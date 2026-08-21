@@ -2,14 +2,17 @@
 
 Versioned so expectations remain backward-compatible across model updates.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class InterviewPhase(BaseModel):
+    """One timed phase of the interview."""
+
     name: str
     duration_minutes: int
     mandatory: bool
@@ -17,6 +20,8 @@ class InterviewPhase(BaseModel):
 
 
 class SkillExpectation(BaseModel):
+    """How one skill must be assessed."""
+
     skill: str
     priority: str = Field(..., pattern="^(high|medium|low)$")
     min_duration_minutes: int
@@ -25,26 +30,34 @@ class SkillExpectation(BaseModel):
 
 
 class ResumeProbing(BaseModel):
+    """Whether and how the resume must be probed."""
+
     required: bool
-    focus_areas: List[str]
-    sample_questions: List[str]
+    focus_areas: list[str]
+    sample_questions: list[str]
 
 
 class BehavioralAssessment(BaseModel):
+    """Whether and how behavioural signal must be gathered."""
+
     required: bool
-    focus_areas: List[str]
-    sample_questions: List[str]
+    focus_areas: list[str]
+    sample_questions: list[str]
 
 
 class EvaluationCriterion(BaseModel):
+    """One weighted scoring criterion."""
+
     name: str
     weight: float
     description: str
 
 
 class InterviewerGuidance(BaseModel):
-    dos: List[str]
-    donts: List[str]
+    """Dos and don'ts for the interviewer."""
+
+    dos: list[str]
+    donts: list[str]
 
 
 class InterviewExpectation(BaseModel):
@@ -52,25 +65,27 @@ class InterviewExpectation(BaseModel):
 
     expectation_version: str = "v1.0"
     interview_id: str
-    interview_type: str = Field(..., pattern="^(technical_coding|technical_discussion|behavioral|mixed)$")
+    interview_type: str = Field(
+        ..., pattern="^(technical_coding|technical_discussion|behavioral|mixed)$"
+    )
 
-    structure: List[InterviewPhase]
-    mandatory_skills: List[SkillExpectation]
-    optional_skills: List[SkillExpectation] = Field(default_factory=list)
+    structure: list[InterviewPhase]
+    mandatory_skills: list[SkillExpectation]
+    optional_skills: list[SkillExpectation] = Field(default_factory=list)
 
     resume_probing: ResumeProbing
     behavioral_assessment: BehavioralAssessment
 
-    red_flags: List[str]
-    green_flags: List[str]
-    evaluation_criteria: List[EvaluationCriterion]
+    red_flags: list[str]
+    green_flags: list[str]
+    evaluation_criteria: list[EvaluationCriterion]
     interviewer_guidance: InterviewerGuidance
 
-    raw_model_output: Optional[Dict[str, Any]] = None
+    raw_model_output: dict[str, Any] | None = None
 
 
 # JSON Schema for Gemini/OpenAI structured output
-EXPECTATION_JSON_SCHEMA: Dict[str, Any] = {
+EXPECTATION_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "expectation_version": {"type": "string", "const": "v1.0"},

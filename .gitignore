@@ -19,7 +19,8 @@ dist/
 # Node / UI
 node_modules/
 ui/dist/
-
+owner_handover/
+docs/
 # Owner deliverables are hand-maintained, not generated — tracked on purpose.
 
 .DS_Store

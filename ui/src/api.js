@@ -25,3 +25,16 @@ export const generateExpectation = (id) =>
   request(`/interviews/${id}/expectation`, { method: 'POST' })
 
 export const getExpectation = (id) => request(`/interviews/${id}/expectation`)
+
+export const listArchetypes = () => request('/candidate-archetypes')
+
+export const listCandidates = (id) => request(`/interviews/${id}/candidates`)
+
+export const enrollCandidates = (id, body) =>
+  request(`/interviews/${id}/candidates`, {
+    method: 'POST',
+    body: JSON.stringify(body ?? {}),
+  })
+
+export const deleteCandidate = (cid) =>
+  request(`/candidates/${cid}`, { method: 'DELETE' })

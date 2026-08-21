@@ -1,4 +1,5 @@
 """SQLite storage for the interview control-plane."""
+
 from __future__ import annotations
 
 import os
@@ -56,6 +57,29 @@ CREATE INDEX IF NOT EXISTS idx_interviews_experience_level ON interviews(experie
 CREATE INDEX IF NOT EXISTS idx_assignments_interview ON interview_assignments(interview_id);
 CREATE INDEX IF NOT EXISTS idx_assignments_interviewer ON interview_assignments(interviewer_id);
 
+CREATE TABLE IF NOT EXISTS virtual_candidates (
+    candidate_id TEXT PRIMARY KEY,
+    interview_id TEXT NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+    archetype TEXT NOT NULL,
+    archetype_label TEXT NOT NULL,
+    name TEXT NOT NULL,
+    headline TEXT,
+    verdict TEXT NOT NULL CHECK (verdict IN ('select', 'reject', 'borderline')),
+    persona_version TEXT NOT NULL DEFAULT 'v1.0',
+    catalog_version TEXT NOT NULL DEFAULT 'v1.0',
+    persona_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    seed_fingerprint TEXT NOT NULL,
+    seed TEXT NOT NULL,
+    model_used TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (interview_id, archetype)
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidates_interview ON virtual_candidates(interview_id);
+CREATE INDEX IF NOT EXISTS idx_candidates_verdict ON virtual_candidates(verdict);
+
 CREATE TABLE IF NOT EXISTS interview_expectations (
     id TEXT PRIMARY KEY,
     interview_id TEXT NOT NULL UNIQUE REFERENCES interviews(id) ON DELETE CASCADE,
@@ -71,6 +95,7 @@ DEFAULT_DB_PATH = "control_plane.db"
 
 
 def db_path_from_env() -> str:
+    """Database path from CONTROL_PLANE_DB, falling back to the default."""
     return os.getenv("CONTROL_PLANE_DB") or DEFAULT_DB_PATH
 
 

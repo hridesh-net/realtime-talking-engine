@@ -1,10 +1,10 @@
 """Deterministic persona generation from BRD §4.3 / §5.2."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import random
-from typing import List
 
 from control_plane.schemas import CandidatePersona, PersonaAttribute
 
@@ -26,12 +26,40 @@ VARIANCE_POOL = {
 }
 
 FIRST_NAMES = [
-    "Alex", "Priya", "Jordan", "Sam", "Taylor", "Riley", "Maya", "Jamie",
-    "Chris", "Lee", "Anika", "Rahul", "Sofia", "Marcus", "Elena", "Omar",
+    "Alex",
+    "Priya",
+    "Jordan",
+    "Sam",
+    "Taylor",
+    "Riley",
+    "Maya",
+    "Jamie",
+    "Chris",
+    "Lee",
+    "Anika",
+    "Rahul",
+    "Sofia",
+    "Marcus",
+    "Elena",
+    "Omar",
 ]
 LAST_NAMES = [
-    "Chen", "Patel", "Johnson", "Kim", "Garcia", "Smith", "Reddy", "Lee",
-    "Brown", "Singh", "Muller", "Nguyen", "Taylor", "Ivanov", "Doe", "Rossi",
+    "Chen",
+    "Patel",
+    "Johnson",
+    "Kim",
+    "Garcia",
+    "Smith",
+    "Reddy",
+    "Lee",
+    "Brown",
+    "Singh",
+    "Muller",
+    "Nguyen",
+    "Taylor",
+    "Ivanov",
+    "Doe",
+    "Rossi",
 ]
 BACKGROUNDS = [
     "Backend engineer with {years} years building distributed systems",
@@ -69,13 +97,11 @@ def generate_persona(
     years = rng.randint(2, 8)
     background = rng.choice(BACKGROUNDS).format(years=years)
 
-    attributes: List[PersonaAttribute] = []
+    attributes: list[PersonaAttribute] = []
     for attr_name, bounds in ATTRIBUTE_BOUNDS.items():
         score = rng.randint(bounds["min"], bounds["max"])
         variance = rng.choice(VARIANCE_POOL[attr_name])
-        attributes.append(
-            PersonaAttribute(name=attr_name, score=score, variance=variance)
-        )
+        attributes.append(PersonaAttribute(name=attr_name, score=score, variance=variance))
 
     persona_dict = {
         "name": name,

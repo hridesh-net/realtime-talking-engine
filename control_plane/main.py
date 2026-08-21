@@ -1,4 +1,5 @@
 """Entry point for the interview control-plane FastAPI service."""
+
 from __future__ import annotations
 
 import logging
@@ -12,6 +13,7 @@ from control_plane.database import init_db
 
 
 def build_app(db_path: str | None = None) -> FastAPI:
+    """Construct the control-plane application."""
     logging.basicConfig(level=logging.INFO)
     load_dotenv()  # make GEMINI_API_KEY / OPENAI_API_KEY available
     app = FastAPI(title="Interview Control Plane", version="0.1.0")
@@ -28,6 +30,7 @@ def build_app(db_path: str | None = None) -> FastAPI:
 
 
 def main() -> None:
+    """Run the service with uvicorn."""
     import uvicorn
 
     uvicorn.run(

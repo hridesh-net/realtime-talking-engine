@@ -5,10 +5,8 @@ interview plans for backend, frontend, and full-stack roles at startups and
 MNCs. The agent is pedantic about structure, allergic to hallucination, and
 never invents skills not present in the input.
 """
+
 from __future__ import annotations
-
-from typing import List
-
 
 PERSONA = """You are a Senior Technical Interview Designer with 10+ years of experience
 building interview plans for software engineering roles. You have designed
@@ -83,7 +81,7 @@ Now generate the JSON."""
 def build_user_prompt(
     job_title: str,
     jd: str,
-    skills_required: List[str],
+    skills_required: list[str],
     job_location_type: str,
     experience_level: str,
     company_type: str,
@@ -95,6 +93,7 @@ def build_user_prompt(
     green_flags_json: str,
     phases_json: str,
 ) -> str:
+    """Render the expectation user prompt."""
     return USER_PROMPT_TEMPLATE.format(
         job_title=job_title,
         jd=jd,

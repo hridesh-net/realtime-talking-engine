@@ -1,10 +1,256 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "InterviewExpectation",
-  "description": "Response for POST /api/v1/interviews/{id}/expectation and GET /api/v1/interviews/{id}/expectation.",
-  "type": "object",
+  "$defs": {
+    "BehavioralAssessment": {
+      "properties": {
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "focus_areas": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Focus Areas",
+          "type": "array"
+        },
+        "sample_questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sample Questions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "focus_areas",
+        "sample_questions"
+      ],
+      "title": "BehavioralAssessment",
+      "type": "object"
+    },
+    "EvaluationCriterion": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "weight",
+        "description"
+      ],
+      "title": "EvaluationCriterion",
+      "type": "object"
+    },
+    "InterviewPhase": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "duration_minutes": {
+          "title": "Duration Minutes",
+          "type": "integer"
+        },
+        "mandatory": {
+          "title": "Mandatory",
+          "type": "boolean"
+        },
+        "guidance": {
+          "title": "Guidance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "duration_minutes",
+        "mandatory",
+        "guidance"
+      ],
+      "title": "InterviewPhase",
+      "type": "object"
+    },
+    "InterviewerGuidance": {
+      "properties": {
+        "dos": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dos",
+          "type": "array"
+        },
+        "donts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Donts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "dos",
+        "donts"
+      ],
+      "title": "InterviewerGuidance",
+      "type": "object"
+    },
+    "ResumeProbing": {
+      "properties": {
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "focus_areas": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Focus Areas",
+          "type": "array"
+        },
+        "sample_questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sample Questions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "focus_areas",
+        "sample_questions"
+      ],
+      "title": "ResumeProbing",
+      "type": "object"
+    },
+    "SkillExpectation": {
+      "properties": {
+        "skill": {
+          "title": "Skill",
+          "type": "string"
+        },
+        "priority": {
+          "pattern": "^(high|medium|low)$",
+          "title": "Priority",
+          "type": "string"
+        },
+        "min_duration_minutes": {
+          "title": "Min Duration Minutes",
+          "type": "integer"
+        },
+        "assessment_method": {
+          "pattern": "^(live_coding|discussion|scenario|review)$",
+          "title": "Assessment Method",
+          "type": "string"
+        },
+        "evidence_to_look_for": {
+          "title": "Evidence To Look For",
+          "type": "string"
+        }
+      },
+      "required": [
+        "skill",
+        "priority",
+        "min_duration_minutes",
+        "assessment_method",
+        "evidence_to_look_for"
+      ],
+      "title": "SkillExpectation",
+      "type": "object"
+    }
+  },
+  "description": "Interviewer expectation document for one interview.",
+  "properties": {
+    "expectation_version": {
+      "default": "v1.0",
+      "title": "Expectation Version",
+      "type": "string"
+    },
+    "interview_id": {
+      "title": "Interview Id",
+      "type": "string"
+    },
+    "interview_type": {
+      "pattern": "^(technical_coding|technical_discussion|behavioral|mixed)$",
+      "title": "Interview Type",
+      "type": "string"
+    },
+    "structure": {
+      "items": {
+        "$ref": "#/$defs/InterviewPhase"
+      },
+      "title": "Structure",
+      "type": "array"
+    },
+    "mandatory_skills": {
+      "items": {
+        "$ref": "#/$defs/SkillExpectation"
+      },
+      "title": "Mandatory Skills",
+      "type": "array"
+    },
+    "optional_skills": {
+      "items": {
+        "$ref": "#/$defs/SkillExpectation"
+      },
+      "title": "Optional Skills",
+      "type": "array"
+    },
+    "resume_probing": {
+      "$ref": "#/$defs/ResumeProbing"
+    },
+    "behavioral_assessment": {
+      "$ref": "#/$defs/BehavioralAssessment"
+    },
+    "red_flags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Red Flags",
+      "type": "array"
+    },
+    "green_flags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Green Flags",
+      "type": "array"
+    },
+    "evaluation_criteria": {
+      "items": {
+        "$ref": "#/$defs/EvaluationCriterion"
+      },
+      "title": "Evaluation Criteria",
+      "type": "array"
+    },
+    "interviewer_guidance": {
+      "$ref": "#/$defs/InterviewerGuidance"
+    },
+    "raw_model_output": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Raw Model Output"
+    }
+  },
   "required": [
-    "expectation_version",
     "interview_id",
     "interview_type",
     "structure",
@@ -16,111 +262,7 @@
     "evaluation_criteria",
     "interviewer_guidance"
   ],
-  "properties": {
-    "expectation_version": {
-      "type": "string",
-      "const": "v1.0",
-      "description": "Schema version for backward compatibility."
-    },
-    "interview_id": {
-      "type": "string",
-      "description": "The interview this expectation belongs to."
-    },
-    "interview_type": {
-      "type": "string",
-      "enum": ["technical_coding", "technical_discussion", "behavioral", "mixed"],
-      "description": "Deterministically selected from experience_level + company_type."
-    },
-    "structure": {
-      "type": "array",
-      "description": "Interview phases. duration_minutes must sum to the interview's total duration.",
-      "items": {
-        "type": "object",
-        "required": ["name", "duration_minutes", "mandatory", "guidance"],
-        "properties": {
-          "name": { "type": "string" },
-          "duration_minutes": { "type": "integer" },
-          "mandatory": { "type": "boolean" },
-          "guidance": { "type": "string" }
-        }
-      }
-    },
-    "mandatory_skills": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["skill", "priority", "min_duration_minutes", "assessment_method", "evidence_to_look_for"],
-        "properties": {
-          "skill": { "type": "string" },
-          "priority": { "type": "string", "enum": ["high", "medium", "low"] },
-          "min_duration_minutes": { "type": "integer" },
-          "assessment_method": { "type": "string", "enum": ["live_coding", "discussion", "scenario", "review"] },
-          "evidence_to_look_for": { "type": "string" }
-        }
-      }
-    },
-    "optional_skills": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["skill", "priority", "min_duration_minutes", "assessment_method", "evidence_to_look_for"],
-        "properties": {
-          "skill": { "type": "string" },
-          "priority": { "type": "string", "enum": ["high", "medium", "low"] },
-          "min_duration_minutes": { "type": "integer" },
-          "assessment_method": { "type": "string", "enum": ["live_coding", "discussion", "scenario", "review"] },
-          "evidence_to_look_for": { "type": "string" }
-        }
-      }
-    },
-    "resume_probing": {
-      "type": "object",
-      "required": ["required", "focus_areas", "sample_questions"],
-      "properties": {
-        "required": { "type": "boolean" },
-        "focus_areas": { "type": "array", "items": { "type": "string" } },
-        "sample_questions": { "type": "array", "items": { "type": "string" } }
-      }
-    },
-    "behavioral_assessment": {
-      "type": "object",
-      "required": ["required", "focus_areas", "sample_questions"],
-      "properties": {
-        "required": { "type": "boolean" },
-        "focus_areas": { "type": "array", "items": { "type": "string" } },
-        "sample_questions": { "type": "array", "items": { "type": "string" } }
-      }
-    },
-    "red_flags": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Baseline red flags from rubric plus role-specific ones added by the model."
-    },
-    "green_flags": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Baseline green flags from rubric plus role-specific ones added by the model."
-    },
-    "evaluation_criteria": {
-      "type": "array",
-      "description": "Exactly the six fixed criteria from the rubric with their exact weights.",
-      "items": {
-        "type": "object",
-        "required": ["name", "weight", "description"],
-        "properties": {
-          "name": { "type": "string" },
-          "weight": { "type": "number" },
-          "description": { "type": "string" }
-        }
-      }
-    },
-    "interviewer_guidance": {
-      "type": "object",
-      "required": ["dos", "donts"],
-      "properties": {
-        "dos": { "type": "array", "items": { "type": "string" } },
-        "donts": { "type": "array", "items": { "type": "string" } }
-      }
-    }
-  }
+  "title": "InterviewExpectation",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

@@ -32,3 +32,63 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+exclude = [".venv", "ui"]
+
+[tool.ruff.lint]
+# Explicit rule set — the project standard, not whatever the ruff default drifts to.
+select = [
+    "E", "W",      # pycodestyle
+    "F",           # pyflakes
+    "I",           # import order
+    "N",           # pep8-naming
+    "UP",          # pyupgrade — py311 idioms
+    "B",           # bugbear
+    "C4",          # comprehensions
+    "SIM",         # simplify
+    "RET",         # return consistency
+    "ARG",         # unused arguments
+    "PTH",         # pathlib over os.path
+    "TID",         # tidy imports (bans relative imports)
+    "RUF",         # ruff-specific
+    "ANN",         # annotations — public API must be typed
+    "D",           # docstrings
+]
+ignore = [
+    "D203",    # incompatible with D211
+    "D213",    # incompatible with D212
+    "D401",    # imperative mood — too rigid for domain docstrings
+    "ANN401",  # Any is legitimate for model payloads
+    "D107",    # __init__ documented on the class
+]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's Depends()/Query() defaults are the framework's calling convention.
+"control_plane/api.py" = ["B008"]
+# Tests document themselves through names; scripts are entrypoints.
+"tests/*" = ["D100", "D101", "D102", "D103", "ANN", "ARG"]
+"scripts/*" = ["D103", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+python_version = "3.11"
+files = ["control_plane", "expectation_agent", "candidate_agent", "llm"]
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+# Third-party packages without bundled stubs.
+module = ["google.*", "openai.*", "dotenv.*"]
+ignore_missing_imports = true

@@ -3,16 +3,14 @@
 These rules are code-defined and versioned. The LLM fills in the blanks but
 cannot override structure, weights, or constraints.
 """
+
 from __future__ import annotations
-
-from typing import Dict, List
-
 
 # ---------------------------------------------------------------------------
 # Fixed phase durations by experience level and interview duration
 # ---------------------------------------------------------------------------
 # (introduction, technical, candidate_questions, closing) in minutes
-PHASE_TEMPLATE: Dict[str, Dict[int, List[int]]] = {
+PHASE_TEMPLATE: dict[str, dict[int, list[int]]] = {
     "junior": {
         30: [3, 22, 3, 2],
         45: [5, 33, 4, 3],
@@ -33,7 +31,7 @@ PHASE_TEMPLATE: Dict[str, Dict[int, List[int]]] = {
 DEFAULT_PHASES = [5, 45, 5, 5]  # fallback for 60 min
 
 
-def phase_durations(experience_level: str, duration_minutes: int) -> List[int]:
+def phase_durations(experience_level: str, duration_minutes: int) -> list[int]:
     """Return [intro, technical, candidate_questions, closing] minutes."""
     template = PHASE_TEMPLATE.get(experience_level, PHASE_TEMPLATE["mid"])
     if duration_minutes in template:
@@ -41,13 +39,13 @@ def phase_durations(experience_level: str, duration_minutes: int) -> List[int]:
     # Scale linearly if no exact template
     base = DEFAULT_PHASES
     scale = duration_minutes / 60.0
-    return [max(1, int(round(x * scale))) for x in base]
+    return [max(1, round(x * scale)) for x in base]
 
 
 # ---------------------------------------------------------------------------
 # Fixed evaluation criteria (mirrors BRD §9 / pkg/criteria)
 # ---------------------------------------------------------------------------
-EVALUATION_CRITERIA: List[Dict[str, object]] = [
+EVALUATION_CRITERIA: list[dict[str, object]] = [
     {
         "name": "communication",
         "weight": 0.15,
@@ -128,8 +126,7 @@ def min_skill_duration(skill_count: int, technical_minutes: int) -> int:
     """Distribute technical time across mandatory skills."""
     if skill_count == 0:
         return technical_minutes
-    base = max(5, technical_minutes // max(skill_count, 3))
-    return base
+    return max(5, technical_minutes // max(skill_count, 3))
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +150,8 @@ BASE_GREEN_FLAGS = [
 # ---------------------------------------------------------------------------
 # Interviewer guidance (dos / donts) by experience level
 # ---------------------------------------------------------------------------
-def interviewer_guidance(experience_level: str, company_type: str) -> Dict[str, List[str]]:
+def interviewer_guidance(experience_level: str, company_type: str) -> dict[str, list[str]]:
+    """Dos and don'ts tuned to the level and company type."""
     dos = [
         "Ask open-ended questions first, then drill down",
         "Let the candidate finish their thought before interrupting",

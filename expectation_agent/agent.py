@@ -3,11 +3,11 @@
 One agent instance per model backend. Generates deterministic, schema-valid
 expectation documents from an interview job spec.
 """
+
 from __future__ import annotations
 
 import json
-import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from expectation_agent.prompts import (
     PERSONA,
@@ -27,43 +27,25 @@ from expectation_agent.schema import (
     EXPECTATION_JSON_SCHEMA,
     InterviewExpectation,
 )
+from llm.base import StructuredModel
+from llm.factory import build_model
 
 
 class InterviewExpectationAgent:
-    """Generates interview expectations using Gemini (or OpenAI fallback)."""
+    """Generates interview expectations from a job spec."""
 
-    #: Model IDs are config, never hardcoded — override with EXPECTATION_MODEL.
-    DEFAULT_MODEL = "gemini-2.5-flash"
+    #: Low temperature: the expectation document must be stable across runs.
+    DEFAULT_TEMPERATURE = 0.1
 
-    def __init__(self, model: str | None = None, temperature: float = 0.1):
-        self.model = model or os.getenv("EXPECTATION_MODEL") or self.DEFAULT_MODEL
-        self.temperature = temperature
-        self._client = None
-        self._backend = None
-        self._init_backend()
+    def __init__(self, model: StructuredModel | None = None) -> None:
+        # Injected for tests and for swapping providers; built from config
+        # otherwise. This agent never imports a vendor SDK.
+        self._model = model or build_model("expectation", self.DEFAULT_TEMPERATURE)
 
-    def _init_backend(self) -> None:
-        """Backend follows EXPECTATION_PROVIDER when set, else the key that exists."""
-        provider = (os.getenv("EXPECTATION_PROVIDER") or "").strip().lower()
-        if provider == "openai" and os.getenv("OPENAI_API_KEY"):
-            import openai
-
-            self._client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self._backend = "openai"
-            return
-        if os.getenv("GEMINI_API_KEY"):
-            from google import genai
-
-            self._client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-            self._backend = "gemini"
-            return
-        if os.getenv("OPENAI_API_KEY"):
-            import openai
-
-            self._client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self._backend = "openai"
-            return
-        raise ValueError("Set GEMINI_API_KEY or OPENAI_API_KEY")
+    @property
+    def model(self) -> str:
+        """Model ID recorded against generated expectations."""
+        return self._model.model_id
 
     async def generate(
         self,
@@ -79,7 +61,6 @@ class InterviewExpectationAgent:
         has_resume: bool = True,
     ) -> InterviewExpectation:
         """Generate one expectation document. Deterministic given same inputs."""
-
         # ---- Deterministic pre-computation (LLM cannot override these) ----
         interview_type = determine_interview_type(experience_level, company_type)
         phases = phase_durations(experience_level, duration_minutes)
@@ -104,8 +85,16 @@ class InterviewExpectationAgent:
             phases_json=json.dumps(
                 [
                     {"name": "introduction", "duration_minutes": phases[0], "mandatory": True},
-                    {"name": "technical_deep_dive", "duration_minutes": phases[1], "mandatory": True},
-                    {"name": "candidate_questions", "duration_minutes": phases[2], "mandatory": True},
+                    {
+                        "name": "technical_deep_dive",
+                        "duration_minutes": phases[1],
+                        "mandatory": True,
+                    },
+                    {
+                        "name": "candidate_questions",
+                        "duration_minutes": phases[2],
+                        "mandatory": True,
+                    },
                     {"name": "closing", "duration_minutes": phases[3], "mandatory": True},
                 ],
                 indent=2,
@@ -119,7 +108,9 @@ class InterviewExpectationAgent:
         raw["interview_type"] = interview_type
         raw["evaluation_criteria"] = criteria
         raw["red_flags"] = red_flags + [f for f in raw.get("red_flags", []) if f not in red_flags]
-        raw["green_flags"] = green_flags + [f for f in raw.get("green_flags", []) if f not in green_flags]
+        raw["green_flags"] = green_flags + [
+            f for f in raw.get("green_flags", []) if f not in green_flags
+        ]
         raw["resume_probing"]["required"] = resume_required
         raw["interviewer_guidance"] = interviewer_guidance(experience_level, company_type)
 
@@ -127,51 +118,40 @@ class InterviewExpectationAgent:
         total = sum(p["duration_minutes"] for p in raw.get("structure", []))
         if total != duration_minutes:
             raw["structure"] = [
-                {"name": "introduction", "duration_minutes": phases[0], "mandatory": True, "guidance": "Build rapport and set expectations."},
-                {"name": "technical_deep_dive", "duration_minutes": phases[1], "mandatory": True, "guidance": "Cover mandatory skills with live exercises or scenarios."},
-                {"name": "candidate_questions", "duration_minutes": phases[2], "mandatory": True, "guidance": "Answer candidate questions and assess engagement."},
-                {"name": "closing", "duration_minutes": phases[3], "mandatory": True, "guidance": "Summarize next steps and thank the candidate."},
+                {
+                    "name": "introduction",
+                    "duration_minutes": phases[0],
+                    "mandatory": True,
+                    "guidance": "Build rapport and set expectations.",
+                },
+                {
+                    "name": "technical_deep_dive",
+                    "duration_minutes": phases[1],
+                    "mandatory": True,
+                    "guidance": "Cover mandatory skills with live exercises or scenarios.",
+                },
+                {
+                    "name": "candidate_questions",
+                    "duration_minutes": phases[2],
+                    "mandatory": True,
+                    "guidance": "Answer candidate questions and assess engagement.",
+                },
+                {
+                    "name": "closing",
+                    "duration_minutes": phases[3],
+                    "mandatory": True,
+                    "guidance": "Summarize next steps and thank the candidate.",
+                },
             ]
 
         expectation = InterviewExpectation.model_validate(raw)
         expectation.raw_model_output = raw
         return expectation
 
-    async def _call_model(self, prompt: str) -> Dict[str, Any]:
-        """Call the configured backend with structured output."""
-        if self._backend == "gemini":
-            return await self._call_gemini(prompt)
-        if self._backend == "openai":
-            return await self._call_openai(prompt)
-        raise RuntimeError("no backend configured")
-
-    async def _call_gemini(self, prompt: str) -> Dict[str, Any]:
-        from google.genai import types
-
-        full_prompt = f"{PERSONA}\n\n{SYSTEM_GUARDRAILS}\n\n{prompt}"
-        config = types.GenerateContentConfig(
-            temperature=self.temperature,
-            response_mime_type="application/json",
-            response_schema=EXPECTATION_JSON_SCHEMA,
+    async def _call_model(self, prompt: str) -> dict[str, Any]:
+        """Delegate to the injected provider."""
+        return await self._model.generate_json(
+            system=f"{PERSONA}\n\n{SYSTEM_GUARDRAILS}",
+            prompt=prompt,
+            schema=EXPECTATION_JSON_SCHEMA,
         )
-        response = await self._client.aio.models.generate_content(
-            model=self.model,
-            contents=full_prompt,
-            config=config,
-        )
-        text = response.text or "{}"
-        return json.loads(text)
-
-    async def _call_openai(self, prompt: str) -> Dict[str, Any]:
-        full_prompt = f"{PERSONA}\n\n{SYSTEM_GUARDRAILS}\n\n{prompt}"
-        response = await self._client.chat.completions.acreate(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": PERSONA + "\n\n" + SYSTEM_GUARDRAILS},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=self.temperature,
-            response_format={"type": "json_object"},
-        )
-        text = response.choices[0].message.content or "{}"
-        return json.loads(text)

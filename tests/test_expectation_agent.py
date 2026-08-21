@@ -1,16 +1,16 @@
 """Smoke tests for interview expectation generation across scenarios."""
+
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import sys
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
 # Make sure project root is on path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from control_plane.database import init_db
 from control_plane.repository import InterviewRepository
@@ -51,8 +51,17 @@ SCENARIOS = [
         "name": "senior_backend_startup",
         "payload": {
             "job_title": "Senior Backend Engineer",
-            "jd": "Senior backend engineer with strong Go, distributed systems, Redis, and microservices. Must design scalable services and mentor junior engineers.",
-            "skills_required": ["Go", "distributed systems", "Redis", "microservices", "system design"],
+            "jd": (
+                "Senior backend engineer with strong Go, distributed systems, Redis, "
+                "and microservices. Must design scalable services and mentor juniors."
+            ),
+            "skills_required": [
+                "Go",
+                "distributed systems",
+                "Redis",
+                "microservices",
+                "system design",
+            ],
             "job_location_type": "remote",
             "experience_level": "senior",
             "company_type": "startup",
@@ -64,7 +73,10 @@ SCENARIOS = [
         "name": "senior_data_mnc",
         "payload": {
             "job_title": "Senior Data Engineer",
-            "jd": "Build large-scale data pipelines with Spark, Airflow, and Kafka. Own data quality and observability.",
+            "jd": (
+                "Build large-scale data pipelines with Spark, Airflow, and Kafka. "
+                "Own data quality and observability."
+            ),
             "skills_required": ["Spark", "Airflow", "Kafka", "Python", "data quality"],
             "job_location_type": "remote",
             "experience_level": "senior",
@@ -92,13 +104,13 @@ SCENARIOS = [
 def validate_expectation(
     name: str,
     interview_id: str,
-    payload: Dict[str, Any],
-    exp: Dict[str, Any],
+    payload: dict[str, Any],
+    exp: dict[str, Any],
     expected_type: str,
     expected_resume: bool,
-) -> List[str]:
+) -> list[str]:
     """Return a list of validation failures."""
-    failures: List[str] = []
+    failures: list[str] = []
 
     # 1. Deterministic interview type
     if exp.get("interview_type") != expected_type:
@@ -121,21 +133,35 @@ def validate_expectation(
     criteria = exp.get("evaluation_criteria", [])
     if len(criteria) != 6:
         failures.append(f"evaluation_criteria has {len(criteria)} items, expected 6")
-    expected_names = {"communication", "problem_solving", "technical_depth", "system_design", "cultural_fit", "code_quality"}
+    expected_names = {
+        "communication",
+        "problem_solving",
+        "technical_depth",
+        "system_design",
+        "cultural_fit",
+        "code_quality",
+    }
     actual_names = {c["name"] for c in criteria}
     if actual_names != expected_names:
         failures.append(f"criteria names mismatch: {actual_names} != {expected_names}")
 
     # 5. Resume probing rule
     if exp["resume_probing"]["required"] != expected_resume:
-        failures.append(f"resume_probing.required={exp['resume_probing']['required']} expected={expected_resume}")
+        actual = exp["resume_probing"]["required"]
+        failures.append(f"resume_probing.required={actual} expected={expected_resume}")
 
     # 6. Red/green flags include baseline items
-    baseline_red = {"Cannot explain trade-offs of chosen technology", "Blames external factors without ownership"}
+    baseline_red = {
+        "Cannot explain trade-offs of chosen technology",
+        "Blames external factors without ownership",
+    }
     if not baseline_red.issubset(set(exp.get("red_flags", []))):
         failures.append("baseline red flags missing")
 
-    baseline_green = {"Explains why a decision was made, not just what", "Asks clarifying questions before solving"}
+    baseline_green = {
+        "Explains why a decision was made, not just what",
+        "Asks clarifying questions before solving",
+    }
     if not baseline_green.issubset(set(exp.get("green_flags", []))):
         failures.append("baseline green flags missing")
 
@@ -146,7 +172,7 @@ def validate_expectation(
     return failures
 
 
-async def run_scenario(scenario: Dict[str, Any]) -> List[str]:
+async def run_scenario(scenario: dict[str, Any]) -> list[str]:
     repo = InterviewRepository(init_db(":memory:"))
     agent = InterviewExpectationAgent()
 
@@ -181,7 +207,7 @@ async def run_scenario(scenario: Dict[str, Any]) -> List[str]:
 
 
 async def main() -> None:
-    results: Dict[str, List[str]] = {}
+    results: dict[str, list[str]] = {}
     for scenario in SCENARIOS:
         print(f"Testing {scenario['name']} ...")
         try:

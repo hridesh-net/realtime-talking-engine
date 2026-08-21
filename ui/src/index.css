@@ -188,3 +188,176 @@ body {
   border-radius: 4px;
   margin-bottom: 12px;
 }
+
+/* --- virtual candidate enrollment --- */
+
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.candidate-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.candidate-card.select {
+  border-left: 4px solid #2e7d32;
+}
+
+.candidate-card.reject {
+  border-left: 4px solid #d32f2f;
+}
+
+.candidate-card.borderline {
+  border-left: 4px solid #ed6c02;
+}
+
+.candidate-card .cname {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.candidate-card .chead {
+  font-size: 12px;
+  color: #555;
+  margin: 2px 0 8px 0;
+}
+
+.verdict-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.verdict-badge.select {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.verdict-badge.reject {
+  background: #ffebee;
+  color: #d32f2f;
+}
+
+.verdict-badge.borderline {
+  background: #fff4e5;
+  color: #ed6c02;
+}
+
+.trait-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.trait-row .tlabel {
+  width: 92px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.trait-bar {
+  flex: 1;
+  height: 6px;
+  background: #eee;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.trait-bar span {
+  display: block;
+  height: 100%;
+  background: #0070f3;
+}
+
+.trait-row .tval {
+  width: 26px;
+  text-align: right;
+  color: #333;
+  font-variant-numeric: tabular-nums;
+}
+
+.ratio-bar {
+  display: flex;
+  height: 18px;
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 18px;
+  color: #fff;
+  margin: 6px 0 10px 0;
+}
+
+.ratio-bar .smart {
+  background: #2e7d32;
+  text-align: center;
+}
+
+.ratio-bar .dumb {
+  background: #b0a0a0;
+  text-align: center;
+}
+
+.archetype-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.archetype-option {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  background: #fff;
+}
+
+.archetype-option.checked {
+  border-color: #0070f3;
+  background: #f0f7ff;
+}
+
+.archetype-option .aname {
+  font-weight: 600;
+  font-size: 13px;
+  display: block;
+}
+
+.archetype-option .achallenge {
+  color: #666;
+  display: block;
+  margin-top: 3px;
+}
+
+details.persona-detail {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+details.persona-detail summary {
+  cursor: pointer;
+  color: #0070f3;
+}
+
+details.persona-detail pre {
+  background: #fafafa;
+  border: 1px solid #eee;
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 11px;
+  max-height: 320px;
+}

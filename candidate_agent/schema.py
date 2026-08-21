@@ -1,0 +1,254 @@
+"""Virtual candidate persona schema.
+
+Two documents live here:
+
+* ``VirtualCandidate`` — the full persona. Assembled in code from a fixed
+  archetype plus a job-grounded LLM draft.
+* ``EngineContract`` — the slice the Go interview-candidate engine consumes at
+  runtime. Versioned separately so the engine can pin a contract version while
+  the persona document keeps evolving.
+
+``CandidateDraft`` is the narrow schema the LLM is allowed to fill. Everything
+outside it — verdict, trait scores, scorecard weights — is computed.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+PERSONA_VERSION = "v1.0"
+ENGINE_CONTRACT_VERSION = "v1.0"
+
+
+# ---------------------------------------------------------------------------
+# Persona sub-documents
+# ---------------------------------------------------------------------------
+
+
+class SpeechProfile(BaseModel):
+    """Way of talking. Drives the realtime voice model in the Go engine."""
+
+    pace: str = Field(..., pattern="^(slow|measured|fast)$")
+    verbosity: str = Field(..., pattern="^(terse|balanced|verbose)$")
+    filler_frequency: int = Field(..., ge=0, le=10)
+    hesitation_frequency: int = Field(..., ge=0, le=10)
+    formality: str = Field(..., pattern="^(casual|neutral|formal)$")
+    interrupts_interviewer: bool
+    tone: str
+    verbal_tics: list[str] = Field(default_factory=list)
+    sample_phrases: list[str] = Field(default_factory=list)
+
+
+class AptitudeProfile(BaseModel):
+    """Smartness/dumbness ratio and seriousness. All axes fixed across personas."""
+
+    smartness: int = Field(..., ge=0, le=10)
+    dumbness: int = Field(..., ge=0, le=10)
+    #: smartness / (smartness + dumbness), rounded to 2dp. 0.5 means evenly split.
+    smartness_ratio: float = Field(..., ge=0.0, le=1.0)
+    seriousness: int = Field(..., ge=0, le=10)
+    effort: int = Field(..., ge=0, le=10)
+    interest: int = Field(..., ge=0, le=10)
+    honesty: int = Field(..., ge=0, le=10)
+    preparedness: int = Field(..., ge=0, le=10)
+    nervousness: int = Field(..., ge=0, le=10)
+
+
+class SkillKnowledge(BaseModel):
+    """What the persona actually knows about one required skill."""
+
+    skill: str
+    level: int = Field(..., ge=0, le=10)
+    stance: str = Field(..., pattern="^(solid|shallow|bluffs|absent)$")
+    talking_points: list[str] = Field(default_factory=list)
+    #: The question depth at which this persona stops being able to answer.
+    breaking_point: str
+    #: Specific incorrect things they will assert. Empty unless they bluff.
+    wrong_beliefs: list[str] = Field(default_factory=list)
+
+
+class ResumeClaim(BaseModel):
+    """One claim on the persona's resume, and how truthful it is."""
+
+    claim: str
+    truthfulness: str = Field(..., pattern="^(true|exaggerated|false)$")
+    probe_that_exposes_it: str
+
+
+class AnswerPolicy(BaseModel):
+    """How the persona decides what to reveal. The engine treats this as law."""
+
+    default_answer_depth: str = Field(..., pattern="^(minimal|adequate|thorough)$")
+    #: What the interviewer must do to unlock a deeper answer.
+    reveals_depth_when: str
+    on_unknown_question: str
+    on_pressure: str
+    on_silence: str
+    always_does: list[str] = Field(default_factory=list)
+    never_does: list[str] = Field(default_factory=list)
+
+
+class ScorecardItem(BaseModel):
+    """One weighted signal the interviewer is expected to surface."""
+
+    id: str
+    signal: str
+    weight: float = Field(..., ge=0.0, le=1.0)
+    how_to_surface: str
+
+
+class InterviewerScorecard(BaseModel):
+    """Ground-truth answer key for grading the interviewer, not the candidate."""
+
+    expected_verdict: str = Field(..., pattern="^(select|reject|borderline)$")
+    interviewer_challenge: str
+    must_discover: list[ScorecardItem]
+    interviewer_failure_modes: list[str]
+    pass_condition: str
+
+
+class EngineContract(BaseModel):
+    """Runtime slice consumed by the Go interview-candidate engine."""
+
+    contract_version: str = ENGINE_CONTRACT_VERSION
+    candidate_id: str
+    interview_id: str
+    #: Compiled deterministically from the persona — inject verbatim as the
+    #: realtime model's system instruction. The engine does not re-derive it.
+    system_prompt: str
+    opening_line: str
+    voice_directives: dict[str, Any]
+    turn_policy: dict[str, Any]
+    #: skill -> hard ceiling (0-10). The engine must not let the persona
+    #: demonstrate more than this, whatever the interviewer asks.
+    knowledge_ceiling: dict[str, int]
+    unlock_condition: str
+    forbidden_behaviors: list[str]
+
+
+class VirtualCandidate(BaseModel):
+    """A cast persona: who they are, what they know, and how to run them."""
+
+    persona_version: str = PERSONA_VERSION
+    candidate_id: str
+    interview_id: str
+    archetype: str
+    archetype_label: str
+    catalog_version: str
+
+    name: str
+    headline: str
+    background: str
+    years_experience: int = Field(..., ge=0, le=40)
+
+    verdict: str = Field(..., pattern="^(select|reject|borderline)$")
+    verdict_rationale: str
+
+    speech_profile: SpeechProfile
+    aptitude: AptitudeProfile
+    knowledge_map: list[SkillKnowledge]
+    resume_claims: list[ResumeClaim] = Field(default_factory=list)
+    answer_policy: AnswerPolicy
+    interviewer_scorecard: InterviewerScorecard
+    engine_contract: EngineContract
+
+    #: SHA256 over the full persona — integrity check on a stored record.
+    #: Changes whenever any content changes, including on a re-cast.
+    fingerprint: str
+    #: SHA256 over the seeded identity only (seed, archetype, traits, verdict,
+    #: versions). Stable across re-casts — this is the reproducibility claim.
+    seed_fingerprint: str
+    seed: str
+    raw_model_output: dict[str, Any] | None = None
+
+
+# ---------------------------------------------------------------------------
+# LLM draft — the ONLY fields the model is allowed to author
+# ---------------------------------------------------------------------------
+
+CANDIDATE_DRAFT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "headline": {"type": "string"},
+        "background": {"type": "string"},
+        "years_experience": {"type": "integer"},
+        "verdict_rationale": {"type": "string"},
+        "verbal_tics": {"type": "array", "items": {"type": "string"}},
+        "sample_phrases": {"type": "array", "items": {"type": "string"}},
+        "reveals_depth_when": {"type": "string"},
+        "always_does": {"type": "array", "items": {"type": "string"}},
+        "never_does": {"type": "array", "items": {"type": "string"}},
+        "opening_line": {"type": "string"},
+        "knowledge_map": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "skill": {"type": "string"},
+                    "level": {"type": "integer"},
+                    "stance": {
+                        "type": "string",
+                        "enum": ["solid", "shallow", "bluffs", "absent"],
+                    },
+                    "talking_points": {"type": "array", "items": {"type": "string"}},
+                    "breaking_point": {"type": "string"},
+                    "wrong_beliefs": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "skill",
+                    "level",
+                    "stance",
+                    "talking_points",
+                    "breaking_point",
+                    "wrong_beliefs",
+                ],
+            },
+        },
+        "resume_claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim": {"type": "string"},
+                    "truthfulness": {
+                        "type": "string",
+                        "enum": ["true", "exaggerated", "false"],
+                    },
+                    "probe_that_exposes_it": {"type": "string"},
+                },
+                "required": ["claim", "truthfulness", "probe_that_exposes_it"],
+            },
+        },
+        "must_discover": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "signal": {"type": "string"},
+                    "how_to_surface": {"type": "string"},
+                },
+                "required": ["id", "signal", "how_to_surface"],
+            },
+        },
+    },
+    "required": [
+        "name",
+        "headline",
+        "background",
+        "years_experience",
+        "verdict_rationale",
+        "verbal_tics",
+        "sample_phrases",
+        "reveals_depth_when",
+        "always_does",
+        "never_does",
+        "opening_line",
+        "knowledge_map",
+        "resume_claims",
+        "must_discover",
+    ],
+}
