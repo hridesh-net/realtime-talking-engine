@@ -16,9 +16,6 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
 from candidate_agent import archetypes as catalog
 from candidate_agent.agent import VirtualCandidateAgent
 from candidate_agent.archetypes import Archetype, ScorecardSignal
@@ -29,6 +26,8 @@ from llm import factory
 from llm.base import StructuredModel
 from llm.gemini import GeminiModel
 from llm.openai_model import OpenAIModel
+
+ROOT = Path(__file__).resolve().parent.parent
 
 #: Every first-party package, in dependency order.
 PACKAGES = ["llm", "expectation_agent", "candidate_agent", "control_plane"]
@@ -150,7 +149,7 @@ def test_isp_sqlite_adapter_satisfies_every_port(port: type) -> None:
     )
 
 
-def _memory_conn():  # noqa: ANN202 - test helper
+def _memory_conn():
     from control_plane.database import init_db
 
     return init_db(":memory:")
@@ -326,5 +325,7 @@ def test_layering_respects_the_allowed_direction(pkg: str, path: Path) -> None:
 def test_layering_uses_absolute_imports(pkg: str, path: Path) -> None:
     """Relative imports hide the dependency graph these checks rely on."""
     tree = ast.parse(path.read_text(), filename=str(path))
-    relative = [n.module or "." for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.level]
+    relative = [
+        n.module or "." for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.level
+    ]
     assert not relative, f"{path.relative_to(ROOT)} uses relative imports: {relative}"

@@ -1,0 +1,44 @@
+# Go lint standard for the interview-candidate engine.
+#
+# There is no Go source in this repo yet — the engine is a separate build.
+# This file records the standard it will be held to, and scripts/check.sh
+# picks it up automatically once Go files land here.
+#
+# Install: brew install golangci-lint
+version: "2"
+
+linters:
+  enable:
+    - errcheck      # every returned error is handled
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose     # HTTP response bodies are closed
+    - errorlint     # %w wrapping and errors.Is/As used correctly
+    - gosec
+    - misspell
+    - nilerr
+    - revive        # golint successor: naming, exported comments
+    - unconvert
+    - wastedassign
+
+  settings:
+    revive:
+      rules:
+        - name: exported          # exported identifiers carry doc comments
+        - name: package-comments
+        - name: error-strings     # lowercase, no trailing punctuation
+        - name: error-return
+        - name: context-as-argument
+        - name: indent-error-flow
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
