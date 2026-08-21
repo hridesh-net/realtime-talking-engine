@@ -1,0 +1,1 @@
+"""Interview expectation generator."""

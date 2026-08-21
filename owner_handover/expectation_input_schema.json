@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExpectationGenerateInput",
+  "description": "Input for POST /api/v1/interviews/{interview_id}/expectation. The endpoint takes no body; it reads the interview record from the database. This schema describes the interview fields that drive expectation generation.",
+  "type": "object",
+  "required": [
+    "job_title",
+    "jd",
+    "skills_required",
+    "job_location_type",
+    "experience_level",
+    "company_type",
+    "config"
+  ],
+  "properties": {
+    "job_title": {
+      "type": "string",
+      "description": "Job title used in the expectation header and guidance."
+    },
+    "jd": {
+      "type": "string",
+      "description": "Full job description text. The agent extracts implied skills and responsibilities from here."
+    },
+    "skills_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Every skill in this list MUST appear in the output's mandatory_skills or optional_skills."
+    },
+    "job_location_type": {
+      "type": "string",
+      "enum": ["remote", "onsite", "hybrid"]
+    },
+    "experience_level": {
+      "type": "string",
+      "enum": ["junior", "mid", "senior"],
+      "description": "Drives interview type, phase durations, and resume-probing rules."
+    },
+    "company_type": {
+      "type": "string",
+      "enum": ["startup", "mnc"],
+      "description": "Drives interview type and interviewer guidance."
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "duration_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 180,
+          "description": "Total interview duration. The output's structure durations must sum to this."
+        },
+        "question_mode": { "type": "string", "enum": ["AI", "HYBRID", "MANUAL"], "default": "AI" },
+        "interview_mode": { "type": "string", "enum": ["STANDARD", "DEEP"], "default": "STANDARD" },
+        "language": { "type": "string", "default": "en" }
+      },
+      "required": ["duration_minutes"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["live_interview", "training_interviewer"],
+      "default": "live_interview"
+    }
+  }
+}

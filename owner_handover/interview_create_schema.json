@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InterviewCreateRequest",
+  "description": "Payload for POST /api/v1/interviews. Creates an interview request from a job spec. Candidate and interviewer are assigned later.",
+  "type": "object",
+  "required": [
+    "job_title",
+    "jd",
+    "skills_required",
+    "job_location_type",
+    "experience_level",
+    "company_type"
+  ],
+  "properties": {
+    "job_title": {
+      "type": "string",
+      "description": "Job title being interviewed for."
+    },
+    "jd": {
+      "type": "string",
+      "description": "Job description / requirement text used to drive interview planning."
+    },
+    "skills_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Skills the candidate must demonstrate."
+    },
+    "job_location_type": {
+      "type": "string",
+      "enum": ["remote", "onsite", "hybrid"]
+    },
+    "experience_level": {
+      "type": "string",
+      "enum": ["junior", "mid", "senior"]
+    },
+    "company_type": {
+      "type": "string",
+      "enum": ["startup", "mnc"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["live_interview", "training_interviewer"],
+      "default": "live_interview",
+      "description": "Session mode. Immutable after creation."
+    },
+    "config": {
+      "type": "object",
+      "description": "Runtime configuration snapshot.",
+      "properties": {
+        "duration_minutes": { "type": "integer", "minimum": 1, "maximum": 180, "default": 60 },
+        "question_mode": { "type": "string", "enum": ["AI", "HYBRID", "MANUAL"], "default": "AI" },
+        "interview_mode": { "type": "string", "enum": ["STANDARD", "DEEP"], "default": "STANDARD" },
+        "language": { "type": "string", "default": "en" }
+      }
+    },
+    "scheduled_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the interview should start. Defaults to now."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Free-form tags, notes, or external references."
+    }
+  }
+}

@@ -1,0 +1,179 @@
+{
+  "expectation_version": "v1.0",
+  "interview_id": "2594ee07-3d24-4777-aa20-b980c848ac96",
+  "interview_type": "technical_discussion",
+  "structure": [
+    {
+      "name": "introduction",
+      "duration_minutes": 5,
+      "mandatory": true,
+      "guidance": "Welcome the candidate, briefly explain the interview structure and what to expect. Allow the candidate to ask initial questions."
+    },
+    {
+      "name": "technical_deep_dive",
+      "duration_minutes": 45,
+      "mandatory": true,
+      "guidance": "Engage the candidate in a discussion covering mandatory skills. Focus on their experience with Go, distributed systems, Redis, microservices, and system design. Probe for their ability to design scalable services and mentor junior engineers. Use scenario-based questions to assess problem-solving and trade-off analysis."
+    },
+    {
+      "name": "candidate_questions",
+      "duration_minutes": 5,
+      "mandatory": true,
+      "guidance": "Provide an opportunity for the candidate to ask questions about the role, team, or company."
+    },
+    {
+      "name": "closing",
+      "duration_minutes": 5,
+      "mandatory": true,
+      "guidance": "Thank the candidate for their time and explain the next steps in the interview process."
+    }
+  ],
+  "mandatory_skills": [
+    {
+      "skill": "Go",
+      "priority": "high",
+      "min_duration_minutes": 7,
+      "assessment_method": "discussion",
+      "evidence_to_look_for": "Demonstrated understanding of Go concurrency patterns, error handling, standard library usage, and performance considerations. Ability to discuss Go project structures and best practices."
+    },
+    {
+      "skill": "distributed systems",
+      "priority": "high",
+      "min_duration_minutes": 8,
+      "assessment_method": "discussion",
+      "evidence_to_look_for": "Ability to discuss challenges and solutions in distributed environments (e.g., consistency, fault tolerance, consensus, data partitioning). Experience with common distributed system patterns and protocols."
+    },
+    {
+      "skill": "Redis",
+      "priority": "high",
+      "min_duration_minutes": 6,
+      "assessment_method": "discussion",
+      "evidence_to_look_for": "Knowledge of Redis data structures, use cases (caching, pub/sub, queues), and operational considerations (persistence, high availability, scaling). Ability to explain trade-offs of using Redis."
+    },
+    {
+      "skill": "microservices",
+      "priority": "high",
+      "min_duration_minutes": 7,
+      "assessment_method": "discussion",
+      "evidence_to_look_for": "Experience designing, building, and operating microservices. Understanding of inter-service communication, API design, service discovery, and deployment strategies in a microservices architecture."
+    },
+    {
+      "skill": "system design",
+      "priority": "high",
+      "min_duration_minutes": 8,
+      "assessment_method": "scenario",
+      "evidence_to_look_for": "Ability to decompose complex problems, propose scalable and resilient architectures, identify critical components, and discuss trade-offs (e.g., CAP theorem, consistency models, latency vs. throughput)."
+    },
+    {
+      "skill": "mentor junior engineers",
+      "priority": "high",
+      "min_duration_minutes": 4,
+      "assessment_method": "discussion",
+      "evidence_to_look_for": "Examples of guiding junior team members, providing constructive feedback, fostering growth, and contributing to team knowledge sharing. Understanding of effective mentorship strategies."
+    }
+  ],
+  "optional_skills": [],
+  "resume_probing": {
+    "required": false,
+    "focus_areas": [
+      "Experience with Go in production environments",
+      "Contributions to distributed systems projects",
+      "Usage of Redis for specific use cases",
+      "Design and implementation of microservices architectures",
+      "System design challenges and solutions",
+      "Mentorship or leadership roles in previous teams"
+    ],
+    "sample_questions": [
+      "Tell me about a challenging distributed system you worked on. What was your role and what were the key technical decisions?",
+      "Can you describe a project where you heavily utilized Redis? What were the performance considerations?",
+      "Walk me through a microservice architecture you designed. What were the biggest challenges you faced?",
+      "Describe a situation where you mentored a junior engineer. What was the outcome?",
+      "What was the most complex system design problem you've tackled? How did you approach it?"
+    ]
+  },
+  "behavioral_assessment": {
+    "required": true,
+    "focus_areas": [
+      "Leadership and mentorship",
+      "Collaboration and teamwork",
+      "Problem-solving under ambiguity",
+      "Handling technical disagreements",
+      "Learning and adaptability",
+      "Ownership and accountability"
+    ],
+    "sample_questions": [
+      "Tell me about a time you had to lead a technical initiative. What was your approach?",
+      "Describe a situation where you had to resolve a conflict within your team regarding a technical decision.",
+      "Give me an example of a time you failed on a project. What did you learn from it?",
+      "How do you approach mentoring a junior engineer who is struggling with a complex task?",
+      "Tell me about a time you had to adapt to a significant change in project requirements or technology."
+    ]
+  },
+  "red_flags": [
+    "Cannot explain trade-offs of chosen technology",
+    "Blames external factors without ownership",
+    "No evidence of testing or code review discipline",
+    "Cannot estimate scale or performance constraints",
+    "Lack of understanding of fundamental distributed system concepts (e.g., CAP theorem, consistency models)",
+    "Inability to articulate design choices or justify technical decisions for scalable services",
+    "No experience or interest in mentoring or guiding less experienced engineers",
+    "Overly prescriptive solutions without considering alternatives or context"
+  ],
+  "green_flags": [
+    "Explains why a decision was made, not just what",
+    "Mentions monitoring, observability, or rollback strategy",
+    "Asks clarifying questions before solving",
+    "References concrete production incidents and learnings",
+    "Clearly articulates complex distributed system concepts and their practical implications",
+    "Demonstrates a strong grasp of Go idioms, best practices, and performance optimization techniques",
+    "Provides clear examples of successful mentorship and team development",
+    "Proactively identifies potential system bottlenecks and proposes solutions during design discussions"
+  ],
+  "evaluation_criteria": [
+    {
+      "name": "communication",
+      "weight": 0.15,
+      "description": "Clarity, structure, and responsiveness of answers."
+    },
+    {
+      "name": "problem_solving",
+      "weight": 0.25,
+      "description": "Approach to ambiguous problems, trade-off analysis, decomposition."
+    },
+    {
+      "name": "technical_depth",
+      "weight": 0.25,
+      "description": "Accuracy, breadth, and depth in required skills."
+    },
+    {
+      "name": "system_design",
+      "weight": 0.15,
+      "description": "Ability to design scalable, maintainable systems."
+    },
+    {
+      "name": "cultural_fit",
+      "weight": 0.1,
+      "description": "Collaboration, ownership, growth mindset."
+    },
+    {
+      "name": "code_quality",
+      "weight": 0.1,
+      "description": "Readability, testing, error handling, best practices."
+    }
+  ],
+  "interviewer_guidance": {
+    "dos": [
+      "Ask open-ended questions first, then drill down",
+      "Let the candidate finish their thought before interrupting",
+      "Ask for specific examples from past projects",
+      "Keep track of time per phase",
+      "Challenge architectural decisions with scale or failure scenarios",
+      "Ask about speed vs quality trade-offs and ownership"
+    ],
+    "donts": [
+      "Do not answer the question for the candidate",
+      "Do not make assumptions about background from the resume",
+      "Do not spend more than 20% of time on any single topic"
+    ]
+  }
+}

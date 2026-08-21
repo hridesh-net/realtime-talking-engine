@@ -1,0 +1,20 @@
+{
+  "job_title": "Senior Backend Engineer",
+  "jd": "Looking for a senior backend engineer with strong Go, distributed systems, Redis, and microservices experience. Must design scalable services and mentor junior engineers.",
+  "skills_required": ["Go", "distributed systems", "Redis", "microservices", "system design"],
+  "job_location_type": "remote",
+  "experience_level": "senior",
+  "company_type": "startup",
+  "mode": "live_interview",
+  "config": {
+    "duration_minutes": 60,
+    "question_mode": "AI",
+    "interview_mode": "STANDARD",
+    "language": "en"
+  },
+  "scheduled_at": "2026-08-25T10:00:00Z",
+  "metadata": {
+    "notes": "Focus on system design and distributed caching.",
+    "tags": ["backend", "senior", "go"]
+  }
+}

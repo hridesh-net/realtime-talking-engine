@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Secrets — only .env.example is committed
+.env
+.env.*
+!.env.example
+
+# Local SQLite state (regenerated on startup)
+*.db
+
+# Node / UI
+node_modules/
+ui/dist/
+
+# Owner deliverables are hand-maintained, not generated — tracked on purpose.
+
+.DS_Store
+.claude/settings.local.json
