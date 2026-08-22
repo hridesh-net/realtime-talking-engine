@@ -104,18 +104,23 @@ async def generate_expectation(
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
 
-    expectation = await agent.generate(
-        interview_id=interview.id,
-        job_title=interview.job_title,
-        jd=interview.jd,
-        skills_required=interview.skills_required,
-        job_location_type=interview.job_location_type,
-        experience_level=interview.experience_level,
-        company_type=interview.company_type,
-        duration_minutes=interview.config.duration_minutes,
-        mode=interview.mode,
-        has_resume=False,  # resume is attached later when candidate is assigned
-    )
+    try:
+        expectation = await agent.generate(
+            interview_id=interview.id,
+            job_title=interview.job_title,
+            jd=interview.jd,
+            skills_required=interview.skills_required,
+            job_location_type=interview.job_location_type,
+            experience_level=interview.experience_level,
+            company_type=interview.company_type,
+            duration_minutes=interview.config.duration_minutes,
+            mode=interview.mode,
+            has_resume=False,  # resume is attached later when candidate is assigned
+        )
+    except ModelError as exc:
+        # A generation failure is the provider's answer, not a bug in this
+        # service — surface it as a gateway error so the UI can say so plainly.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     repo.save_expectation(expectation, model_used=agent.model)
     return expectation
 
@@ -272,22 +277,28 @@ async def enroll_candidates(
             results.append(existing)
             continue
 
-        candidate = await agent.generate(
-            interview_id=interview_id,
-            archetype_key=key,
-            job_title=interview.job_title,
-            jd=interview.jd,
-            skills_required=interview.skills_required,
-            experience_level=interview.experience_level,
-            company_type=interview.company_type,
-            job_location_type=interview.job_location_type,
-            duration_minutes=interview.config.duration_minutes,
-            interview_type=(expectation.interview_type if expectation else "mixed"),
-            expectation=expectation,
-            seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
-            avoid_names=taken,
-            human_traits=human_traits,
-        )
+        try:
+            candidate = await agent.generate(
+                interview_id=interview_id,
+                archetype_key=key,
+                job_title=interview.job_title,
+                jd=interview.jd,
+                skills_required=interview.skills_required,
+                experience_level=interview.experience_level,
+                company_type=interview.company_type,
+                job_location_type=interview.job_location_type,
+                duration_minutes=interview.config.duration_minutes,
+                interview_type=(expectation.interview_type if expectation else "mixed"),
+                expectation=expectation,
+                seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
+                avoid_names=taken,
+                human_traits=human_traits,
+            )
+        except ModelError as exc:
+            # A casting failure is the provider's answer, not a bug in this
+            # service — surface it as a gateway error so the UI can say so
+            # plainly instead of an opaque 500.
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         repo.save_candidate(candidate, model_used=agent.model)
         taken.append(candidate.name)
         results.append(candidate)
@@ -387,20 +398,26 @@ async def start_session(
 
     candidate = repo.get_candidate_by_archetype(req.interview_id, req.archetype)
     if candidate is None:
-        candidate = await agent.generate(
-            interview_id=req.interview_id,
-            archetype_key=req.archetype,
-            job_title=interview.job_title,
-            jd=interview.jd,
-            skills_required=interview.skills_required,
-            experience_level=interview.experience_level,
-            company_type=interview.company_type,
-            job_location_type=interview.job_location_type,
-            duration_minutes=interview.config.duration_minutes,
-            interview_type="mixed",
-            expectation=None,
-            avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
-        )
+        try:
+            candidate = await agent.generate(
+                interview_id=req.interview_id,
+                archetype_key=req.archetype,
+                job_title=interview.job_title,
+                jd=interview.jd,
+                skills_required=interview.skills_required,
+                experience_level=interview.experience_level,
+                company_type=interview.company_type,
+                job_location_type=interview.job_location_type,
+                duration_minutes=interview.config.duration_minutes,
+                interview_type="mixed",
+                expectation=None,
+                avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
+            )
+        except ModelError as exc:
+            # A casting failure is the provider's answer, not a bug in this
+            # service — surface it as a gateway error so the UI can say so
+            # plainly instead of an opaque 500.
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         repo.save_candidate(candidate, model_used=agent.model)
 
     return repo.create_session(

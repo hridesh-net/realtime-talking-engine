@@ -30,10 +30,23 @@ function personaRadarAxes(dims, form) {
   })
   const language = dims.language?.[form.language]
   axes.push(language ? { label: 'Fluency', value: language.fluency * 10 } : null)
-  // Until every field the form drives has a resolved preset (e.g. right
-  // after `GET /trait-dimensions` returns but before the form's defaults are
-  // set), show nothing rather than a chart with silently-missing axes.
-  return axes.every(Boolean) ? axes : []
+  // Until every field the form drives has a resolved preset with a finite
+  // score (e.g. right after `GET /trait-dimensions` returns but before the
+  // form's defaults are set), show nothing rather than a chart that plots
+  // NaN as silently-broken SVG coordinates.
+  return axes.every((ax) => ax && Number.isFinite(ax.value)) ? axes : []
+}
+
+// Shared with Wizard.jsx (singleMode has no batch/cast button of its own to
+// gate, so the caller needs this to decide whether its own submit buttons
+// should be enabled) and used internally by addToBatch/cast below — one
+// definition of "is this spec submittable" instead of two that can drift.
+export function personaSpecError(spec) {
+  if (!spec.label?.trim()) return 'Give the persona a label.'
+  if (spec.compliance_traps?.includes('volunteers_protected_info') && !spec.protected_info_type) {
+    return 'Choose a protected info type — it is required when "volunteers_protected_info" is checked.'
+  }
+  return null
 }
 
 const EMPTY_PERSONA = {
@@ -167,6 +180,13 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
   if (!dims) return <div className="loading">Loading trait taxonomy…</div>
 
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value })
+  // A controlled number input's value is a string; setForm's plain `set`
+  // would let a mid-edit empty field ("") reach the batch/cast payload,
+  // which CustomPersonaSpec.offers_in_hand (an int, ge=0) rejects with a 422.
+  const setNumber = (key) => (e) => {
+    const raw = e.target.value
+    setForm({ ...form, [key]: raw === '' ? 0 : Math.max(0, Math.trunc(Number(raw)) || 0) })
+  }
   const toggle = (key, value) =>
     setForm((f) => ({
       ...f,
@@ -174,8 +194,9 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
     }))
 
   const addToBatch = () => {
-    if (!form.label.trim()) {
-      setError('Give the persona a label before adding it to the batch.')
+    const err = personaSpecError(form)
+    if (err) {
+      setError(err)
       return
     }
     setError(null)
@@ -361,7 +382,12 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
           </div>
           <div className="field">
             <label>Offers in hand</label>
-            <input type="number" min="0" value={form.offers_in_hand} onChange={set('offers_in_hand')} />
+            <input
+              type="number"
+              min="0"
+              value={form.offers_in_hand}
+              onChange={setNumber('offers_in_hand')}
+            />
           </div>
 
           {!singleMode && (

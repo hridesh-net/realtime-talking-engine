@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import PersonaComposer from './PersonaComposer'
+import PersonaComposer, { personaSpecError } from './PersonaComposer'
 import PersonaPicker from './PersonaPicker'
 
 /**
@@ -297,35 +297,42 @@ export default function Wizard({
             {pickMode === 'custom' && (
               <>
                 <PersonaComposer singleMode busy={busy} onChange={setCustomSpec} />
-                <div className="actions" style={{ marginTop: 16 }}>
-                  <button
-                    className="btn"
-                    disabled={Boolean(busy) || !customSpec?.label.trim()}
-                    onClick={() => onSubmitCustom(payload(), customSpec, 'open')}
-                  >
-                    {busy === 'open' ? 'Creating…' : 'Create interview'}
-                  </button>
-                  <button
-                    className="btn"
-                    disabled={Boolean(busy) || !customSpec?.label.trim()}
-                    onClick={() => onSubmitCustom(payload(), customSpec, 'text')}
-                  >
-                    {busy === 'text' ? 'Casting…' : 'Create & chat'}
-                  </button>
-                  <button
-                    className="btn primary"
-                    disabled={Boolean(busy) || !customSpec?.label.trim() || !voiceCap?.available}
-                    title={voiceCap?.available ? 'Spoken interview' : voiceCap?.detail}
-                    onClick={() => onSubmitCustom(payload(), customSpec, 'voice')}
-                  >
-                    {busy === 'voice' ? 'Casting…' : '🎙 Create & talk'}
-                  </button>
-                </div>
-                {!customSpec?.label.trim() && (
-                  <div className="help" style={{ marginTop: 8 }}>
-                    Give the persona a label above to enable these.
-                  </div>
-                )}
+                {(() => {
+                  const specError = customSpec ? personaSpecError(customSpec) : 'Loading…'
+                  return (
+                    <>
+                      <div className="actions" style={{ marginTop: 16 }}>
+                        <button
+                          className="btn"
+                          disabled={Boolean(busy) || Boolean(specError)}
+                          onClick={() => onSubmitCustom(payload(), customSpec, 'open')}
+                        >
+                          {busy === 'open' ? 'Creating…' : 'Create interview'}
+                        </button>
+                        <button
+                          className="btn"
+                          disabled={Boolean(busy) || Boolean(specError)}
+                          onClick={() => onSubmitCustom(payload(), customSpec, 'text')}
+                        >
+                          {busy === 'text' ? 'Casting…' : 'Create & chat'}
+                        </button>
+                        <button
+                          className="btn primary"
+                          disabled={Boolean(busy) || Boolean(specError) || !voiceCap?.available}
+                          title={voiceCap?.available ? 'Spoken interview' : voiceCap?.detail}
+                          onClick={() => onSubmitCustom(payload(), customSpec, 'voice')}
+                        >
+                          {busy === 'voice' ? 'Casting…' : '🎙 Create & talk'}
+                        </button>
+                      </div>
+                      {specError && (
+                        <div className="help" style={{ marginTop: 8 }}>
+                          {specError}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
               </>
             )}
           </div>
