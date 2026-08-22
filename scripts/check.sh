@@ -41,15 +41,27 @@ run "SOLID + layering"              $PY -m pytest tests/test_architecture.py -q
 run "persona rubric (offline)"      $PY -m pytest tests/test_candidate_rubric.py -q
 
 # -------------------------------------------------------------------- go ----
-# No Go source lives here yet — the interview-candidate engine is a separate
-# build. These run automatically once Go files land, against .golangci.yml.
-if compgen -G "**/*.go" >/dev/null 2>&1 || find . -name '*.go' -not -path './.venv/*' -print -quit | grep -q .; then
+# The live-session engine is a Go module rooted at engine/, so every gate runs
+# from inside that module — a repo-root `go vet ./...` finds no packages.
+# The race detector is always on: this codebase is all concurrency, and a data
+# race that only shows up under load is exactly what these gates exist to catch.
+if [[ -f engine/go.mod ]]; then
     if command -v go >/dev/null 2>&1; then
-        run "go format (gofmt)" bash -c '[[ -z "$(gofmt -l .)" ]] || { gofmt -l .; false; }'
-        run "go vet"            go vet ./...
-        run "go tests"          go test ./...
+        run "go format (gofmt)" bash -c '[[ -z "$(gofmt -l engine)" ]] || { gofmt -l engine; false; }'
+        run "go vet"            bash -c 'cd engine && go vet ./...'
+        run "go build"          bash -c 'cd engine && go build ./...'
+        run "go tests (-race)"  bash -c 'cd engine && go test -race ./...'
+        # Layering gate. Guard on a test file, not the directory: the package
+        # exists from the skeleton onward, and `go test` on a package with no
+        # tests exits 0 — which would report a PASS for a check that never ran.
+        if compgen -G "engine/internal/arch/*_test.go" >/dev/null 2>&1; then
+            run "go architecture" bash -c 'cd engine && go test ./internal/arch'
+        else
+            skip "go architecture" "internal/arch has no test yet (phase 0 task 7)"
+        fi
         if command -v golangci-lint >/dev/null 2>&1; then
-            run "go lint (golangci-lint)" golangci-lint run
+            run "go lint (golangci-lint)" \
+                bash -c 'cd engine && golangci-lint run --config ../.golangci.yml'
         else
             skip "go lint (golangci-lint)" "not installed (brew install golangci-lint)"
         fi
@@ -57,7 +69,7 @@ if compgen -G "**/*.go" >/dev/null 2>&1 || find . -name '*.go' -not -path './.ve
         skip "go checks" "go toolchain not installed"
     fi
 else
-    skip "go checks" "no Go source yet — standard recorded in .golangci.yml"
+    skip "go checks" "no engine/go.mod yet — standard recorded in .golangci.yml"
 fi
 
 # ---------------------------------------------------------------- schemas ----
@@ -67,6 +79,12 @@ run "handover schemas match the code" $PY scripts/export_schemas.py --check
 if (( LIVE )); then
     run "expectation scenarios (live)" $PY tests/test_expectation_agent.py
     run "candidate scenarios (live)"   $PY tests/test_candidate_agent.py
+    # Same convention on the Go side: vendor calls cost money, so they sit
+    # behind a build tag and never run in the default offline gate.
+    if [[ -f engine/go.mod ]] && command -v go >/dev/null 2>&1; then
+        run "engine vendor scenarios (live)" \
+            bash -c 'cd engine && go test -tags live ./...'
+    fi
 else
     skip "live model scenarios" "pass --live to run (calls the model, costs money)"
 fi

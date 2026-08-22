@@ -29,13 +29,13 @@ non-zero if any failed, with a summary list.
 | Check | Enforces |
 |---|---|
 | `ruff check .` | The explicit rule set in `pyproject.toml` — pyflakes, imports, naming, py311 idioms, bugbear, docstrings, annotations, no relative imports |
-| `ruff format --check .` | One formatting standard |
+| `ruff format --check .` | One formatting standard. `okf/` and `docs/` are excluded in `pyproject.toml`: ruff reformats fenced Python blocks in markdown, and those are aligned for reading |
 | `mypy` | `disallow_untyped_defs`, no implicit Optional, pydantic plugin, over all four packages |
 | `pytest tests/test_architecture.py` | [SOLID and layering](/concepts/architecture.md) |
 | `pytest tests/test_candidate_rubric.py` | Determinism, clamping, scorecard integrity, prompt byte-stability |
-| gofmt / go vet / go test / golangci-lint | **Skipped** — no Go source here yet; the standard is recorded in `.golangci.yml` and these activate automatically when `.go` files land |
+| gofmt / go vet / go build / `go test -race` / go architecture / golangci-lint | The [live-session engine](/concepts/subsystems/engine.md) in `engine/`. Every gate runs **from inside the module** — a repo-root `go vet ./...` finds no packages. Race detector always on. Activates when `engine/go.mod` exists; `golangci-lint` skips with a hint when not installed |
 | `export_schemas.py --check` | `owner_handover/` matches the Pydantic models |
-| Live scenarios | Only with `--live` |
+| Live scenarios | Only with `--live` — Python model scenarios plus the engine's `//go:build live` vendor tests |
 
 ## Live scenarios
 
@@ -54,3 +54,4 @@ outside its band — that is exactly what these assert.
 * **`test_system_prompt_is_byte_stable`** — you changed the compiled persona prompt. Intended? Bump `ENGINE_CONTRACT_VERSION` and update the expectation. Unintended? Revert.
 * **A layering or DIP test** — the message names the file and the offending import. Do not add an exception; move the code.
 * **`test_ocp_*`** — an agent grew a dependency on a specific archetype or provider. Push the special case back into the catalog or factory.
+* **`go architecture`** — the engine's layering rule broke: a package outside `cmd/engined` imported a vendor, transport or store adapter, `os.Getenv` escaped `internal/config`, a model id was hardcoded, or `internal/session` called `time.Now` instead of the injected `Clock`. Move the code; do not add an exception.

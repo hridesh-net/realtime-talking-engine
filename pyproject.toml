@@ -32,7 +32,10 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-exclude = [".venv", "ui"]
+# okf/ and docs/ hold prose, not source. Their fenced Python blocks are aligned
+# for reading (dependency maps, struct sketches with trailing comments); ruff
+# would reformat them into something correct and less legible.
+exclude = [".venv", "ui", "okf", "docs"]
 
 [tool.ruff.lint]
 # Explicit rule set — the project standard, not whatever the ruff default drifts to.

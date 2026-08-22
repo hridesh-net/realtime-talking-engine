@@ -9,3 +9,4 @@ One page per package, in dependency order (bottom of the stack first).
 * [Test UI](/concepts/subsystems/ui.md) - `ui/`. React + Vite operator console.
 * [Owner handover](/concepts/subsystems/owner-handover.md) - `owner_handover/`, `scripts/export_schemas.py`.
 * [Test suite](/concepts/subsystems/test-suite.md) - `tests/`. Offline checks and live scenarios.
+* [Live-session engine](/concepts/subsystems/engine.md) - `engine/`. Go runtime that performs the session. Under construction.
