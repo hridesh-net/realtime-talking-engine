@@ -1,0 +1,75 @@
+Copyright (c) 2026 Hridesh Sharma. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL
+
+This software and its source code, documentation, data formats, prompts,
+persona definitions, and all other material in this repository (collectively,
+the "Software") are the proprietary and confidential property of Hridesh Sharma
+(the "Owner").
+
+1. NO LICENSE GRANTED
+
+   No licence, right, or interest in the Software is granted to any person by
+   the mere fact of access. Possession of a copy of the Software does not
+   confer permission to use it.
+
+   Except as expressly permitted in a separate written agreement signed by the
+   Owner, no person may:
+
+     (a) use, execute, or run the Software, in whole or in part, for any
+         purpose;
+     (b) copy, reproduce, publish, or distribute the Software;
+     (c) modify, adapt, translate, or create derivative works of the Software;
+     (d) reverse engineer, decompile, or disassemble the Software, except to
+         the extent this restriction is unenforceable under applicable law;
+     (e) sublicense, sell, rent, lease, or otherwise transfer the Software or
+         any rights in it; or
+     (f) remove, obscure, or alter this notice or any proprietary marking.
+
+2. CONFIDENTIALITY
+
+   The Software contains trade secrets and confidential information of the
+   Owner. Any person granted access must keep it confidential, must not
+   disclose it to any third party, and must use it solely for the purpose
+   authorised in writing by the Owner.
+
+3. THIRD-PARTY COMPONENTS
+
+   The Software depends on third-party open-source components, each of which
+   remains governed by its own licence. Those licences apply to those
+   components only and grant no rights in the Software itself. Third-party
+   dependencies are declared in `pyproject.toml`, `requirements.txt`,
+   `engine/go.mod`, and `ui/package.json`.
+
+4. AI-GENERATED AND MODEL-DERIVED CONTENT
+
+   Portions of the Software invoke third-party generative model providers.
+   Use of those providers is governed by their respective terms. Nothing in
+   this licence transfers to any person the Owner's rights in the prompts,
+   rubrics, archetypes, persona contracts, or other content authored by or
+   compiled within the Software.
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+   FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+
+7. TERMINATION
+
+   Any permission granted by the Owner terminates automatically and without
+   notice upon breach of any term of this notice. On termination, all copies
+   of the Software must be destroyed.
+
+8. RESERVATION OF RIGHTS
+
+   All rights not expressly granted in writing are reserved by the Owner.
+
+For licensing enquiries, contact the Owner.

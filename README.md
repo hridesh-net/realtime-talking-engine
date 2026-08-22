@@ -213,3 +213,9 @@ Resolution order per role: `<ROLE>_PROVIDER` / `<ROLE>_MODEL`, then
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` | — | At least one required |
 | `CONTROL_PLANE_DB` | `control_plane.db` | SQLite path |
 | `CONTROL_PLANE_PORT` | `8081` | Service port |
+
+## License
+
+Proprietary and confidential. Copyright (c) 2026 Hridesh Sharma. All rights
+reserved. See [LICENSE](LICENSE) — access to this repository does not grant
+permission to use the software.

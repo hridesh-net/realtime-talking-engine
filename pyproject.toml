@@ -8,6 +8,13 @@ version = "0.1.0"
 description = "Interview control plane — interview creation and AI-generated interviewer expectations"
 readme = "README.md"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: Other/Proprietary License",
+    # Makes PyPI reject an upload outright. This code is not for distribution,
+    # and a stray `twine upload` should fail loudly rather than publish it.
+    "Private :: Do Not Upload",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
