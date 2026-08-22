@@ -46,6 +46,7 @@ Two independent requirements force it:
 | Answer policy defaults (depth, on-unknown, on-pressure, on-silence) | `reveals_depth_when`, `always_does`, `never_does` |
 | The compiled engine contract and system prompt | `opening_line` |
 | Resume-claim truthfulness enum validation | The claims themselves |
+| Every §3.2 taxonomy value (`HumanTraitProfile`, when present) — affect, verbal style, language/comprehension numbers, motivation, negotiation stance, compliance traps, environment, profile | Nothing — the model never sees or authors `human_traits`; it is composed by `trait_dimensions.compose_human_traits` from fixed presets before the call and injected into the compiled prompt after |
 
 Enforcement is not by prompt alone — the agent **re-imposes** the code side after
 the call:

@@ -1091,3 +1091,153 @@ details.raw pre {
     transition: none !important;
   }
 }
+
+/* --- custom persona composer (§3.2 taxonomy) --- */
+
+.composer-layout {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 16px;
+  align-items: start;
+}
+
+.composer-fields .field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.composer-fields .field {
+  margin-bottom: 10px;
+}
+
+.composer-fields label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.composer-fields input,
+.composer-fields select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--card);
+  color: var(--ink);
+}
+
+.composer-preview {
+  position: sticky;
+  top: 16px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--tile);
+  cursor: pointer;
+  color: var(--ink-2);
+}
+
+.radar-card {
+  display: flex;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 8px;
+}
+
+.radar-chart .radar-grid {
+  fill: none;
+  stroke: var(--line);
+  stroke-dasharray: 3 3;
+}
+
+.radar-chart .radar-spoke {
+  stroke: var(--line);
+}
+
+.radar-chart .radar-shape {
+  fill: color-mix(in srgb, var(--blue) 20%, transparent);
+  stroke: var(--blue);
+  stroke-width: 2;
+}
+
+.radar-chart .radar-dot {
+  fill: var(--card);
+  stroke: var(--blue);
+  stroke-width: 2;
+}
+
+.radar-chart .radar-label {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--ink-2);
+}
+
+.radar-chart .radar-value {
+  font-size: 10px;
+  fill: var(--ink-3);
+}
+
+.batch-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.batch-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--tile);
+}
+
+details.human-traits {
+  margin-top: 12px;
+  background: var(--green-50);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, var(--line));
+  border-radius: var(--r);
+  padding: 10px 12px;
+}
+
+details.human-traits summary {
+  cursor: pointer;
+  color: var(--green);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+details.human-traits .row {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+details.human-traits .watch {
+  color: var(--red);
+}

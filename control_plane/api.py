@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from candidate_agent import archetypes as archetype_catalog
+from candidate_agent import trait_dimensions
 from candidate_agent.agent import VirtualCandidateAgent
-from candidate_agent.schema import EngineContract, InterviewerScorecard, VirtualCandidate
+from candidate_agent.schema import (
+    EngineContract,
+    HumanTraitProfile,
+    InterviewerScorecard,
+    VirtualCandidate,
+)
 from candidate_agent.session import CANDIDATE, MANAGER, CandidateSessionAgent
 from candidate_agent.voice import build_realtime_session
 from control_plane.database import init_db
@@ -23,6 +32,7 @@ from control_plane.ports import (
 from control_plane.repository import InterviewRepository
 from control_plane.schemas import (
     CandidateEnrollRequest,
+    CustomPersonaSpec,
     InterviewCreateRequest,
     InterviewResponse,
     RealtimeCredentialResponse,
@@ -151,6 +161,64 @@ def list_archetypes() -> dict[str, object]:
     }
 
 
+@router.get("/trait-dimensions")
+def list_trait_dimensions() -> dict[str, object]:
+    """Every dimension and preset `custom_personas` values must come from."""
+    return trait_dimensions.dimension_catalog()
+
+
+def _dynamic_archetype_key(spec: CustomPersonaSpec) -> str:
+    """Deterministic key for a composed archetype — same spec, same key."""
+    digest = hashlib.sha256(json.dumps(spec.model_dump(), sort_keys=True).encode()).hexdigest()
+    return f"dyn-{digest[:12]}"
+
+
+def _register_custom_persona(spec: CustomPersonaSpec) -> tuple[str, HumanTraitProfile]:
+    """Compose and register one custom persona's archetype + human traits.
+
+    Raises `HTTPException(422)` on an unknown preset or out-of-vocabulary
+    value instead of letting a malformed spec reach `agent.generate`.
+    """
+    key = _dynamic_archetype_key(spec)
+    try:
+        if key not in archetype_catalog.ARCHETYPES:
+            trait_dimensions.register_dynamic(
+                key=key,
+                label=spec.label,
+                verdict=spec.verdict,
+                competence=spec.competence,
+                conscientiousness=spec.conscientiousness,
+                communication=spec.communication,
+                emotional_stance=spec.emotional_stance,
+                honesty=spec.honesty,
+                bias_trap=spec.bias_trap,
+            )
+        human_traits = trait_dimensions.compose_human_traits(
+            affect=spec.affect,
+            verbal_style=spec.verbal_style,
+            language=spec.language,
+            comprehension=spec.comprehension,
+            motivation=spec.motivation,
+            negotiation_stance=spec.negotiation_stance,
+            environment=spec.environment,
+            seniority=spec.seniority,
+            function=spec.function,
+            region=spec.region,
+            gender_presentation=spec.gender_presentation,
+            age_band=spec.age_band,
+            notice_period=spec.notice_period,
+            compliance_traps=spec.compliance_traps,
+            protected_info_type=spec.protected_info_type,
+            integrity_red_flags=spec.integrity_red_flags,
+            offers_in_hand=spec.offers_in_hand,
+        )
+    except (trait_dimensions.UnknownPresetError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    return key, human_traits
+
+
 @router.post(
     "/interviews/{interview_id}/candidates",
     response_model=list[VirtualCandidate],
@@ -172,13 +240,23 @@ async def enroll_candidates(
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
 
-    keys = req.archetypes or archetype_catalog.default_keys()
+    if req.archetypes is None and not req.custom_personas:
+        keys = archetype_catalog.default_keys()
+    else:
+        keys = req.archetypes or []
     unknown = [k for k in keys if k not in archetype_catalog.ARCHETYPES]
     if unknown:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"unknown archetypes: {', '.join(unknown)}",
         )
+
+    # Fixed-catalog keys carry no human_traits; custom specs compose both a
+    # one-off archetype (registered under a content-addressed key, so casting
+    # the same spec twice reuses it) and a human-trait profile.
+    casts: list[tuple[str, HumanTraitProfile | None]] = [(k, None) for k in keys]
+    for spec in req.custom_personas or []:
+        casts.append(_register_custom_persona(spec))
 
     # The expectation grounds personas in the flags the interviewer is watching
     # for. Optional — enrollment must not require it.
@@ -188,7 +266,7 @@ async def enroll_candidates(
     # Independent generations converge on the same names, which makes a training
     # set confusing. Feed each cast the names already taken.
     taken: list[str] = [c.name for c in repo.list_candidates(interview_id)]
-    for key in keys:
+    for key, human_traits in casts:
         existing = repo.get_candidate_by_archetype(interview_id, key)
         if existing and not req.regenerate:
             results.append(existing)
@@ -208,6 +286,7 @@ async def enroll_candidates(
             expectation=expectation,
             seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
             avoid_names=taken,
+            human_traits=human_traits,
         )
         repo.save_candidate(candidate, model_used=agent.model)
         taken.append(candidate.name)

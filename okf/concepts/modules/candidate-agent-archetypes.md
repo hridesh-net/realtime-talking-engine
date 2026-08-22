@@ -95,11 +95,20 @@ So a malformed archetype breaks the import, not a request.
 | `comp_first` | The comp-first candidate | borderline | 6–8 | clarity 4 | ✓ | |
 | `defensive` | The defensive candidate | borderline | 5–7 | communication 4 | | |
 | `rambler` | The rambler | borderline | 6–8 | structure 4 | | |
+| `frontline_network_candidate` | Frontline network technician | borderline | 4–7 | bias 4 | | |
+| `frontline_sales_candidate` | Frontline sales candidate | select | 6–8 | bias 4 | | |
 
-Every archetype carries exactly **4** `must_discover` signals. 2 select, 2
-reject, 3 borderline. A test asserts every rubric criterion is stressed at
-level ≥3 by at least one persona — no manager competency is left without a
-persona that exercises it.
+Every archetype carries exactly **4** `must_discover` signals. A test asserts
+every rubric criterion is stressed at level ≥3 by at least one persona — no
+manager competency is left without a persona that exercises it.
+
+The two `frontline_*` entries are Airtel/telecom-specific additions (see
+[Candidate agent § composing personas from presets](/concepts/subsystems/candidate-agent.md)):
+`frontline_network_candidate` carries a career-gap bias trap,
+`frontline_sales_candidate` an age/re-entry one — both were written against the
+v1 schema originally and updated with `session_beats`/`stresses` when the
+catalog moved to v2.0. `CATALOG_VERSION` was **not** bumped for their
+addition — pure content, no existing entry changed.
 
 `comp_first` is the only one with `allows_adjacent_strength`: they are genuinely
 competent, so the agent lets extra skills through unclamped for it alone.

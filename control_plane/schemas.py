@@ -74,6 +74,46 @@ class InterviewResponse(BaseModel):
     metadata: dict[str, Any]
 
 
+class CustomPersonaSpec(BaseModel):
+    """One dynamically composed persona.
+
+    Every field's legal values come from ``GET /api/v1/trait-dimensions`` — it
+    mirrors ``candidate_agent.trait_dimensions.compose_archetype`` (the first
+    six fields: skill/verdict mechanics) plus
+    ``compose_human_traits`` (the rest: the §3.2 realism/compliance taxonomy).
+    Composing is validated exactly like a hand-written archetype — an unknown
+    preset or an out-of-vocabulary value fails the request with a 422 rather
+    than casting something malformed.
+    """
+
+    label: str
+    verdict: str = Field(..., pattern="^(select|reject|borderline)$")
+    competence: str
+    conscientiousness: str
+    communication: str
+    emotional_stance: str
+    honesty: str
+    bias_trap: str | None = None
+
+    affect: str
+    verbal_style: str
+    language: str
+    comprehension: str
+    motivation: str
+    negotiation_stance: str
+    environment: str
+    seniority: str
+    function: str
+    region: str
+    gender_presentation: str
+    age_band: str
+    notice_period: str
+    compliance_traps: list[str] = Field(default_factory=list)
+    protected_info_type: str | None = None
+    integrity_red_flags: list[str] = Field(default_factory=list)
+    offers_in_hand: int = Field(0, ge=0)
+
+
 class CandidateEnrollRequest(BaseModel):
     """POST /api/v1/interviews/{id}/candidates body.
 
@@ -85,6 +125,11 @@ class CandidateEnrollRequest(BaseModel):
         None,
         description="Archetype keys from GET /api/v1/candidate-archetypes. "
         "Defaults to ['cooperative_trap', 'evasive'].",
+    )
+    custom_personas: list[CustomPersonaSpec] | None = Field(
+        None,
+        description="Personas composed on the spot from GET /api/v1/trait-dimensions "
+        "values, instead of a fixed archetype key.",
     )
     regenerate: bool = Field(
         False,

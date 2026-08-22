@@ -125,7 +125,7 @@
       "description": "Runtime slice consumed by the Go interview-candidate engine.",
       "properties": {
         "contract_version": {
-          "default": "v1.0",
+          "default": "v1.1",
           "title": "Contract Version",
           "type": "string"
         },
@@ -186,6 +186,220 @@
         "forbidden_behaviors"
       ],
       "title": "EngineContract",
+      "type": "object"
+    },
+    "EnvironmentProfile": {
+      "description": "Session-logistics realism \u2014 the 'Environment' row of the \u00a73.2 taxonomy.",
+      "properties": {
+        "camera_behavior": {
+          "pattern": "^(on|off|toggling)$",
+          "title": "Camera Behavior",
+          "type": "string"
+        },
+        "network_drops_at_minute": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network Drops At Minute"
+        },
+        "background_noise": {
+          "title": "Background Noise",
+          "type": "string"
+        },
+        "joins_late_minutes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Joins Late Minutes",
+          "type": "integer"
+        },
+        "mobile_or_driving": {
+          "default": false,
+          "title": "Mobile Or Driving",
+          "type": "boolean"
+        },
+        "hard_stop_minute": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hard Stop Minute"
+        }
+      },
+      "required": [
+        "camera_behavior",
+        "background_noise"
+      ],
+      "title": "EnvironmentProfile",
+      "type": "object"
+    },
+    "HumanTraitProfile": {
+      "description": "The generic human-candidate trait dimensions (BRD \u00a73.2 taxonomy).\n\nOrthogonal to the archetype's skill/verdict mechanics \u2014 this is the\nrealism, communication, and compliance-training layer. Entirely\ncode-derived from fixed dimension presets, same as trait scores; the model\nnever authors or sees these values.",
+      "properties": {
+        "affect": {
+          "pattern": "^(hostile|defensive|anxious|apathetic|over_eager|arrogant|cooperative|flirtatious_inappropriate|grieving_distressed)$",
+          "title": "Affect",
+          "type": "string"
+        },
+        "verbal_style": {
+          "pattern": "^(rambling|monosyllabic|tangential|interrupts|long_silences|jargon_flooder|over_formal)$",
+          "title": "Verbal Style",
+          "type": "string"
+        },
+        "fluency": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Fluency",
+          "type": "integer"
+        },
+        "literacy_level": {
+          "pattern": "^(basic|functional|fluent|native)$",
+          "title": "Literacy Level",
+          "type": "string"
+        },
+        "native_speaker": {
+          "title": "Native Speaker",
+          "type": "boolean"
+        },
+        "accent_strength": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Accent Strength",
+          "type": "number"
+        },
+        "code_switch_probability": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Code Switch Probability",
+          "type": "number"
+        },
+        "vocabulary_ceiling": {
+          "pattern": "^(basic|workplace|technical|executive)$",
+          "title": "Vocabulary Ceiling",
+          "type": "string"
+        },
+        "clarification_rate": {
+          "pattern": "^(low|medium|high)$",
+          "title": "Clarification Rate",
+          "type": "string"
+        },
+        "misinterprets_question_rate": {
+          "pattern": "^(low|medium|high)$",
+          "title": "Misinterprets Question Rate",
+          "type": "string"
+        },
+        "needs_rephrasing": {
+          "title": "Needs Rephrasing",
+          "type": "boolean"
+        },
+        "integrity_red_flags": {
+          "items": {
+            "pattern": "^(resume_inflation|concealed_termination|ghost_employer|dual_employment|proxy_candidate|ai_assisted_answers)$",
+            "type": "string"
+          },
+          "title": "Integrity Red Flags",
+          "type": "array"
+        },
+        "motivation": {
+          "pattern": "^(comp_only|counter_offer_risk|not_really_looking|location_blocked|family_pressured|passion_hire)$",
+          "title": "Motivation",
+          "type": "string"
+        },
+        "negotiation_stance": {
+          "pattern": "^(anchors_high|refuses_to_disclose_ctc|lowballs_self|demands_off_band|offer_shopping)$",
+          "title": "Negotiation Stance",
+          "type": "string"
+        },
+        "compliance_traps": {
+          "items": {
+            "pattern": "^(volunteers_protected_info|requests_off_policy_favour|asks_illegal_question_back)$",
+            "type": "string"
+          },
+          "title": "Compliance Traps",
+          "type": "array"
+        },
+        "protected_info_type": {
+          "anyOf": [
+            {
+              "pattern": "^(pregnancy|age|religion|caste|disability|marital_status)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protected Info Type"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentProfile"
+        },
+        "seniority": {
+          "title": "Seniority",
+          "type": "string"
+        },
+        "function": {
+          "title": "Function",
+          "type": "string"
+        },
+        "region": {
+          "title": "Region",
+          "type": "string"
+        },
+        "gender_presentation": {
+          "title": "Gender Presentation",
+          "type": "string"
+        },
+        "age_band": {
+          "title": "Age Band",
+          "type": "string"
+        },
+        "notice_period": {
+          "title": "Notice Period",
+          "type": "string"
+        },
+        "offers_in_hand": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offers In Hand",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "affect",
+        "verbal_style",
+        "fluency",
+        "literacy_level",
+        "native_speaker",
+        "accent_strength",
+        "code_switch_probability",
+        "vocabulary_ceiling",
+        "clarification_rate",
+        "misinterprets_question_rate",
+        "needs_rephrasing",
+        "motivation",
+        "negotiation_stance",
+        "environment",
+        "seniority",
+        "function",
+        "region",
+        "gender_presentation",
+        "age_band",
+        "notice_period"
+      ],
+      "title": "HumanTraitProfile",
       "type": "object"
     },
     "InterviewerScorecard": {
@@ -400,7 +614,7 @@
   "description": "One virtual candidate persona. Returned by the enrollment endpoint and by GET /api/v1/candidates/{candidate_id}.",
   "properties": {
     "persona_version": {
-      "default": "v1.0",
+      "default": "v1.1",
       "title": "Persona Version",
       "type": "string"
     },
@@ -479,6 +693,17 @@
     },
     "engine_contract": {
       "$ref": "#/$defs/EngineContract"
+    },
+    "human_traits": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HumanTraitProfile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "fingerprint": {
       "title": "Fingerprint",

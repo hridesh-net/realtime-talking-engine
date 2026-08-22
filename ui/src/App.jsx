@@ -123,6 +123,20 @@ export default function App() {
     }
   }
 
+  const enrollCustom = async (customPersonas) => {
+    setError(null)
+    setBusy('enroll:custom')
+    try {
+      await enrollCandidates(selected.id, { custom_personas: customPersonas })
+      await refreshDetail()
+    } catch (e) {
+      setError(e.message)
+      throw e
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const removeCandidate = async (cid) => {
     setError(null)
     try {
@@ -211,6 +225,7 @@ export default function App() {
           sessions={sessions}
           onStart={startFromDetail}
           onEnroll={enroll}
+          onEnrollCustom={enrollCustom}
           onDeleteCandidate={removeCandidate}
           onBack={() => setScreen('list')}
         />

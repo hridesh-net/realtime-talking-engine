@@ -28,6 +28,8 @@ export const getExpectation = (id) => request(`/interviews/${id}/expectation`)
 
 export const listArchetypes = () => request('/candidate-archetypes')
 
+export const listTraitDimensions = () => request('/trait-dimensions')
+
 export const listCandidates = (id) => request(`/interviews/${id}/candidates`)
 
 export const enrollCandidates = (id, body) =>

@@ -35,6 +35,7 @@ from candidate_agent.schema import (
     PERSONA_VERSION,
     AnswerPolicy,
     AptitudeProfile,
+    HumanTraitProfile,
     InterviewerScorecard,
     ResumeClaim,
     ScorecardItem,
@@ -112,6 +113,7 @@ class VirtualCandidateAgent:
         expectation: Any | None = None,
         seed_override: str | None = None,
         avoid_names: list[str] | None = None,
+        human_traits: HumanTraitProfile | None = None,
     ) -> VirtualCandidate:
         """Cast one persona for this interview and archetype.
 
@@ -129,6 +131,9 @@ class VirtualCandidateAgent:
             expectation: Expectation document to ground the persona in, if any.
             seed_override: Replaces the default seed for reproducible casts.
             avoid_names: Names already used in this training set.
+            human_traits: Optional §3.2 taxonomy layer (see
+                `trait_dimensions.compose_human_traits`) — code-derived, never
+                seen or authored by the model.
 
         Returns:
             The assembled persona, including its engine contract.
@@ -206,6 +211,7 @@ class VirtualCandidateAgent:
             knowledge_map=knowledge_map,
             policy=policy,
             opening_line=opening_line,
+            human_traits=human_traits,
         )
 
         # Reproducibility claim: everything here is derived from the seed alone,
@@ -218,6 +224,7 @@ class VirtualCandidateAgent:
                 "persona_version": PERSONA_VERSION,
                 "traits": traits,
                 "verdict": archetype.verdict,
+                "human_traits": human_traits.model_dump() if human_traits else None,
             }
         )
         # Integrity claim: covers the model-authored content too, so a stored
@@ -253,6 +260,7 @@ class VirtualCandidateAgent:
             answer_policy=policy,
             interviewer_scorecard=scorecard,
             engine_contract=engine,
+            human_traits=human_traits,
             fingerprint=fingerprint,
             seed_fingerprint=seed_fingerprint,
             seed=seed,

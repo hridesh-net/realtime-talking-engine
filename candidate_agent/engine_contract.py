@@ -16,6 +16,7 @@ from candidate_agent.schema import (
     AnswerPolicy,
     AptitudeProfile,
     EngineContract,
+    HumanTraitProfile,
     SkillKnowledge,
     SpeechProfile,
 )
@@ -72,6 +73,80 @@ def _turn_policy(policy: AnswerPolicy, speech: SpeechProfile) -> dict[str, objec
     }
 
 
+def _realism_section(traits: HumanTraitProfile | None) -> str:
+    """Render the §3.2 taxonomy layer, if this persona carries one.
+
+    Empty string when absent, so a persona cast without `human_traits`
+    compiles a byte-identical prompt to before this layer existed.
+    """
+    if traits is None:
+        return ""
+
+    env = traits.environment
+    compliance_lines = []
+    for trap in traits.compliance_traps:
+        if trap == "volunteers_protected_info" and traits.protected_info_type:
+            compliance_lines.append(
+                f"- You volunteer protected personal information ({traits.protected_info_type}) "
+                "unprompted, early in the conversation, as if it were ordinary small talk."
+            )
+        elif trap == "requests_off_policy_favour":
+            compliance_lines.append(
+                "- You ask the interviewer for an off-policy favour (e.g. skipping a step, "
+                "bending a rule) at some point in the conversation."
+            )
+        elif trap == "asks_illegal_question_back":
+            compliance_lines.append(
+                "- At some point you ask the interviewer a question that is itself "
+                "inappropriate for them to have to answer (e.g. about their own age, "
+                "family plans, or background)."
+            )
+    compliance_block = "\n".join(compliance_lines) or "- (none)"
+
+    integrity_block = ", ".join(traits.integrity_red_flags) or "none"
+
+    joins_late = (
+        f"You join {env.joins_late_minutes} minutes late."
+        if env.joins_late_minutes
+        else "You join on time."
+    )
+    network_drops = (
+        f"Your network drops around minute {env.network_drops_at_minute}."
+        if env.network_drops_at_minute
+        else ""
+    )
+
+    return f"""
+
+REALISM & COMPLIANCE LAYER
+Affect / disposition: {traits.affect}. Verbal style: {traits.verbal_style}.
+Language: fluency {traits.fluency}/10, {traits.literacy_level} literacy,
+{"native" if traits.native_speaker else "non-native"} speaker, accent strength
+{traits.accent_strength}, code-switch probability {traits.code_switch_probability},
+vocabulary ceiling {traits.vocabulary_ceiling}.
+Comprehension: asks for clarification at a {traits.clarification_rate} rate,
+misinterprets questions at a {traits.misinterprets_question_rate} rate.
+{"You often ask the interviewer to rephrase." if traits.needs_rephrasing else ""}
+Integrity red flags in play (do not narrate them, just behave consistently
+with them if probed): {integrity_block}.
+Motivation: {traits.motivation}. Negotiation stance: {traits.negotiation_stance}.
+
+COMPLIANCE TRAPS (in-character, unprompted — never label them as traps)
+{compliance_block}
+
+ENVIRONMENT
+Camera: {env.camera_behavior}. Background noise: {env.background_noise}.
+{joins_late}
+{network_drops}
+{"You are mobile or driving during the call." if env.mobile_or_driving else ""}
+{f"You have a hard stop at minute {env.hard_stop_minute}." if env.hard_stop_minute else ""}
+
+PROFILE
+Seniority: {traits.seniority}. Function: {traits.function}. Region: {traits.region}.
+Gender presentation: {traits.gender_presentation}. Age band: {traits.age_band}.
+Notice period: {traits.notice_period}. Offers in hand: {traits.offers_in_hand}."""
+
+
 def _compile_system_prompt(
     *,
     name: str,
@@ -82,6 +157,7 @@ def _compile_system_prompt(
     aptitude: AptitudeProfile,
     knowledge_map: list[SkillKnowledge],
     policy: AnswerPolicy,
+    human_traits: HumanTraitProfile | None = None,
 ) -> str:
     """Build the realtime model's system instruction. Injected verbatim."""
     knowledge_lines = []
@@ -146,7 +222,7 @@ NEVER
 
 HARD RULES
 {chr(10).join(f"- {r}" for r in UNIVERSAL_FORBIDDEN)}
-
+{_realism_section(human_traits)}
 You are being interviewed. Answer as this person would, including their weaknesses.
 A convincing bad candidate is the point — do not drift toward being helpful or
 impressive if this persona would not be."""
@@ -165,6 +241,7 @@ def build_engine_contract(
     knowledge_map: list[SkillKnowledge],
     policy: AnswerPolicy,
     opening_line: str,
+    human_traits: HumanTraitProfile | None = None,
 ) -> EngineContract:
     """Compile the runtime contract the Go engine consumes for one persona."""
     return EngineContract(
@@ -180,6 +257,7 @@ def build_engine_contract(
             aptitude=aptitude,
             knowledge_map=knowledge_map,
             policy=policy,
+            human_traits=human_traits,
         ),
         opening_line=opening_line,
         voice_directives=_speech_directives(speech, aptitude),

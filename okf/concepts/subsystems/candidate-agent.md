@@ -35,6 +35,7 @@ and then plays that persona through a live typed interview. Imports only `llm`.
 | `session.py` (95 ln) | [`CandidateSessionAgent.reply(...)`](/concepts/modules/candidate-agent-session.md) — one persona turn, stateless |
 | `voice.py` (105 ln) | [`build_realtime_session(...)`](/concepts/modules/candidate-agent-voice.md) — the persona's spoken session config |
 | `prompts.py` (240 ln) | Casting-director persona, 11 hard rules, user prompt builder, `expectation_note()`, `build_session_system_prompt()` |
+| `trait_dimensions.py` | Compose an archetype or a `HumanTraitProfile` from fixed presets instead of hand-writing one — see below |
 
 ## The idea
 
@@ -52,11 +53,17 @@ stopped meaning anything when the assessed subject became the manager.
 | `comp_first` | Hiring with Clarity | sells the role and states the band honestly without caving |
 | `defensive` | Communication & Tone | holds composure through provocation and re-plans around a hard stop |
 | `rambler` | Structured Interviewing | redirects without rudeness and still covers what was planned |
+| `frontline_network_candidate` | Unconscious Bias | explains shifts/conditions beyond the JD, probes with open follow-ups, stays bias-free about a volunteered career gap |
+| `frontline_sales_candidate` | Unconscious Bias | explains targets/incentives concretely, verifies claims with numbers, stays bias-free about age/re-entry |
 
-Seven archetypes: **2 select, 2 reject, 3 borderline** — though the verdict is
-now only persona metadata. What the catalog is balanced on instead is rubric
-coverage: a test asserts every one of the five criteria is stressed at level ≥3
-by at least one persona, so no competency is untrainable.
+Nine archetypes — though the verdict is now only persona metadata. What the
+catalog is balanced on instead is rubric coverage: a test asserts every one of
+the five criteria is stressed at level ≥3 by at least one persona, so no
+competency is untrainable. The two `frontline_*` entries are Airtel/telecom
+profiles, predating the v2.0 rubric reframe — their `interviewer_challenge`
+text already targeted clarity/structure/bias/communication directly, so they
+needed only `session_beats`/`stresses` added to satisfy `_register`, not a
+rewrite.
 
 The two defaults are no longer "one hire, one no-hire". They are the bias trap
 (the one manager failure that cannot be walked back) and the evasive candidate
@@ -109,10 +116,47 @@ halves: the persona document (for humans and storage) and the compiled
 [`EngineContract`](/concepts/contracts/engine-contract.md) (for the Go runtime),
 plus the scorecard that grades the interviewer afterwards.
 
+## Composing personas from presets — `trait_dimensions.py`
+
+Two composers, both additive to the fixed catalog above — neither replaces it,
+and neither lets the model choose a value:
+
+* **`compose_archetype(...)`** builds an `Archetype` from five generic presets
+  (`COMPETENCE`, `CONSCIENTIOUSNESS`, `COMMUNICATION`, `EMOTIONAL_STANCE`,
+  `HONESTY`, optionally `BIAS_TRAP`) instead of writing the dataclass by hand,
+  deriving `session_beats` and `stresses` from those same five inputs so it
+  satisfies exactly what `_register` requires — v2.0's non-empty-beats and
+  valid-criteria rules included. `register_dynamic(...)` composes and calls
+  the same `_register` the hand-written catalog uses.
+* **`compose_human_traits(...)`** builds a `HumanTraitProfile` — the BRD §3.2
+  taxonomy layer (affect, verbal style, language & literacy, comprehension,
+  integrity red flags, motivation, negotiation stance, compliance traps,
+  environment, profile). Orthogonal to the archetype and to `stresses`/
+  `session_beats`: this decides how realistically a persona comes across,
+  including compliance-training traps like volunteering protected information.
+  See [VirtualCandidate § human_traits](/concepts/contracts/virtual-candidate.md)
+  and [EngineContract § REALISM & COMPLIANCE LAYER](/concepts/contracts/engine-contract.md).
+
+`dimension_catalog()` serializes every preset table and closed vocabulary for
+a UI to render pickers from — it backs `GET /api/v1/trait-dimensions`
+([REST API](/concepts/contracts/rest-api.md)). The control plane exposes both
+composers as `custom_personas` on the enrollment endpoint: a spec composes into
+a content-addressed archetype key (`dyn-<hash of the spec>`, idempotent on
+resubmission) and a `HumanTraitProfile`, then casts through the normal
+`agent.generate(...)` path. The UI's "Compose" tab
+(`ui/src/PersonaComposer.jsx`, inside `InterviewDetail.jsx`) is the human-facing
+side of this.
+
 ## Testing
 
 Offline: `tests/test_candidate_rubric.py` (279 ln) is the real safety net —
 determinism, clamping, scorecard integrity, prompt byte-stability.
 `tests/test_session.py` covers the session agent against a fake `ChatModel`;
 `tests/test_voice.py` covers voice compilation against a fake broker.
+`tests/test_trait_dimensions.py` covers both composers (valid composition,
+unknown-preset and out-of-vocabulary rejection, the v2.0 `session_beats`/
+`stresses` requirement, the `protected_info_type`-required-when-volunteered
+guard). `tests/test_control_plane_candidates_api.py` covers the
+`custom_personas` enrollment path end-to-end (`TestClient` + fake model +
+throwaway SQLite).
 Live: `tests/test_candidate_agent.py`, six archetypes plus a determinism check.

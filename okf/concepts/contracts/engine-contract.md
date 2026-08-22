@@ -18,8 +18,12 @@ sources:
 ---
 # EngineContract
 
-`ENGINE_CONTRACT_VERSION = "v1.0"`, versioned **separately** from the persona
+`ENGINE_CONTRACT_VERSION = "v1.1"`, versioned **separately** from the persona
 document so the engine can pin a contract version while personas keep evolving.
+Bumped from v1.0 when `_compile_system_prompt` gained an optional
+`human_traits` parameter (see below) — the emitted text changes whenever a
+persona carries one, so the version moved per the rule at the bottom of this
+page.
 
 The Go engine needs exactly two reads: this contract, and the
 [scorecard](/concepts/contracts/virtual-candidate.md) afterwards. It never parses
@@ -88,11 +92,24 @@ exaggerated unless specifically probed; never end the interview.
 
 Compiled deterministically by `_compile_system_prompt` into fixed sections:
 identity/headline → BACKGROUND → HOW YOU TALK → WHO YOU ARE UNDER THE SURFACE →
-WHAT YOU ACTUALLY KNOW → HOW YOU ANSWER → ALWAYS → NEVER → HARD RULES → a closing
-instruction that *a convincing bad candidate is the point*.
+WHAT YOU ACTUALLY KNOW → HOW YOU ANSWER → ALWAYS → NEVER → HARD RULES →
+**REALISM & COMPLIANCE LAYER** (only when the persona carries a
+[`HumanTraitProfile`](/concepts/contracts/virtual-candidate.md), rendered by
+`_realism_section`; empty string, and therefore no section, when absent) → a
+closing instruction that *a convincing bad candidate is the point*.
 
-**Same persona in, byte-identical prompt out.** Do not edit, summarise, or append
-to it at runtime — session framing and audio config go in a separate turn.
+The realism section spells out affect, verbal style, language/accent,
+comprehension quirks, integrity red flags, motivation/negotiation stance, the
+in-character compliance traps to exhibit unprompted (never labelled as traps to
+the persona), the session environment (camera, network, lateness, hard stop),
+and the profile fields — all rendered from code-owned values, same as every
+other section.
+
+**Same persona in, byte-identical prompt out** — true both with and without a
+`human_traits` layer; `_realism_section(None)` returns `""`, so a persona cast
+without one compiles the same bytes it always did. Do not edit, summarise, or
+append to it at runtime — session framing and audio config go in a separate
+turn.
 
 ## Changing this file
 

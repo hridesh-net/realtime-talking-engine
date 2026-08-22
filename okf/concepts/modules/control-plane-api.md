@@ -33,10 +33,24 @@ router = APIRouter(prefix="/api/v1", tags=["interviews"])
 
 Handlers, in order: `create_interview`, `get_interview`, `list_interviews`,
 `generate_expectation`, `get_expectation`, `list_archetypes`,
-`enroll_candidates`, `list_candidates`, `get_candidate`, `get_engine_contract`,
-`get_scorecard`, `delete_candidate`, `start_session`, `take_turn`,
-`end_session`, `get_session`, `voice_capability`, `mint_realtime_credential`,
-`append_transcript_turn`.
+`list_trait_dimensions`, `enroll_candidates`, `list_candidates`, `get_candidate`,
+`get_engine_contract`, `get_scorecard`, `delete_candidate`, `start_session`,
+`take_turn`, `end_session`, `get_session`, `voice_capability`,
+`mint_realtime_credential`, `append_transcript_turn`.
+
+Two module-level helpers back `enroll_candidates`'s `custom_personas` path:
+
+```python
+def _dynamic_archetype_key(spec: CustomPersonaSpec) -> str      # sha256(spec)[:12], "dyn-" prefixed
+def _register_custom_persona(spec) -> tuple[str, HumanTraitProfile | None]
+```
+
+`_register_custom_persona` composes a spec via
+`trait_dimensions.compose_archetype`/`register_dynamic` and
+`compose_human_traits`, catching `UnknownPresetError` and `ValueError`
+(pydantic's `ValidationError` is a `ValueError` subclass) and re-raising as
+`HTTPException(422)` — a malformed custom persona never reaches
+`agent.generate`, and therefore never costs a model call.
 
 ## Dependency injection
 
@@ -53,22 +67,24 @@ Override these four providers in tests rather than patching modules — `tests/t
 ## `enroll_candidates` — the one with logic
 
 ```python
-keys = req.archetypes or archetype_catalog.default_keys()
+keys = archetype_catalog.default_keys() if (req.archetypes is None and not req.custom_personas) else (req.archetypes or [])
 unknown = [k for k in keys if k not in archetype_catalog.ARCHETYPES]   # -> 422
+casts = [(k, None) for k in keys] + [_register_custom_persona(s) for s in req.custom_personas or []]
 expectation = repo.get_expectation(interview_id)                       # optional
 taken = [c.name for c in repo.list_candidates(interview_id)]
-for key in keys:
+for key, human_traits in casts:
     existing = repo.get_candidate_by_archetype(interview_id, key)
     if existing and not req.regenerate:
         results.append(existing); continue
-    candidate = await agent.generate(..., avoid_names=taken)
+    candidate = await agent.generate(..., avoid_names=taken, human_traits=human_traits)
     repo.save_candidate(candidate, model_used=agent.model)
     taken.append(candidate.name)
 ```
 
-Three decisions worth knowing:
+Four decisions worth knowing:
 
-* **Skip-unless-regenerate** — an already-enrolled archetype is returned untouched, so the endpoint is safe to re-POST.
+* **Defaults only apply when both `archetypes` and `custom_personas` are omitted** — a body with only `custom_personas` does not also enroll the two defaults.
+* **Skip-unless-regenerate** — an already-enrolled archetype (or previously-cast custom-persona key) is returned untouched, so the endpoint is safe to re-POST.
 * **`avoid_names` accumulates within the loop** — independent casts converge on the same names, and a training set of identical names is confusing.
 * **The expectation is optional** — fetched if present to ground personas in the flags the interviewer is watching for, but enrollment must not require it. `interview_type` falls back to `"mixed"`.
 

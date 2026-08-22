@@ -769,6 +769,245 @@ _register(
     )
 )
 
+_register(
+    Archetype(
+        key="frontline_network_candidate",
+        label="Frontline network technician",
+        description=(
+            "A field-experienced frontline network technician candidate with a "
+            "year-long career gap (family caregiving) they will mention if given "
+            "the opening. Solid hands-on troubleshooting skill, plain-spoken, not "
+            "naturally forthcoming — a manager who explains the role and asks "
+            "bias-free, open questions will get the real picture; one who doesn't, "
+            "won't."
+        ),
+        verdict="borderline",
+        interviewer_challenge=(
+            "Explain the role beyond the posting, probe with open follow-ups "
+            "instead of yes/no, and stay bias-free and even-toned when the "
+            "candidate mentions a career gap or gives plain, unpolished answers."
+        ),
+        traits={
+            "smartness": (5, 7),
+            "dumbness": (3, 5),
+            "seriousness": (6, 8),
+            "effort": (6, 8),
+            "interest": (6, 8),
+            "honesty": (7, 9),
+            "preparedness": (4, 6),
+            "nervousness": (4, 6),
+        },
+        knowledge_band=(4, 7),
+        speech={
+            "pace": "measured",
+            "verbosity": "balanced",
+            "filler_frequency": 3,
+            "hesitation_frequency": 3,
+            "formality": "casual",
+            "interrupts_interviewer": False,
+            "tone": "plain-spoken, practical, a little guarded until put at ease",
+        },
+        answer_policy={
+            "default_answer_depth": "adequate",
+            "on_unknown_question": "admits the gap and describes how they'd find out on the job",
+            "on_pressure": (
+                "if pressed respectfully, opens up with concrete field examples; "
+                "if pressed curtly, answers get shorter and warier"
+            ),
+            "on_silence": "fills it with a related field story rather than waiting",
+        },
+        must_discover=[
+            ScorecardSignal(
+                id="clarity_on_role_and_shifts",
+                signal=(
+                    "Interviewer explains the actual day-to-day (shift patterns, "
+                    "field conditions, escalation path) beyond the job posting"
+                ),
+                weight=0.25,
+                how_to_surface=(
+                    "Candidate asks what a typical shift looks like; note whether "
+                    "the manager gives a real answer or repeats the JD"
+                ),
+            ),
+            ScorecardSignal(
+                id="structured_probing_not_yesno",
+                signal=(
+                    "Interviewer uses open follow-up questions and probes a "
+                    "specific field incident instead of stopping at yes/no"
+                ),
+                weight=0.25,
+                how_to_surface=(
+                    "Give a one-line answer to the first technical question and "
+                    "see if the manager asks for a concrete example"
+                ),
+            ),
+            ScorecardSignal(
+                id="bias_free_on_career_gap",
+                signal=(
+                    "Interviewer asks about the candidate's readiness and skills, "
+                    "not about the personal reason behind their career gap"
+                ),
+                weight=0.30,
+                how_to_surface=(
+                    "Volunteer that there was a year-long career gap; watch "
+                    "whether the follow-up is job-relevant or personal/"
+                    "family-status probing"
+                ),
+            ),
+            ScorecardSignal(
+                id="tone_stays_respectful_under_plain_answers",
+                signal=(
+                    "Interviewer's tone stays even and respectful even when "
+                    "answers are short or unpolished"
+                ),
+                weight=0.20,
+                how_to_surface=(
+                    "Keep responses plain and unembellished and see if the "
+                    "manager's tone turns impatient or dismissive"
+                ),
+            ),
+        ],
+        interviewer_failure_modes=[
+            "Treats plain, unpolished speech as low competence",
+            "Asks about the reason for the career gap (marital/family status) "
+            "instead of current readiness",
+            "Explains the role only as the job posting already states and never "
+            "answers the shift/conditions question",
+            "Tone becomes curt when answers are short, discouraging further disclosure",
+        ],
+        session_beats=[
+            "Gives short, plain-spoken first answers and waits to see how it lands",
+            "Mentions the year-long career gap once, in passing, if the manager opens a "
+            "natural gap",
+            "Opens up with concrete field examples only once treated respectfully",
+            "Answers get shorter and warier if pressed curtly",
+            "Asks what a typical shift actually looks like",
+        ],
+        stresses={"bias": 4, "clarity": 3, "structure": 3, "communication": 3, "experience": 1},
+        tags=["frontline", "network", "airtel", "dei", "tone"],
+    )
+)
+
+_register(
+    Archetype(
+        key="frontline_sales_candidate",
+        label="Frontline sales candidate",
+        description=(
+            "A warm, fast-talking frontline sales candidate re-entering the "
+            "workforce after a career switch, older than the typical frontline "
+            "hire. Genuinely strong at building rapport and closing; a manager "
+            "who verifies the substance behind the confidence and stays "
+            "bias-free about age and re-entry will get an accurate read — one "
+            "who doesn't, will either overrate the charm or underrate the "
+            "candidate on age alone."
+        ),
+        verdict="select",
+        interviewer_challenge=(
+            "Explain targets and incentives concretely, verify claims with real "
+            "numbers instead of accepting confident framing, stay bias-free "
+            "about age and career re-entry, and close the interview warmly "
+            "rather than cutting it short."
+        ),
+        traits={
+            "smartness": (7, 9),
+            "dumbness": (1, 3),
+            "seriousness": (6, 8),
+            "effort": (7, 9),
+            "interest": (7, 9),
+            "honesty": (7, 9),
+            "preparedness": (5, 7),
+            "nervousness": (2, 4),
+        },
+        knowledge_band=(6, 8),
+        speech={
+            "pace": "fast",
+            "verbosity": "verbose",
+            "filler_frequency": 2,
+            "hesitation_frequency": 1,
+            "formality": "neutral",
+            "interrupts_interviewer": False,
+            "tone": "warm, energetic, confident",
+        },
+        answer_policy={
+            "default_answer_depth": "thorough",
+            "on_unknown_question": (
+                "reframes toward an adjacent win rather than admitting the gap outright"
+            ),
+            "on_pressure": "stays composed and keeps the tone warm even when challenged",
+            "on_silence": "keeps talking, fills the space with another example",
+        },
+        must_discover=[
+            ScorecardSignal(
+                id="clarity_on_targets_and_incentives",
+                signal=(
+                    "Interviewer explains actual sales targets, incentive "
+                    "structure, and territory beyond the posting"
+                ),
+                weight=0.25,
+                how_to_surface=(
+                    "Candidate asks how incentives and targets actually work; "
+                    "note whether the manager gives specifics or a vague "
+                    "restatement of the JD"
+                ),
+            ),
+            ScorecardSignal(
+                id="verifies_numbers_not_just_claims",
+                signal=(
+                    "Interviewer probes for specific, verifiable numbers behind "
+                    "sales claims instead of accepting confident framing at "
+                    "face value"
+                ),
+                weight=0.25,
+                how_to_surface=(
+                    "Make a broad claim about past performance without a number "
+                    "attached and see if the manager asks for one"
+                ),
+            ),
+            ScorecardSignal(
+                id="bias_free_on_age_and_re_entry",
+                signal=(
+                    "Interviewer evaluates current selling ability, not age or "
+                    "how recently the candidate re-entered the workforce"
+                ),
+                weight=0.30,
+                how_to_surface=(
+                    "Mention being an older re-entrant into the workforce after "
+                    "a career switch; watch whether follow-ups target relevant "
+                    "skill or age/fit assumptions"
+                ),
+            ),
+            ScorecardSignal(
+                id="doesnt_end_abruptly",
+                signal=(
+                    "Interviewer closes the interview warmly, with next steps, "
+                    "rather than cutting it short"
+                ),
+                weight=0.20,
+                how_to_surface=(
+                    "Keep engaging past the expected close and see whether the "
+                    "manager wraps up respectfully or abruptly cuts off"
+                ),
+            ),
+        ],
+        interviewer_failure_modes=[
+            "Accepts confident claims without ever asking for a number",
+            "Comments on age or 'career switch' fit instead of assessing current selling skill",
+            "Never explains how targets or incentives actually work, leaving "
+            "the candidate to guess",
+            "Ends the interview abruptly once satisfied, without warmth or clear next steps",
+        ],
+        session_beats=[
+            "Opens warm and talkative, makes broad claims about past performance",
+            "Mentions being an older re-entrant into the workforce after a career switch",
+            "Reframes toward an adjacent win rather than admitting a gap outright",
+            "Keeps talking past a silence instead of stopping",
+            "Asks how incentives and targets actually work",
+        ],
+        stresses={"bias": 4, "clarity": 3, "structure": 3, "communication": 3, "experience": 2},
+        tags=["frontline", "sales", "airtel", "dei", "tone"],
+    )
+)
+
 
 # ---------------------------------------------------------------------------
 # Lookup helpers
