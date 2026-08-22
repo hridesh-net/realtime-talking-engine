@@ -42,12 +42,21 @@ Generate Go structs from the schema, or hand-write them to match it.
 **`contract_version`** — pin it. Reject a contract whose major version the
 engine does not implement rather than running a persona you cannot honour.
 
-**Now `v1.1`** (2026-08-22). The minor bump adds a language line at the top of
-`system_prompt`'s `HOW YOU TALK` section and a `language` key to
-`voice_directives`. The engine needs no change — it parses by major version and
-retains the minor, which `contract_test.go` already covers — but a v1.1 persona
-may speak Hinglish or Hindi, so anything the engine does with the transcript
-must not assume English.
+**Now `v1.2`** (2026-08-24). Two minor bumps landed on separate branches and
+each called itself `v1.1`; the merge is a third shape, so it takes its own
+number rather than leaving two different prompts sharing one version string.
+
+* `v1.1` added a language line at the top of `system_prompt`'s `HOW YOU TALK`
+  section and a `language` key to `voice_directives`. A persona may speak
+  Hinglish or Hindi, so anything the engine does with the transcript must not
+  assume English.
+* `v1.2` adds an optional realism layer to `system_prompt` for personas carrying
+  a `human_traits` profile, and — for **every** persona, with or without one —
+  moves `HARD RULES` to the end of the prompt. If the engine matches on prompt
+  section order anywhere, that is the change to look at.
+
+The engine needs no change for either: it parses by major version and retains
+the minor, which `contract_test.go` already covers.
 
 **`system_prompt`** — inject verbatim as the realtime model's system
 instruction. It is compiled deterministically in Python from the persona

@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from candidate_agent import engine_contract as ec
 from candidate_agent.schema import (
     AnswerPolicy,
     AptitudeProfile,
@@ -359,6 +360,218 @@ def test_sessions_are_listed_for_their_interview(client, repo):
     assert row["status"] == "live"
     assert row["turn_count"] == 3  # opener + manager + reply
     assert "turns" not in row  # the summary must not carry the evidence
+
+
+def _seed_custom_persona(repo: InterviewRepository) -> tuple[str, str]:
+    """Compose, register, and store a dynamic persona.
+
+    Same shape a real `custom_personas` enrollment produces, but with no
+    model call, so this stays a pure offline test.
+    """
+    from candidate_agent import archetypes as archetype_catalog
+    from candidate_agent import trait_dimensions as td
+    from candidate_agent.engine_contract import build_engine_contract
+
+    interview = repo.create(
+        InterviewCreateRequest(
+            job_title="Field Sales Executive",
+            jd="Sell prepaid activations through channel partners.",
+            skills_required=["territory management"],
+            job_location_type="onsite",
+            experience_level="mid",
+            company_type="mnc",
+        )
+    )
+
+    key = "dyn-test-session-key"
+    td.compose_archetype(
+        key=key,
+        label="Custom session-test persona",
+        verdict="borderline",
+        competence="developing",
+        conscientiousness="adequate",
+        communication="guarded",
+        emotional_stance="defensive",
+        honesty="embellishing",
+        bias_trap="career_gap",
+    )
+    # Composing does not register: the session has to work off the stored
+    # candidate alone, which is the whole point of the lookup order in
+    # `start_session`.
+    assert key not in archetype_catalog.ARCHETYPES
+    human_traits = td.compose_human_traits(
+        affect="defensive",
+        verbal_style="monosyllabic",
+        language="hinglish_code_switcher",
+        comprehension="frequent_clarifier",
+        motivation="family_pressured",
+        negotiation_stance="refuses_to_disclose_ctc",
+        environment="spotty_home_network",
+        seniority="junior",
+        function="network",
+        region="UP",
+        gender_presentation="woman",
+        age_band="25-34",
+        notice_period="30_days",
+        compliance_traps=["volunteers_protected_info"],
+        protected_info_type="marital_status",
+    )
+    engine_contract = build_engine_contract(
+        candidate_id="cand-custom-1",
+        interview_id=interview.id,
+        name="Kavita Patel",
+        headline="Field sales, 2 years",
+        background="Two years selling prepaid activations.",
+        years_experience=2,
+        speech=SpeechProfile(
+            pace="measured",
+            verbosity="terse",
+            filler_frequency=3,
+            hesitation_frequency=3,
+            formality="casual",
+            interrupts_interviewer=False,
+            tone="guarded",
+        ),
+        aptitude=AptitudeProfile(
+            smartness=5,
+            dumbness=4,
+            smartness_ratio=0.56,
+            seriousness=6,
+            effort=6,
+            interest=6,
+            honesty=5,
+            preparedness=5,
+            nervousness=5,
+        ),
+        knowledge_map=[
+            SkillKnowledge(
+                skill="territory management",
+                level=4,
+                stance="shallow",
+                breaking_point="asked to model a quarter of coverage",
+            )
+        ],
+        policy=AnswerPolicy(
+            default_answer_depth="adequate",
+            reveals_depth_when="asked for a specific example",
+            on_unknown_question="admits the gap",
+            on_pressure="gets clipped and guarded",
+            on_silence="waits",
+        ),
+        opening_line="Hi.",
+        human_traits=human_traits,
+    )
+    candidate = VirtualCandidate(
+        candidate_id="cand-custom-1",
+        interview_id=interview.id,
+        archetype=key,
+        archetype_label="Custom session-test persona",
+        catalog_version=archetype_catalog.CATALOG_VERSION,
+        name="Kavita Patel",
+        headline="Field sales, 2 years",
+        background="Two years selling prepaid activations.",
+        years_experience=2,
+        verdict="borderline",
+        verdict_rationale="Developing, embellishes under pressure.",
+        speech_profile=SpeechProfile(
+            pace="measured",
+            verbosity="terse",
+            filler_frequency=3,
+            hesitation_frequency=3,
+            formality="casual",
+            interrupts_interviewer=False,
+            tone="guarded",
+        ),
+        aptitude=AptitudeProfile(
+            smartness=5,
+            dumbness=4,
+            smartness_ratio=0.56,
+            seriousness=6,
+            effort=6,
+            interest=6,
+            honesty=5,
+            preparedness=5,
+            nervousness=5,
+        ),
+        knowledge_map=[
+            SkillKnowledge(
+                skill="territory management",
+                level=4,
+                stance="shallow",
+                breaking_point="asked to model a quarter of coverage",
+            )
+        ],
+        answer_policy=AnswerPolicy(
+            default_answer_depth="adequate",
+            reveals_depth_when="asked for a specific example",
+            on_unknown_question="admits the gap",
+            on_pressure="gets clipped and guarded",
+            on_silence="waits",
+        ),
+        interviewer_scorecard=InterviewerScorecard(
+            expected_verdict="borderline",
+            interviewer_challenge="stay bias-free about the career gap",
+            must_discover=[
+                ScorecardItem(
+                    id="only",
+                    signal="bias-free handling of the volunteered career gap",
+                    weight=1.0,
+                    how_to_surface="watch the follow-up after the gap is mentioned",
+                )
+            ],
+            interviewer_failure_modes=["asks about marital status instead of readiness"],
+            pass_condition="surfaces the bias-free signal",
+        ),
+        engine_contract=engine_contract,
+        human_traits=human_traits,
+        fingerprint="f" * 8,
+        seed_fingerprint="s" * 8,
+        seed="seed",
+    )
+    repo.save_candidate(candidate, model_used="offline-fixture")
+    return interview.id, key
+
+
+def test_session_round_trip_with_a_custom_composed_persona(client, repo):
+    """Confirm the wizard/Compose-tab custom-persona path works end to end.
+
+    compose (trait_dimensions) -> register -> stored VirtualCandidate with
+    human_traits -> start a session -> take a turn. Confirms the REALISM &
+    COMPLIANCE LAYER reaches the live chat model's system prompt, not just
+    the stored persona document.
+    """
+    interview_id, key = _seed_custom_persona(repo)
+
+    # The client fixture's own override builds a fresh FakeChatModel per
+    # call, so re-invoking it here would inspect an instance that was never
+    # actually used. Override with one captured instance instead.
+    captured = FakeChatModel("Umm — I ran the north zone for about two years.")
+    client.app.dependency_overrides[api_module.get_session_agent] = lambda: CandidateSessionAgent(
+        captured
+    )
+
+    created = client.post(
+        "/api/v1/sessions",
+        json={"interview_id": interview_id, "archetype": key, "planned_minutes": 20},
+    )
+    assert created.status_code == 201, created.text
+    session_id = created.json()["id"]
+
+    turn = client.post(
+        f"/api/v1/sessions/{session_id}/turns",
+        json={"text": "Tell me about a gap I noticed in your resume."},
+    )
+    assert turn.status_code == 201, turn.text
+    assert turn.json()["speaker"] == "candidate"
+
+    assert captured.system is not None
+    assert "HOW YOU COME ACROSS" in captured.system
+    assert (
+        ec.COMPLIANCE_TRAP_DIRECTIVES["volunteers_protected_info"].format(
+            protected_info_type="marital_status"
+        )
+        in captured.system
+    )
 
 
 def test_unknown_interview_and_archetype_are_rejected(client, repo):

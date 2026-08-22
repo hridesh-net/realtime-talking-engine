@@ -46,6 +46,7 @@ class VirtualCandidate(BaseModel):
     answer_policy: AnswerPolicy
     interviewer_scorecard: InterviewerScorecard
     engine_contract: EngineContract
+    human_traits: HumanTraitProfile | None = None   # realism taxonomy layer, optional
 
     fingerprint: str             # integrity — moves on every re-cast
     seed_fingerprint: str        # reproducibility — stable across re-casts
@@ -106,8 +107,32 @@ Everything else is computed. See [the determinism split](/concepts/determinism.m
 * Scorecard items iterate the archetype, so invented ids vanish and weights are always the catalog's.
 * Falsy model output falls back to archetype text rather than empty strings.
 
+## `HumanTraitProfile` — the realism taxonomy layer (`PERSONA_VERSION` "v1.1")
+
+Optional, `None` on every persona cast before this layer existed. Orthogonal
+to everything above: the archetype decides whether the candidate can do the
+job; this decides how realistically, and how dangerously for an unprepared
+interviewer. Entirely code-derived — composed by
+`trait_dimensions.compose_human_traits(...)` from fixed presets, never
+authored or seen by the model. Ten dimensions, matching the taxonomy exactly:
+
+* `affect`, `verbal_style` — closed vocabularies validated by a `pattern=` on the field itself (e.g. affect: hostile/defensive/anxious/apathetic/over_eager/arrogant/cooperative/flirtatious_inappropriate/grieving_distressed).
+* `fluency`, `literacy_level`, `native_speaker`, `accent_strength`, `code_switch_probability`, `vocabulary_ceiling` — language & literacy.
+* `clarification_rate`, `misinterprets_question_rate`, `needs_rephrasing` — comprehension.
+* `integrity_red_flags` — subset of resume_inflation/concealed_termination/ghost_employer/dual_employment/proxy_candidate/ai_assisted_answers, each validated against that vocabulary (a plain `list[str]` would silently accept typos — caught by `tests/test_trait_dimensions.py` and fixed with `Annotated[str, StringConstraints(pattern=...)]` list items).
+* `motivation`, `negotiation_stance` — closed vocabularies.
+* `compliance_traps` — subset of volunteers_protected_info/requests_off_policy_favour/asks_illegal_question_back, same list-item validation. `protected_info_type` (pregnancy/age/religion/caste/disability/marital_status) is **required** when `volunteers_protected_info` is present — `compose_human_traits` raises `ValueError` otherwise, because the compliance line silently drops from the compiled prompt without it.
+* `environment: EnvironmentProfile` — camera_behavior, network_drops_at_minute, background_noise, joins_late_minutes, mobile_or_driving, hard_stop_minute.
+* `seniority`, `function`, `region`, `gender_presentation`, `age_band`, `notice_period`, `offers_in_hand` — profile/identity fields, free text except `offers_in_hand` (int).
+
+When present, it renders as the realism layer inside
+the compiled system prompt — see
+[EngineContract](/concepts/contracts/engine-contract.md). When absent, the
+compiled prompt is byte-identical to a persona cast before this field existed.
+
 ## Related
 
 [agent.py](/concepts/modules/candidate-agent-agent.md) ·
 [archetypes.py](/concepts/modules/candidate-agent-archetypes.md) ·
+[Candidate agent § composing personas from presets](/concepts/subsystems/candidate-agent.md) ·
 `owner_handover/candidate_output_schema.json`

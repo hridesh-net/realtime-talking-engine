@@ -28,6 +28,8 @@ export const getExpectation = (id) => request(`/interviews/${id}/expectation`)
 
 export const listArchetypes = () => request('/candidate-archetypes')
 
+export const listTraitDimensions = () => request('/trait-dimensions')
+
 // Drafts the role-fact checklist from a JD. Nothing is stored — the operator
 // edits the drafts before the interview is created.
 export const draftRoleFacts = (body) =>

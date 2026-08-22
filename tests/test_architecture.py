@@ -462,3 +462,109 @@ def test_layering_uses_absolute_imports(pkg: str, path: Path) -> None:
         n.module or "." for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.level
     ]
     assert not relative, f"{path.relative_to(ROOT)} uses relative imports: {relative}"
+
+
+# ---------------------------------------------------------------------------
+# The realism taxonomy has exactly one source of truth
+# ---------------------------------------------------------------------------
+
+
+def _pattern_alternatives(model: type, field: str) -> set[str]:
+    """The literal values a `^(a|b|c)$` pattern on one field accepts."""
+    prop = model.model_json_schema()["properties"][field]
+    pattern = prop.get("pattern") or prop["items"]["pattern"]
+    return set(pattern.removeprefix("^(").removesuffix(")$").split("|"))
+
+
+@pytest.mark.parametrize(
+    ("field", "table_name"),
+    [
+        ("affect", "AFFECT_DIRECTIVES"),
+        ("verbal_style", "VERBAL_STYLE_DIRECTIVES"),
+        ("motivation", "MOTIVATION_DIRECTIVES"),
+        ("negotiation_stance", "NEGOTIATION_DIRECTIVES"),
+        ("compliance_traps", "COMPLIANCE_TRAP_DIRECTIVES"),
+        ("integrity_red_flags", "INTEGRITY_DIRECTIVES"),
+        ("vocabulary_ceiling", "VOCABULARY_CEILING_DIRECTIVES"),
+        ("clarification_rate", "CLARIFICATION_DIRECTIVES"),
+        ("misinterprets_question_rate", "MISINTERPRETATION_DIRECTIVES"),
+    ],
+)
+def test_every_taxonomy_value_has_a_behavioural_directive(field: str, table_name: str) -> None:
+    """A value the schema accepts but no table describes compiles to nothing.
+
+    `schema.py` cannot import `engine_contract` — that module imports it — so
+    the vocabularies are declared twice: once as a pattern, once as the keys of
+    the directive table that says what the value *does*. This is the test the
+    duplication is only acceptable because of.
+    """
+    from candidate_agent import engine_contract
+    from candidate_agent.schema import HumanTraitProfile
+
+    assert _pattern_alternatives(HumanTraitProfile, field) == set(
+        getattr(engine_contract, table_name)
+    )
+
+
+def test_camera_behaviour_values_all_have_a_directive() -> None:
+    """Camera behaviour is indexed directly by the prompt compiler.
+
+    A value the schema accepts but the table lacks is a KeyError at
+    prompt-compile time, not a quiet omission.
+    """
+    from candidate_agent.engine_contract import CAMERA_DIRECTIVES
+    from candidate_agent.schema import EnvironmentProfile
+
+    assert _pattern_alternatives(EnvironmentProfile, "camera_behavior") == set(CAMERA_DIRECTIVES)
+
+
+def test_no_raw_taxonomy_token_can_reach_a_compiled_prompt() -> None:
+    """Every directive is prose, not the token it is keyed by.
+
+    A table entry that just restated its own key would satisfy the drift test
+    above while leaving the model exactly as under-instructed as before.
+    """
+    from candidate_agent import engine_contract
+
+    for table_name in (
+        "AFFECT_DIRECTIVES",
+        "VERBAL_STYLE_DIRECTIVES",
+        "MOTIVATION_DIRECTIVES",
+        "NEGOTIATION_DIRECTIVES",
+        "COMPLIANCE_TRAP_DIRECTIVES",
+        "INTEGRITY_DIRECTIVES",
+    ):
+        for key, directive in getattr(engine_contract, table_name).items():
+            assert key not in directive, f"{table_name}[{key!r}] emits its own token"
+            assert len(directive.split()) >= 10, f"{table_name}[{key!r}] is not an instruction"
+
+
+def test_composed_archetypes_are_never_added_to_the_catalog() -> None:
+    """`trait_dimensions` must not mutate the process-wide registry.
+
+    A composed persona is scoped to one interview. Registering it would leak it
+    into every other interview's picker and strand it on the next restart, since
+    the registry is memory and the candidate row is not.
+    """
+    source = (ROOT / "candidate_agent" / "trait_dimensions.py").read_text()
+    assert "ARCHETYPES[" not in source
+    assert "_register" not in source
+
+
+def test_every_test_file_is_wired_into_the_gate() -> None:
+    """`scripts/check.sh` names each suite, so a new file is silently skipped.
+
+    Five test files have already been added to this repo without being added to
+    the gate — 819 lines in one branch, 571 in another, none of it ever run by
+    the command CLAUDE.md calls the standard. Enumerating suites buys per-area
+    PASS/FAIL, which is worth keeping; this is the check that makes the
+    enumeration safe.
+    """
+    check = (ROOT / "scripts" / "check.sh").read_text()
+    missing = sorted(
+        path.name for path in (ROOT / "tests").glob("test_*.py") if path.name not in check
+    )
+    assert not missing, (
+        f"not run by scripts/check.sh: {missing}. Add a `run` line for each — "
+        "under the --live block if it calls a model."
+    )

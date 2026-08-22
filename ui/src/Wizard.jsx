@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { draftRoleFacts } from './api'
+import PersonaComposer, { personaSpecError } from './PersonaComposer'
 import PersonaPicker from './PersonaPicker'
 
 /**
@@ -129,6 +130,7 @@ export default function Wizard({
   busy,
   onCancel,
   onSubmit,
+  onSubmitCustom,
 }) {
   const [step, setStep] = useState(1)
   const [form, setForm] = useState(EMPTY)
@@ -138,6 +140,8 @@ export default function Wizard({
   const [drafting, setDrafting] = useState(false)
   const [draftError, setDraftError] = useState(null)
   const [persona, setPersona] = useState(archetypes[0]?.key)
+  const [pickMode, setPickMode] = useState('catalog')
+  const [customSpec, setCustomSpec] = useState(null)
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   const pick = (k) => (v) => setForm({ ...form, [k]: v })
@@ -419,39 +423,98 @@ export default function Wizard({
               </span>
             </div>
 
-            <PersonaPicker
-              archetypes={archetypes}
-              criteria={criteria}
-              stressLabels={stressLabels}
-              selected={persona}
-              onSelect={setPersona}
-              actions={(p) => (
-                <>
-                  <button
-                    className="btn"
-                    disabled={Boolean(busy)}
-                    onClick={() => onSubmit(payload(), p.key, 'open')}
-                  >
-                    {busy === 'open' ? 'Creating…' : 'Create interview'}
-                  </button>
-                  <button
-                    className="btn"
-                    disabled={Boolean(busy)}
-                    onClick={() => onSubmit(payload(), p.key, 'text')}
-                  >
-                    {busy === 'text' ? 'Casting…' : 'Create & chat'}
-                  </button>
-                  <button
-                    className="btn primary"
-                    disabled={Boolean(busy) || !voiceCap?.available}
-                    title={voiceCap?.available ? 'Spoken interview' : voiceCap?.detail}
-                    onClick={() => onSubmit(payload(), p.key, 'voice')}
-                  >
-                    {busy === 'voice' ? 'Casting…' : '🎙 Create & talk'}
-                  </button>
-                </>
-              )}
-            />
+            <div className="seg radio" style={{ marginBottom: 16 }}>
+              <span
+                className={`chip ${pickMode === 'catalog' ? 'on' : ''}`}
+                onClick={() => setPickMode('catalog')}
+              >
+                Pick from catalog
+              </span>
+              <span
+                className={`chip ${pickMode === 'custom' ? 'on' : ''}`}
+                onClick={() => setPickMode('custom')}
+              >
+                Compose custom
+              </span>
+            </div>
+
+            {pickMode === 'catalog' && (
+              <PersonaPicker
+                archetypes={archetypes}
+                criteria={criteria}
+                stressLabels={stressLabels}
+                selected={persona}
+                onSelect={setPersona}
+                actions={(p) => (
+                  <>
+                    <button
+                      className="btn"
+                      disabled={Boolean(busy)}
+                      onClick={() => onSubmit(payload(), p.key, 'open')}
+                    >
+                      {busy === 'open' ? 'Creating…' : 'Create interview'}
+                    </button>
+                    <button
+                      className="btn"
+                      disabled={Boolean(busy)}
+                      onClick={() => onSubmit(payload(), p.key, 'text')}
+                    >
+                      {busy === 'text' ? 'Casting…' : 'Create & chat'}
+                    </button>
+                    <button
+                      className="btn primary"
+                      disabled={Boolean(busy) || !voiceCap?.available}
+                      title={voiceCap?.available ? 'Spoken interview' : voiceCap?.detail}
+                      onClick={() => onSubmit(payload(), p.key, 'voice')}
+                    >
+                      {busy === 'voice' ? 'Casting…' : '🎙 Create & talk'}
+                    </button>
+                  </>
+                )}
+              />
+            )}
+
+            {pickMode === 'custom' && (
+              <>
+                <PersonaComposer singleMode busy={busy} onChange={setCustomSpec} />
+                {(() => {
+                  const specError = customSpec ? personaSpecError(customSpec) : 'Loading…'
+                  return (
+                    <>
+                      <div className="actions" style={{ marginTop: 16 }}>
+                        <button
+                          className="btn"
+                          disabled={Boolean(busy) || Boolean(specError)}
+                          onClick={() => onSubmitCustom(payload(), customSpec, 'open')}
+                        >
+                          {busy === 'open' ? 'Creating…' : 'Create interview'}
+                        </button>
+                        <button
+                          className="btn"
+                          disabled={Boolean(busy) || Boolean(specError)}
+                          onClick={() => onSubmitCustom(payload(), customSpec, 'text')}
+                        >
+                          {busy === 'text' ? 'Casting…' : 'Create & chat'}
+                        </button>
+                        <button
+                          className="btn primary"
+                          disabled={Boolean(busy) || Boolean(specError) || !voiceCap?.available}
+                          title={voiceCap?.available ? 'Spoken interview' : voiceCap?.detail}
+                          onClick={() => onSubmitCustom(payload(), customSpec, 'voice')}
+                        >
+                          {busy === 'voice' ? 'Casting…' : '🎙 Create & talk'}
+                        </button>
+                      </div>
+                      {specError && (
+                        <div className="help" style={{ marginTop: 8 }}>
+                          {specError}
+                        </div>
+                      )}
+                    </>
+                  )
+                })()}
+              </>
+            )}
 
             <div className="field" style={{ marginTop: 18 }}>
               <label>

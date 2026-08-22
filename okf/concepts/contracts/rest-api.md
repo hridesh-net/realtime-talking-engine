@@ -51,7 +51,8 @@ when a candidate is assigned, so `resume_probing.required` is currently always
 |---|---|---|---|---|
 | `POST` | `/api/v1/role-facts` | — | 200 / **502** | `{job_title, jd, location}` → `list[ClarityFact]`. **Calls the model.** Stores nothing. |
 | `GET` | `/api/v1/candidate-archetypes` | — | 200 | `{catalog_version, defaults, rubric_criteria[], stress_labels[], archetypes[]}`. Pure data, no I/O. |
-| `POST` | `/api/v1/interviews/{id}/candidates` | `EnrollmentStore` | **201** / 404 / 422 | **Calls the model, once per archetype.** Body optional. |
+| `GET` | `/api/v1/trait-dimensions` | — | 200 | `trait_dimensions.dimension_catalog()` — every preset/vocabulary a `custom_persona` value can come from. Pure data, no I/O. |
+| `POST` | `/api/v1/interviews/{id}/candidates` | `EnrollmentStore` | **201** / 404 / 422 | **Calls the model, once per archetype or custom persona.** Body optional. |
 | `GET` | `/api/v1/interviews/{id}/candidates` | `CandidateStore` | 200 | |
 | `GET` | `/api/v1/candidates/{cid}` | `CandidateStore` | 200 / 404 | Full [persona](/concepts/contracts/virtual-candidate.md). |
 | `GET` | `/api/v1/candidates/{cid}/engine-contract` | `CandidateStore` | 200 / 404 | [Runtime slice](/concepts/contracts/engine-contract.md). |
@@ -62,19 +63,37 @@ when a candidate is assigned, so `resume_probing.required` is currently always
 
 ```json
 {"archetypes": ["cooperative_trap", "rambler"],
+ "custom_personas": [{
+   "label": "Custom guarded network tech", "verdict": "borderline",
+   "competence": "developing", "conscientiousness": "adequate",
+   "communication": "guarded", "emotional_stance": "defensive", "honesty": "embellishing",
+   "bias_trap": "regional_or_accent",
+   "affect": "defensive", "verbal_style": "monosyllabic",
+   "language": "hinglish_code_switcher", "comprehension": "frequent_clarifier",
+   "motivation": "family_pressured", "negotiation_stance": "refuses_to_disclose_ctc",
+   "environment": "spotty_home_network",
+   "seniority": "junior", "function": "network", "region": "UP",
+   "gender_presentation": "woman", "age_band": "25-34", "notice_period": "30_days",
+   "compliance_traps": ["volunteers_protected_info"], "protected_info_type": "marital_status"
+ }],
  "regenerate": false,
  "seed_prefix": null}
 ```
 
-All fields optional. Omitting `archetypes` enrolls the two defaults
-(`cooperative_trap`, `evasive`). Unknown keys → **422** listing them.
+All fields optional. Omitting both `archetypes` and `custom_personas` enrolls
+the two defaults (`cooperative_trap`, `evasive`); the two lists can be mixed in
+one call. Unknown archetype keys or unknown/out-of-vocabulary `custom_personas`
+values → **422** (see [`HumanTraitProfile`](/concepts/contracts/virtual-candidate.md),
+the taxonomy layer `CustomPersonaSpec` composes into — its fields mirror
+`GET /api/v1/trait-dimensions`).
 
 Behavior worth knowing:
 
-* An archetype already enrolled is **returned as-is** unless `regenerate: true`.
+* An archetype already enrolled is **returned as-is** unless `regenerate: true`. A `custom_persona` spec is composed into a content-addressed archetype key (`dyn-<hash of the spec>`) first, so re-submitting an identical spec is likewise idempotent.
 * The interview's expectation is fetched and passed to the agent when present — it grounds personas in the flags the interviewer is watching for. **Optional by design**: enrollment must not require an expectation.
 * Names already used in the interview are passed as `avoid_names`, because independent casts converge on the same names and a training set full of "Alex Chen" is confusing.
 * Personas are generated **sequentially**, one model call each, and saved as they land. Enrolling six archetypes is six serial calls.
+* A malformed `custom_persona` (unknown preset, out-of-vocabulary value, or `volunteers_protected_info` without `protected_info_type`) is rejected by `_register_custom_persona` **before** any model call — see [control_plane/api.py](/concepts/modules/control-plane-api.md).
 
 ## Sessions
 

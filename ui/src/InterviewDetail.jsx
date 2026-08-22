@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getSession } from './api'
+import PersonaComposer from './PersonaComposer'
 import PersonaPicker from './PersonaPicker'
 
 /**
@@ -38,6 +39,7 @@ export default function InterviewDetail({
   busy,
   onStart,
   onEnroll,
+  onEnrollCustom,
   onDeleteCandidate,
   onBack,
 }) {
@@ -99,6 +101,13 @@ export default function InterviewDetail({
           onClick={() => setTab('personas')}
         >
           <span>🎭</span> Cast <span className="n">{candidates.length}</span>
+        </button>
+        <button
+          type="button"
+          className={`tab ${tab === 'compose' ? 'active' : ''}`}
+          onClick={() => setTab('compose')}
+        >
+          <span>🧬</span> Compose
         </button>
       </div>
 
@@ -341,6 +350,21 @@ export default function InterviewDetail({
           ))}
         </div>
       )}
+
+      {tab === 'compose' && (
+        <div className="card">
+          <div className="sechead">
+            <span className="secnum">🧬</span>
+            <span className="h2">Compose a custom persona</span>
+            <span className="note">
+              Pick a value for each dimension below — any combination is valid. The radar
+              plots this exact persona's selected competence, effort, composure, honesty,
+              comprehension, and fluency.
+            </span>
+          </div>
+          <PersonaComposer busy={busy} onCast={onEnrollCustom} />
+        </div>
+      )}
     </>
   )
 }
@@ -351,6 +375,53 @@ function Trait({ label, value }) {
       <span>{label}</span>
       <b>{value}</b>
     </div>
+  )
+}
+
+function HumanTraits({ traits }) {
+  const env = traits.environment
+  const watch = [
+    ...traits.compliance_traps.map((t) =>
+      t === 'volunteers_protected_info' && traits.protected_info_type
+        ? `${t} (${traits.protected_info_type})`
+        : t,
+    ),
+    ...traits.integrity_red_flags,
+  ]
+  return (
+    <details className="human-traits" open>
+      <summary>Human traits (realism taxonomy)</summary>
+      <div className="row">
+        <span className="pill">{traits.affect}</span> <span className="pill">{traits.verbal_style}</span>{' '}
+        <span className="pill">{traits.motivation}</span> <span className="pill">{traits.negotiation_stance}</span>
+      </div>
+      <div className="row">
+        <b>Language:</b> fluency {traits.fluency}/10, {traits.literacy_level},{' '}
+        {traits.native_speaker ? 'native' : 'non-native'} speaker, accent {traits.accent_strength}, code-switch{' '}
+        {traits.code_switch_probability}, {traits.vocabulary_ceiling} vocabulary
+      </div>
+      <div className="row">
+        <b>Comprehension:</b> clarification rate {traits.clarification_rate}, misinterprets{' '}
+        {traits.misinterprets_question_rate}
+        {traits.needs_rephrasing ? ', often needs rephrasing' : ''}
+      </div>
+      {watch.length > 0 && (
+        <div className="row watch">
+          <b>Watch for:</b> {watch.join(', ')}
+        </div>
+      )}
+      <div className="row">
+        <b>Environment:</b> camera {env.camera_behavior}, {env.background_noise}
+        {env.joins_late_minutes ? `, joins ${env.joins_late_minutes}m late` : ', on time'}
+        {env.network_drops_at_minute ? `, network drops ~min ${env.network_drops_at_minute}` : ''}
+        {env.mobile_or_driving ? ', mobile/driving' : ''}
+        {env.hard_stop_minute ? `, hard stop at min ${env.hard_stop_minute}` : ''}
+      </div>
+      <div className="row">
+        <b>Profile:</b> {traits.seniority} · {traits.function} · {traits.region} · {traits.gender_presentation} ·{' '}
+        {traits.age_band} · notice {traits.notice_period} · {traits.offers_in_hand} offer(s) in hand
+      </div>
+    </details>
   )
 }
 
@@ -412,6 +483,8 @@ function CandidateCard({ c, onDelete, onStart, busy, voiceReady }) {
       <div className="small muted" style={{ marginTop: 10 }}>
         <b>Opens up when:</b> {c.answer_policy.reveals_depth_when}
       </div>
+
+      {c.human_traits && <HumanTraits traits={c.human_traits} />}
 
       <details className="raw">
         <summary>Compiled persona prompt — do not show the manager</summary>

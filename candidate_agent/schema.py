@@ -14,12 +14,12 @@ outside it — verdict, trait scores, scorecard weights — is computed.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
-PERSONA_VERSION = "v1.0"
-ENGINE_CONTRACT_VERSION = "v1.1"
+PERSONA_VERSION = "v1.1"
+ENGINE_CONTRACT_VERSION = "v1.2"
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +90,112 @@ class AnswerPolicy(BaseModel):
     never_does: list[str] = Field(default_factory=list)
 
 
+#: Free-text profile fields reach the compiled system prompt verbatim, so they
+#: are constrained to a single short line of ordinary characters. The closed
+#: vocabularies elsewhere in this model come from the directive tables in
+#: `candidate_agent.engine_contract`; a test asserts the two stay in step.
+#: (Re-declared rather than imported — `engine_contract` imports this module.)
+PROFILE_TEXT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 &'./-]{0,39}$"
+
+
+class EnvironmentProfile(BaseModel):
+    """Session-logistics realism — the 'Environment' row of the realism taxonomy."""
+
+    camera_behavior: str = Field(..., pattern="^(on|off|toggling)$")
+    network_drops_at_minute: int | None = Field(default=None, ge=0)
+    background_noise: str
+    joins_late_minutes: int = Field(default=0, ge=0)
+    mobile_or_driving: bool = False
+    hard_stop_minute: int | None = Field(default=None, ge=1)
+
+
+class HumanTraitProfile(BaseModel):
+    """The generic human-candidate trait dimensions (the realism taxonomy).
+
+    Orthogonal to the archetype's skill/verdict mechanics — this is the
+    realism, communication, and compliance-training layer. Entirely
+    code-derived from fixed dimension presets, same as trait scores; the model
+    never authors or sees these values.
+    """
+
+    affect: str = Field(
+        ...,
+        pattern="^(hostile|defensive|anxious|apathetic|over_eager|arrogant|"
+        "cooperative|flirtatious_inappropriate|grieving_distressed)$",
+    )
+    verbal_style: str = Field(
+        ...,
+        pattern="^(rambling|monosyllabic|tangential|interrupts|long_silences|"
+        "jargon_flooder|over_formal)$",
+    )
+
+    fluency: int = Field(..., ge=0, le=10)
+    literacy_level: str = Field(..., pattern="^(basic|functional|fluent|native)$")
+    native_speaker: bool
+    accent_strength: float = Field(..., ge=0.0, le=1.0)
+    code_switch_probability: float = Field(..., ge=0.0, le=1.0)
+    vocabulary_ceiling: str = Field(..., pattern="^(basic|workplace|technical|executive)$")
+
+    clarification_rate: str = Field(..., pattern="^(low|medium|high)$")
+    misinterprets_question_rate: str = Field(..., pattern="^(low|medium|high)$")
+    needs_rephrasing: bool
+
+    #: Subset of resume_inflation, concealed_termination, ghost_employer,
+    #: dual_employment, proxy_candidate, ai_assisted_answers.
+    integrity_red_flags: list[
+        Annotated[
+            str,
+            StringConstraints(
+                pattern="^(resume_inflation|concealed_termination|ghost_employer|"
+                "dual_employment|proxy_candidate|ai_assisted_answers)$"
+            ),
+        ]
+    ] = Field(default_factory=list)
+
+    motivation: str = Field(
+        ...,
+        pattern="^(comp_only|counter_offer_risk|not_really_looking|"
+        "location_blocked|family_pressured|passion_hire)$",
+    )
+    negotiation_stance: str = Field(
+        ...,
+        pattern="^(anchors_high|refuses_to_disclose_ctc|lowballs_self|"
+        "demands_off_band|offer_shopping)$",
+    )
+
+    #: Subset of volunteers_protected_info, requests_off_policy_favour,
+    #: asks_illegal_question_back.
+    compliance_traps: list[
+        Annotated[
+            str,
+            StringConstraints(
+                pattern="^(volunteers_protected_info|requests_off_policy_favour|"
+                "asks_illegal_question_back)$"
+            ),
+        ]
+    ] = Field(default_factory=list)
+    #: Set only when "volunteers_protected_info" is in compliance_traps:
+    #: pregnancy, age, religion, caste, disability, marital_status.
+    protected_info_type: str | None = Field(
+        default=None, pattern="^(pregnancy|age|religion|caste|disability|marital_status)$"
+    )
+
+    environment: EnvironmentProfile
+
+    seniority: str = Field(..., pattern="^(fresher|junior|mid|senior|lead|manager)$")
+    gender_presentation: str = Field(..., pattern="^(woman|man|non_binary|unspecified)$")
+    age_band: str = Field(..., pattern=r"^(18-24|25-34|35-44|45-54|55\+)$")
+    notice_period: str = Field(..., pattern="^(immediate|15_days|30_days|60_days|90_days)$")
+    #: Genuinely open — an org has more regions and functions than a closed list
+    #: can hold. Constrained instead: no newlines, no control characters, and
+    #: short enough that nothing sentence-shaped fits. Both are rendered quoted
+    #: and *above* the hard rules in the compiled prompt, so a value that does
+    #: get creative still cannot displace them.
+    function: str = Field(..., pattern=PROFILE_TEXT_PATTERN)
+    region: str = Field(..., pattern=PROFILE_TEXT_PATTERN)
+    offers_in_hand: int = Field(default=0, ge=0)
+
+
 class ScorecardItem(BaseModel):
     """One weighted signal the interviewer is expected to surface."""
 
@@ -153,6 +259,9 @@ class VirtualCandidate(BaseModel):
     answer_policy: AnswerPolicy
     interviewer_scorecard: InterviewerScorecard
     engine_contract: EngineContract
+    #: Optional realism-taxonomy layer — realism, communication, and compliance
+    #: training dimensions, orthogonal to the archetype's skill/verdict axis.
+    human_traits: HumanTraitProfile | None = None
 
     #: SHA256 over the full persona — integrity check on a stored record.
     #: Changes whenever any content changes, including on a re-cast.

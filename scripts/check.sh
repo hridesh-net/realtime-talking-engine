@@ -41,6 +41,11 @@ run "SOLID + layering"              $PY -m pytest tests/test_architecture.py -q
 run "persona rubric (offline)"      $PY -m pytest tests/test_candidate_rubric.py -q
 run "live session (offline)"        $PY -m pytest tests/test_session.py -q
 run "voice session (offline)"       $PY -m pytest tests/test_voice.py -q
+run "trait composition (offline)"   $PY -m pytest tests/test_trait_dimensions.py -q
+run "custom personas (offline)"     $PY -m pytest tests/test_custom_persona_integration.py -q
+run "candidates API (offline)"      $PY -m pytest tests/test_control_plane_candidates_api.py -q
+run "provider errors (offline)"     $PY -m pytest tests/test_model_error_surfacing.py -q
+run "full pipeline (offline)"       $PY -m pytest tests/test_full_interview_pipeline_integration.py -q
 
 # -------------------------------------------------------------------- go ----
 # The live-session engine is a Go module rooted at engine/, so every gate runs

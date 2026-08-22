@@ -1,4 +1,161 @@
 {
+  "$defs": {
+    "CustomPersonaSpec": {
+      "description": "One dynamically composed persona.\n\nMirrors ``candidate_agent.trait_dimensions.compose_custom_persona``. Every\nfield except ``label``, ``function`` and ``region`` takes its legal values\nfrom ``GET /api/v1/trait-dimensions``; those three are free text, and are\nlength- and character-constrained here and by\n``candidate_agent.schema.PROFILE_TEXT_PATTERN`` because they reach the\ncompiled system prompt verbatim.\n\nComposing is validated exactly like a hand-written archetype \u2014 an unknown\npreset or an out-of-vocabulary value fails the request with a 422 rather\nthan casting something malformed. The result is validated but never\nregistered: a composed persona belongs to the interview it was cast for.",
+      "properties": {
+        "label": {
+          "pattern": "^[^\\r\\n]{1,80}$",
+          "title": "Label",
+          "type": "string"
+        },
+        "verdict": {
+          "pattern": "^(select|reject|borderline)$",
+          "title": "Verdict",
+          "type": "string"
+        },
+        "competence": {
+          "title": "Competence",
+          "type": "string"
+        },
+        "conscientiousness": {
+          "title": "Conscientiousness",
+          "type": "string"
+        },
+        "communication": {
+          "title": "Communication",
+          "type": "string"
+        },
+        "emotional_stance": {
+          "title": "Emotional Stance",
+          "type": "string"
+        },
+        "honesty": {
+          "title": "Honesty",
+          "type": "string"
+        },
+        "bias_trap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bias Trap"
+        },
+        "affect": {
+          "title": "Affect",
+          "type": "string"
+        },
+        "verbal_style": {
+          "title": "Verbal Style",
+          "type": "string"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "comprehension": {
+          "title": "Comprehension",
+          "type": "string"
+        },
+        "motivation": {
+          "title": "Motivation",
+          "type": "string"
+        },
+        "negotiation_stance": {
+          "title": "Negotiation Stance",
+          "type": "string"
+        },
+        "environment": {
+          "title": "Environment",
+          "type": "string"
+        },
+        "seniority": {
+          "title": "Seniority",
+          "type": "string"
+        },
+        "function": {
+          "title": "Function",
+          "type": "string"
+        },
+        "region": {
+          "title": "Region",
+          "type": "string"
+        },
+        "gender_presentation": {
+          "title": "Gender Presentation",
+          "type": "string"
+        },
+        "age_band": {
+          "title": "Age Band",
+          "type": "string"
+        },
+        "notice_period": {
+          "title": "Notice Period",
+          "type": "string"
+        },
+        "compliance_traps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Compliance Traps",
+          "type": "array"
+        },
+        "protected_info_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protected Info Type"
+        },
+        "integrity_red_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Integrity Red Flags",
+          "type": "array"
+        },
+        "offers_in_hand": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offers In Hand",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "label",
+        "verdict",
+        "competence",
+        "conscientiousness",
+        "communication",
+        "emotional_stance",
+        "honesty",
+        "affect",
+        "verbal_style",
+        "language",
+        "comprehension",
+        "motivation",
+        "negotiation_stance",
+        "environment",
+        "seniority",
+        "function",
+        "region",
+        "gender_presentation",
+        "age_band",
+        "notice_period"
+      ],
+      "title": "CustomPersonaSpec",
+      "type": "object"
+    }
+  },
   "description": "Body for POST /api/v1/interviews/{interview_id}/candidates. Send no body to enroll the two defaults: the bias trap and the evasive candidate, which carry the heaviest rubric criteria between them.",
   "properties": {
     "archetypes": {
@@ -16,6 +173,22 @@
       "default": null,
       "description": "Archetype keys from GET /api/v1/candidate-archetypes. Defaults to ['cooperative_trap', 'evasive'].",
       "title": "Archetypes"
+    },
+    "custom_personas": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/CustomPersonaSpec"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Personas composed on the spot from GET /api/v1/trait-dimensions values, instead of a fixed archetype key.",
+      "title": "Custom Personas"
     },
     "regenerate": {
       "default": false,

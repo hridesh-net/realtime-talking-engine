@@ -35,6 +35,7 @@ from candidate_agent.schema import (
     PERSONA_VERSION,
     AnswerPolicy,
     AptitudeProfile,
+    HumanTraitProfile,
     InterviewerScorecard,
     ResumeClaim,
     ScorecardItem,
@@ -114,6 +115,8 @@ class VirtualCandidateAgent:
         expectation: Any | None = None,
         seed_override: str | None = None,
         avoid_names: list[str] | None = None,
+        human_traits: HumanTraitProfile | None = None,
+        archetype: Archetype | None = None,
     ) -> VirtualCandidate:
         """Cast one persona for this interview and archetype.
 
@@ -133,11 +136,23 @@ class VirtualCandidateAgent:
             expectation: Expectation document to ground the persona in, if any.
             seed_override: Replaces the default seed for reproducible casts.
             avoid_names: Names already used in this training set.
+            human_traits: Optional realism/compliance layer (see
+                `trait_dimensions.compose_human_traits`) — code-derived, never
+                seen or authored by the model.
+            archetype: A composed archetype to cast instead of looking
+                `archetype_key` up in the catalog. Personas composed per
+                interview are validated but never registered, so there is
+                nothing in the catalog to find.
 
         Returns:
             The assembled persona, including its engine contract.
         """
-        archetype = catalog.get(archetype_key)
+        if archetype is None:
+            archetype = catalog.get(archetype_key)
+        elif archetype.key != archetype_key:
+            raise ValueError(
+                f"archetype key mismatch: {archetype.key!r} passed for {archetype_key!r}"
+            )
         seed = seed_override or f"{interview_id}:{archetype_key}"
 
         # ---- Deterministic pre-computation (the model cannot override these) ----
@@ -212,6 +227,7 @@ class VirtualCandidateAgent:
             knowledge_map=knowledge_map,
             policy=policy,
             opening_line=opening_line,
+            human_traits=human_traits,
             language=language,
         )
 
@@ -225,6 +241,7 @@ class VirtualCandidateAgent:
                 "persona_version": PERSONA_VERSION,
                 "traits": traits,
                 "verdict": archetype.verdict,
+                "human_traits": human_traits.model_dump() if human_traits else None,
             }
         )
         # Integrity claim: covers the model-authored content too, so a stored
@@ -260,6 +277,7 @@ class VirtualCandidateAgent:
             answer_policy=policy,
             interviewer_scorecard=scorecard,
             engine_contract=engine,
+            human_traits=human_traits,
             fingerprint=fingerprint,
             seed_fingerprint=seed_fingerprint,
             seed=seed,

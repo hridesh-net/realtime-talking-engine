@@ -5,8 +5,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from candidate_agent import archetypes as archetype_catalog
+from candidate_agent import trait_dimensions
 from candidate_agent.agent import VirtualCandidateAgent
-from candidate_agent.schema import EngineContract, InterviewerScorecard, VirtualCandidate
+from candidate_agent.archetypes import Archetype
+from candidate_agent.schema import (
+    EngineContract,
+    HumanTraitProfile,
+    InterviewerScorecard,
+    VirtualCandidate,
+)
 from candidate_agent.session import CANDIDATE, MANAGER, CandidateSessionAgent
 from candidate_agent.voice import build_realtime_session
 from control_plane.database import init_db
@@ -24,6 +31,7 @@ from control_plane.repository import InterviewRepository
 from control_plane.schemas import (
     CandidateEnrollRequest,
     ClarityFact,
+    CustomPersonaSpec,
     InterviewCreateRequest,
     InterviewResponse,
     RealtimeCredentialResponse,
@@ -97,18 +105,23 @@ async def generate_expectation(
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
 
-    expectation = await agent.generate(
-        interview_id=interview.id,
-        job_title=interview.job_title,
-        jd=interview.jd,
-        skills_required=interview.skills_required,
-        job_location_type=interview.job_location_type,
-        experience_level=interview.experience_level,
-        company_type=interview.company_type,
-        duration_minutes=interview.config.duration_minutes,
-        mode=interview.mode,
-        has_resume=False,  # resume is attached later when candidate is assigned
-    )
+    try:
+        expectation = await agent.generate(
+            interview_id=interview.id,
+            job_title=interview.job_title,
+            jd=interview.jd,
+            skills_required=interview.skills_required,
+            job_location_type=interview.job_location_type,
+            experience_level=interview.experience_level,
+            company_type=interview.company_type,
+            duration_minutes=interview.config.duration_minutes,
+            mode=interview.mode,
+            has_resume=False,  # resume is attached later when candidate is assigned
+        )
+    except ModelError as exc:
+        # A generation failure is the provider's answer, not a bug in this
+        # service — surface it as a gateway error so the UI can say so plainly.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     repo.save_expectation(expectation, model_used=agent.model)
     return expectation
 
@@ -176,6 +189,26 @@ def list_archetypes() -> dict[str, object]:
     }
 
 
+@router.get("/trait-dimensions")
+def list_trait_dimensions() -> dict[str, object]:
+    """Every dimension and preset `custom_personas` values must come from."""
+    return trait_dimensions.dimension_catalog()
+
+
+def _compose_custom_persona(spec: CustomPersonaSpec) -> trait_dimensions.CustomPersona:
+    """Compose one custom persona, turning a bad spec into a 422.
+
+    Composition itself lives in `candidate_agent.trait_dimensions`; this only
+    translates its failures into the transport's vocabulary.
+    """
+    try:
+        return trait_dimensions.compose_custom_persona(**spec.model_dump())
+    except (trait_dimensions.UnknownPresetError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+
 @router.post(
     "/interviews/{interview_id}/candidates",
     response_model=list[VirtualCandidate],
@@ -197,13 +230,29 @@ async def enroll_candidates(
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
 
-    keys = req.archetypes or archetype_catalog.default_keys()
+    if req.archetypes is None and not req.custom_personas:
+        keys = archetype_catalog.default_keys()
+    else:
+        keys = req.archetypes or []
     unknown = [k for k in keys if k not in archetype_catalog.ARCHETYPES]
     if unknown:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"unknown archetypes: {', '.join(unknown)}",
         )
+
+    # Fixed-catalog keys resolve through the catalog and carry no human_traits.
+    # A custom spec composes both layers here and carries its own archetype: it
+    # is validated exactly like a catalog entry but never registered, so it
+    # cannot leak into another interview's picker or grow the catalog without
+    # bound. Its key is content-addressed, so re-submitting the same spec
+    # resolves to the persona already enrolled.
+    casts: list[tuple[str, Archetype | None, HumanTraitProfile | None]] = [
+        (k, None, None) for k in keys
+    ]
+    for spec in req.custom_personas or []:
+        composed = _compose_custom_persona(spec)
+        casts.append((composed.key, composed.archetype, composed.human_traits))
 
     # The expectation grounds personas in the flags the interviewer is watching
     # for. Optional — enrollment must not require it.
@@ -213,29 +262,37 @@ async def enroll_candidates(
     # Independent generations converge on the same names, which makes a training
     # set confusing. Feed each cast the names already taken.
     taken: list[str] = [c.name for c in repo.list_candidates(interview_id)]
-    for key in keys:
+    for key, archetype, human_traits in casts:
         existing = repo.get_candidate_by_archetype(interview_id, key)
         if existing and not req.regenerate:
             results.append(existing)
             continue
 
-        candidate = await agent.generate(
-            interview_id=interview_id,
-            archetype_key=key,
-            job_title=interview.job_title,
-            jd=interview.jd,
-            skills_required=interview.skills_required,
-            experience_level=interview.experience_level,
-            company_type=interview.company_type,
-            job_location_type=interview.job_location_type,
-            duration_minutes=interview.config.duration_minutes,
-            interview_type=(expectation.interview_type if expectation else "mixed"),
-            language=interview.language,
-            candidate_notes=interview.candidate_notes,
-            expectation=expectation,
-            seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
-            avoid_names=taken,
-        )
+        try:
+            candidate = await agent.generate(
+                interview_id=interview_id,
+                archetype_key=key,
+                job_title=interview.job_title,
+                jd=interview.jd,
+                skills_required=interview.skills_required,
+                experience_level=interview.experience_level,
+                company_type=interview.company_type,
+                job_location_type=interview.job_location_type,
+                duration_minutes=interview.config.duration_minutes,
+                interview_type=(expectation.interview_type if expectation else "mixed"),
+                language=interview.language,
+                candidate_notes=interview.candidate_notes,
+                expectation=expectation,
+                seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
+                avoid_names=taken,
+                human_traits=human_traits,
+                archetype=archetype,
+            )
+        except ModelError as exc:
+            # A casting failure is the provider's answer, not a bug in this
+            # service — surface it as a gateway error so the UI can say so
+            # plainly instead of an opaque 500.
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         repo.save_candidate(candidate, model_used=agent.model)
         taken.append(candidate.name)
         results.append(candidate)
@@ -327,30 +384,43 @@ async def start_session(
     interview = repo.get(req.interview_id)
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
-    if req.archetype not in archetype_catalog.ARCHETYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"unknown archetype: {req.archetype}",
-        )
-
+    # Look in the database before the catalog. An already-enrolled persona is
+    # fully described by its stored record, and a custom-composed one is only
+    # ever in the database — its archetype was validated at enrollment and
+    # deliberately not registered, so requiring a catalog entry here would make
+    # every composed persona unusable the moment the process restarted.
     candidate = repo.get_candidate_by_archetype(req.interview_id, req.archetype)
     if candidate is None:
-        candidate = await agent.generate(
-            interview_id=req.interview_id,
-            archetype_key=req.archetype,
-            job_title=interview.job_title,
-            jd=interview.jd,
-            skills_required=interview.skills_required,
-            experience_level=interview.experience_level,
-            company_type=interview.company_type,
-            job_location_type=interview.job_location_type,
-            duration_minutes=interview.config.duration_minutes,
-            interview_type="mixed",
-            language=interview.language,
-            candidate_notes=interview.candidate_notes,
-            expectation=None,
-            avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
-        )
+        if req.archetype not in archetype_catalog.ARCHETYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"unknown archetype: {req.archetype}. Custom personas must be enrolled "
+                    "through POST /interviews/{id}/candidates before a session can start."
+                ),
+            )
+        try:
+            candidate = await agent.generate(
+                interview_id=req.interview_id,
+                archetype_key=req.archetype,
+                job_title=interview.job_title,
+                jd=interview.jd,
+                skills_required=interview.skills_required,
+                experience_level=interview.experience_level,
+                company_type=interview.company_type,
+                job_location_type=interview.job_location_type,
+                duration_minutes=interview.config.duration_minutes,
+                interview_type="mixed",
+                language=interview.language,
+                candidate_notes=interview.candidate_notes,
+                expectation=None,
+                avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
+            )
+        except ModelError as exc:
+            # A casting failure is the provider's answer, not a bug in this
+            # service — surface it as a gateway error so the UI can say so
+            # plainly instead of an opaque 500.
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         repo.save_candidate(candidate, model_used=agent.model)
 
     return repo.create_session(
