@@ -68,13 +68,28 @@ Vite proxies `/api` → `http://127.0.0.1:8081`, so **start the API first**.
 endpoints. It does **not** cover the engine-contract or scorecard endpoints —
 those are for the Go engine and the grading pipeline, not the operator.
 
-## What the wizard does not ask
+## The wizard
 
-Step 1 renders **only** fields `InterviewCreateRequest` accepts. The mockup also
-shows Location, Department, Manager level, opening Language and Proctoring —
-none exist on the request model, and the pivot plan replaces the whole schema
-with a role card, so they are not stubbed in. Adding them now is work that gets
-deleted.
+Step 1 renders **every** field the training-wizard specification asks for:
+job title, location, job description, department (the mockup's combo box),
+manager level, duration, skills, the language the candidate opens in, and
+proctoring. All are real fields on `InterviewCreateRequest`.
+
+Two carry help text that says what they actually do, because both could
+otherwise be mistaken for decoration:
+
+* **Language** — *"Reaches the persona's prompt and the speech-to-text hint, not just this label."*
+* **Proctoring** — *"Recorded on the interview. **No camera is accessed yet** at any setting."* Saying so on screen is the point; a proctoring control that silently does nothing is worse than no control.
+
+Step 1 also holds the **role-fact checklist**: six fixed fields, an
+`✨ Auto-fill from the job description` button calling `POST /role-facts`, and a
+banner explaining why the list is fixed. A blank field drops that fact from the
+interview's checklist, and the section header counts what remains — *"3 of 6 on
+this interview's checklist"*.
+
+The **Additional notes for the candidate** textarea sits on step 2, beneath the
+picker, exactly where the specification puts it, with help text stating what it
+cannot do.
 
 ## The persona picker
 

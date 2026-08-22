@@ -17,6 +17,17 @@ CREATE TABLE IF NOT EXISTS interviews (
     company_type TEXT NOT NULL CHECK (company_type IN ('startup', 'mnc')),
     mode TEXT NOT NULL DEFAULT 'live_interview'
         CHECK (mode IN ('live_interview', 'training_interviewer')),
+    location TEXT NOT NULL DEFAULT '',
+    department TEXT NOT NULL DEFAULT '',
+    manager_level TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT 'english_indian'
+        CHECK (language IN ('english_indian', 'hinglish', 'hindi')),
+    -- Recorded only. Nothing in this service accesses a camera at any setting.
+    proctoring TEXT NOT NULL DEFAULT 'off'
+        CHECK (proctoring IN ('off', 'identity', 'full')),
+    candidate_notes TEXT NOT NULL DEFAULT '',
+    clarity_facts TEXT NOT NULL DEFAULT '[]',
+    report_sections TEXT NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'scheduled'
         CHECK (status IN ('scheduled', 'in_progress', 'completed', 'failed', 'cancelled')),
     config TEXT NOT NULL DEFAULT '{}',

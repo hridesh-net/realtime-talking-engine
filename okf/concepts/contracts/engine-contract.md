@@ -29,6 +29,21 @@ The Go engine needs exactly two reads: this contract, and the
 [scorecard](/concepts/contracts/virtual-candidate.md) afterwards. It never parses
 the full persona, never sees the archetype key, and never re-derives prompt text.
 
+## v1.1 — the language line (2026-08-22)
+
+The minor bump adds two things: a language directive as the first line of the
+compiled prompt's `HOW YOU TALK` section, and a `language` key on
+`voice_directives`. The Go engine needs no change — it parses by **major**
+version and retains the minor, which `engine/internal/contract/contract_test.go`
+already covers with an explicit `v1.1` case.
+
+The directives themselves live in `LANGUAGE_DIRECTIVES` in
+`candidate_agent/engine_contract.py`. Code owns the vocabulary; the model never
+picks the language.
+
+One consequence for any consumer: **a v1.1 persona may not speak English.**
+Anything downstream that reads the transcript must not assume it does.
+
 # Schema
 
 ```python

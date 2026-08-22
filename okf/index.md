@@ -36,13 +36,12 @@ concept and append to [log.md](/log.md) — see
 Curated 2026-08-21 against commit `802c8426` by reading every documented source
 file, and kept current since — see [log.md](/log.md) for what has changed.
 
-Most recent substantive change: **the console aligned to the SkillBrew.AI design
-mockup**, and the persona catalog rewritten to `v2.0` — seven archetypes that
-each stress one *manager* competency, with session beats and a stress profile.
-The screens the mockup shows but no endpoint can serve (manager cohort,
-readiness scores, bias flags, CSV upload) are deliberately absent. See
-[Test UI](/concepts/subsystems/ui.md) and
-[archetypes.py](/concepts/modules/candidate-agent-archetypes.md).
+Most recent substantive change: the **Phase 0 MVP milestone M1** — the interview
+configuration the training-wizard specification asks for, including a `language`
+setting that genuinely reaches the persona's prompt and the speech-to-text hint,
+operator notes that cannot override an archetype, and the fixed role-fact
+checklist in the new [evaluation agent](/concepts/subsystems/evaluation-agent.md).
+`ENGINE_CONTRACT_VERSION` is now **v1.1**.
 
 ⚠️ Read `docs/BRD_Interviewer_Upskilling_v3.html` before changing anything about
 what is scored or who is scored: the assessed subject is being flipped from the

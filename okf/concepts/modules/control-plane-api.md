@@ -10,13 +10,15 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /control_plane/api.py
 ---
 # control_plane/api.py
 
-480 lines. Endpoint reference lives in [REST API](/concepts/contracts/rest-api.md);
+544 lines. Endpoint reference lives in [REST API](/concepts/contracts/rest-api.md);
 this card is about the code.
 
 # Schema
@@ -26,17 +28,18 @@ def get_repo() -> InterviewRepository          # L28 — init_db() per request
 def get_expectation_agent() -> InterviewExpectationAgent   # L34
 def get_candidate_agent() -> VirtualCandidateAgent
 def get_session_agent() -> CandidateSessionAgent
+def get_role_facts_agent() -> RoleFactsAgent
 def get_realtime_broker() -> RealtimeBroker
 REALTIME_TTL_SECONDS = 600
 router = APIRouter(prefix="/api/v1", tags=["interviews"])
 ```
 
 Handlers, in order: `create_interview`, `get_interview`, `list_interviews`,
-`generate_expectation`, `get_expectation`, `list_archetypes`,
-`list_trait_dimensions`, `enroll_candidates`, `list_candidates`, `get_candidate`,
-`get_engine_contract`, `get_scorecard`, `delete_candidate`, `start_session`,
-`take_turn`, `end_session`, `get_session`, `voice_capability`,
-`mint_realtime_credential`, `append_transcript_turn`.
+`generate_expectation`, `get_expectation`, `draft_role_facts`,
+`list_archetypes`, `list_trait_dimensions`, `enroll_candidates`,
+`list_candidates`, `get_candidate`, `get_engine_contract`, `get_scorecard`,
+`delete_candidate`, `start_session`, `take_turn`, `end_session`, `get_session`,
+`voice_capability`, `mint_realtime_credential`, `append_transcript_turn`.
 
 One module-level helper backs `enroll_candidates`'s `custom_personas` path:
 
@@ -92,6 +95,7 @@ Four decisions worth knowing:
 * **Skip-unless-regenerate** — an already-enrolled archetype (or previously-cast custom-persona key) is returned untouched, so the endpoint is safe to re-POST.
 * **`avoid_names` accumulates within the loop** — independent casts converge on the same names, and a training set of identical names is confusing.
 * **The expectation is optional** — fetched if present to ground personas in the flags the interviewer is watching for, but enrollment must not require it. `interview_type` falls back to `"mixed"`.
+* **The interview's `language` and `candidate_notes` ride into every cast** — here and in `start_session`'s on-the-spot cast — so a Hinglish interview produces a Hinglish persona no matter which endpoint triggers the cast.
 
 Generation is **sequential** — one awaited model call per archetype. Enrolling
 six is six serial round trips; there is no `asyncio.gather`, and adding one would

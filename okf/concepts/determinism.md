@@ -146,3 +146,26 @@ contract version. Changing the compiled prompt text without bumping
 `ENGINE_CONTRACT_VERSION` silently invalidates every stored persona's byte
 stability, which `tests/test_candidate_rubric.py::test_system_prompt_is_byte_stable`
 exists to catch.
+
+## Operator input is code-owned too (2026-08-22)
+
+Two configuration fields let a human put words into a persona's prompt, which
+makes them the newest place the split could leak.
+
+**`language`** — the *choice* is the operator's, from a closed list; the
+*wording* is `LANGUAGE_DIRECTIVES` in `candidate_agent/engine_contract.py`. The
+model never picks a language and never authors the instruction that describes
+one.
+
+**`candidate_notes`** — free text, and the only unstructured operator input that
+reaches casting. It is rendered beneath an explicit subordination clause, and
+every structural guarantee is still enforced in code afterwards: the knowledge
+clamp, the trait bounds, the scorecard weights, `UNIVERSAL_FORBIDDEN`. A note
+can add that the candidate worked at a competitor down the road. It cannot make
+them cleverer than their band, change their archetype, or unlock a forbidden
+behaviour — `test_operator_notes_cannot_override_the_archetype` asserts both the
+prompt framing and the clamp.
+
+**`clarity_facts`** — the *keys* are fixed in `evaluation_agent.schema`; only the
+*statements* are drafted, and a drafted key that is not on the list is discarded.
+The checklist a manager is measured against is never something a model chose.

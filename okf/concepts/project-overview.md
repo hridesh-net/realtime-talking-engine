@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /README.md
@@ -65,7 +67,8 @@ conversation, this one owns the *what* of an interview. See
 ## Build state (2026-08-22)
 
 * **Working**: interview creation, expectation generation and storage, **the v2.0 seven-archetype persona library** (each stressing one manager competency, with session beats and a stress profile), enrollment with re-cast and seeding, engine-contract and scorecard endpoints, **the live text session** (start, turn, end, stored transcript, browser chat view), **the live voice session** (OpenAI Realtime over WebRTC from the browser, deterministic per-persona voice, transcript ingest), session listing per interview, the React console aligned to the SkillBrew.AI design mockup, the offline check suite, schema export.
-* **Partly built**: the persona library v2 — pivot plan Phase 3. The **catalog half shipped**; the behavioural half (`DisruptionSpec`, `candidate_questions`, `ENGINE_CONTRACT_VERSION` → v1.1) did not. Session beats reach the live persona through the casting prompt, so they are a tendency, not a scripted event.
+* **Partly built**: the Phase 0 MVP defined by `interview_training_wizard (1).html`. **M1 shipped** — the full interview configuration (location, department, manager level, language, proctoring, operator notes, the fixed role-fact checklist and report-section toggles), plus `evaluation_agent/` holding the rubric and the role-fact checklist. M2 (hiring-manager cohort), M3 (evaluation layer and report) and M4 (report UI) are open. Plan: `~/.claude/plans/humble-tinkering-ocean.md`.
+* **Partly built**: the persona library v2 — pivot plan Phase 3. The **catalog half shipped**; the behavioural half (`DisruptionSpec`, `candidate_questions`) did not. Session beats reach the live persona through the casting prompt, so they are a tendency, not a scripted event. (`ENGINE_CONTRACT_VERSION` *did* move to v1.1 — but for the M1 language line, not for these behavioural fields; they would now be a v1.2.)
 * **Designed, not built**: the evaluation layer (deterministic signals, judge pass, analytical report) — pivot plan Phase 4; the manager-assessment domain model (role cards replacing job specs) — Phase 2; the manager cohort (roster, CSV upload, invites) — nowhere in the plan yet, though the design mockup shows it; the Go interview-candidate engine, at Phase 0 skeleton and parked (`docs/GO_ENGINE_CONTRACT.md` specifies its side of the handoff); interviewer assignment (`interview_assignments` table exists and is unused).
 * **Stand-in**: SQLite. The schema ports to PostgreSQL with minimal change, and Postgres is the intended bridge to the runtime engine.
 * **Legacy**: `control_plane/persona.py` — the original BRD §4.3 seeded persona, attached at creation for `training_interviewer` mode. Superseded by [`candidate_agent`](/concepts/subsystems/candidate-agent.md) but still wired in.
@@ -76,6 +79,7 @@ conversation, this one owns the *what* of an interview. See
 llm/                 Provider port + Gemini/OpenAI adapters — the only vendor SDKs
 expectation_agent/   Expectation agent — persona, guardrails, fixed rubric
 candidate_agent/     Virtual candidate agent — archetype catalog, engine contract, text + voice sessions
+evaluation_agent/    Manager assessment — the fixed rubric and the role-fact checklist
 control_plane/       FastAPI service, storage ports, SQLite adapter
 owner_handover/      JSON Schemas + samples, regenerated from the Pydantic models
 ui/                  React + Vite test UI

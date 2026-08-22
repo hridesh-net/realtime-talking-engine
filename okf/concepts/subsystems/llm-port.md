@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /llm/base.py
@@ -36,7 +38,7 @@ an AST scan in `tests/test_architecture.py`.
 
 | Port | Method | Used by |
 |---|---|---|
-| `StructuredModel` | `async generate_json(*, system, prompt, schema) -> dict` | expectation agent, persona casting, the future judge pass |
+| `StructuredModel` | `async generate_json(*, system, prompt, schema) -> dict` | expectation agent, persona casting, role-fact drafting, the future judge pass |
 | `ChatModel` | `async generate_text(*, system, messages) -> str` | the live text session |
 | `RealtimeBroker` | `async mint(*, session, ttl_seconds) -> RealtimeCredential` | the live **voice** session |
 
@@ -69,9 +71,10 @@ separate ways.
 
 Resolution order per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/
 `LLM_MODEL` → the provider default. Roles are `expectation`, `candidate`,
-`session`, and `judge` — one per workload, so the hot path (a session call per
+`session`, `judge`, and `role_facts` — one per workload, so the hot path (a session call per
 turn) can move provider without dragging the once-per-interview calls with it.
-`judge` is wired in config ahead of the evaluation layer that will use it.
+`judge` is wired in config ahead of the evaluation layer that will use it;
+`role_facts` backs the evaluation agent's checklist drafting.
 `voice` resolves against the realtime-capable providers **only** — it does not
 fall through to `LLM_PROVIDER`, because the text provider may offer no realtime
 API at all, and a fallback there would fail at mint time with a confusing error.
@@ -84,7 +87,8 @@ present, iterating `PROVIDERS` in insertion order — **Gemini first**.
 ## Temperatures
 
 Set by the agent, not the config: expectation **0.1** (the document must be
-stable across runs), candidate **0.35** (personas need texture, and everything
+stable across runs), role-facts **0.1** (extraction — warmth here produces facts
+the job description does not contain), candidate **0.35** (personas need texture, and everything
 reproducible is computed outside the model anyway), session **0.8** (a persona
 that answers like a form letter defeats the exercise; nothing reproducible
 depends on the call). Voice sessions set no temperature — the realtime vendor

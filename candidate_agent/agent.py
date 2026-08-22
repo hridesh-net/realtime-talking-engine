@@ -23,7 +23,7 @@ from typing import Any
 
 from candidate_agent import archetypes as catalog
 from candidate_agent.archetypes import CATALOG_VERSION, TRAIT_NAMES, Archetype
-from candidate_agent.engine_contract import build_engine_contract
+from candidate_agent.engine_contract import DEFAULT_LANGUAGE, build_engine_contract
 from candidate_agent.prompts import (
     PERSONA,
     SYSTEM_GUARDRAILS,
@@ -110,6 +110,8 @@ class VirtualCandidateAgent:
         job_location_type: str,
         duration_minutes: int,
         interview_type: str = "mixed",
+        language: str = DEFAULT_LANGUAGE,
+        candidate_notes: str = "",
         expectation: Any | None = None,
         seed_override: str | None = None,
         avoid_names: list[str] | None = None,
@@ -129,6 +131,8 @@ class VirtualCandidateAgent:
             job_location_type: remote, onsite, or hybrid.
             duration_minutes: Interview length.
             interview_type: Type from the expectation document.
+            language: The language the persona speaks. Code owns this list.
+            candidate_notes: Extra colour layered on the archetype; never overrides it.
             expectation: Expectation document to ground the persona in, if any.
             seed_override: Replaces the default seed for reproducible casts.
             avoid_names: Names already used in this training set.
@@ -171,6 +175,8 @@ class VirtualCandidateAgent:
                 verdict=archetype.verdict,
                 interviewer_challenge=archetype.interviewer_challenge,
                 session_beats=archetype.session_beats,
+                language=language,
+                candidate_notes=candidate_notes,
                 traits=traits,
                 speech=archetype.speech,
                 policy=archetype.answer_policy,
@@ -222,6 +228,7 @@ class VirtualCandidateAgent:
             policy=policy,
             opening_line=opening_line,
             human_traits=human_traits,
+            language=language,
         )
 
         # Reproducibility claim: everything here is derived from the seed alone,

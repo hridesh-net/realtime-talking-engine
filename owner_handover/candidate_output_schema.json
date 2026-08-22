@@ -125,7 +125,7 @@
       "description": "Runtime slice consumed by the Go interview-candidate engine.",
       "properties": {
         "contract_version": {
-          "default": "v1.1",
+          "default": "v1.2",
           "title": "Contract Version",
           "type": "string"
         },

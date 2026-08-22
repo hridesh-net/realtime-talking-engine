@@ -204,7 +204,7 @@ COMPETENCE: dict[str, CompetencePreset] = {
         "score": 7,
     },
     "developing": {
-        "stresses": {"structure": 1, "experience": 1},
+        "stresses": {"structure": 1, "communication": 1},
         "traits": {"smartness": (4, 6), "dumbness": (4, 6)},
         "knowledge_band": (3, 5),
         "text": "still developing in the required skills",
@@ -212,7 +212,7 @@ COMPETENCE: dict[str, CompetencePreset] = {
         "score": 5,
     },
     "weak": {
-        "stresses": {"structure": 2, "experience": 1},
+        "stresses": {"structure": 2, "communication": 1},
         "traits": {"smartness": (2, 4), "dumbness": (6, 8)},
         "knowledge_band": (1, 3),
         "text": "genuinely below the bar on the required skills",
@@ -239,7 +239,7 @@ CONSCIENTIOUSNESS: dict[str, ConscientiousnessPreset] = {
         "score": 6,
     },
     "low_effort": {
-        "stresses": {"structure": 2, "experience": 1},
+        "stresses": {"structure": 2, "communication": 1},
         "traits": {"effort": (1, 3), "preparedness": (1, 3), "seriousness": (2, 4)},
         "answer_depth": "minimal",
         "text": "did little preparation and does not pretend otherwise",
@@ -272,7 +272,7 @@ COMMUNICATION: dict[str, CommunicationPreset] = {
         "text": "warm and talkative",
     },
     "guarded": {
-        "stresses": {"communication": 2, "experience": 1},
+        "stresses": {"communication": 3},
         "speech": {
             "pace": "slow",
             "verbosity": "terse",
@@ -306,7 +306,7 @@ EMOTIONAL_STANCE: dict[str, EmotionalStancePreset] = {
         "score": 8,  # composure = 10 - midpoint(nervousness)
     },
     "nervous": {
-        "stresses": {"communication": 3, "experience": 2},
+        "stresses": {"communication": 4},
         "traits": {"nervousness": (7, 9), "interest": (5, 7)},
         "filler_frequency": 5,
         "hesitation_frequency": 6,
@@ -367,7 +367,7 @@ HONESTY: dict[str, HonestyPreset] = {
 #: — the fourth scorecard signal falls back to generic structured probing.
 BIAS_TRAP: dict[str, BiasTrapPreset] = {
     "career_gap": {
-        "stresses": {"bias": 4},
+        "stresses": {"fairness": 4},
         "text": "has a career gap (family caregiving) they will mention if given the opening",
         "signal": (
             "Interviewer asks about readiness and skills, not the personal reason behind the gap"
@@ -378,7 +378,7 @@ BIAS_TRAP: dict[str, BiasTrapPreset] = {
         "failure_mode": "asks about marital or family status instead of current readiness",
     },
     "age_or_re_entry": {
-        "stresses": {"bias": 4},
+        "stresses": {"fairness": 4},
         "text": (
             "is re-entering the workforce after a career switch, older than the typical hire "
             "for this role"
@@ -393,7 +393,7 @@ BIAS_TRAP: dict[str, BiasTrapPreset] = {
         "failure_mode": "comments on age or 'career switch' fit instead of assessing current skill",
     },
     "regional_or_accent": {
-        "stresses": {"bias": 4, "communication": 1},
+        "stresses": {"fairness": 4, "communication": 1},
         "text": "speaks with a regional accent and comes from a non-metro background",
         "signal": "Interviewer assesses substance, not accent or regional background",
         "how_to_surface": (
@@ -402,7 +402,7 @@ BIAS_TRAP: dict[str, BiasTrapPreset] = {
         "failure_mode": "reads the accent or regional background as a competence signal",
     },
     "caregiving": {
-        "stresses": {"bias": 4},
+        "stresses": {"fairness": 4},
         "text": "manages caregiving responsibilities that shape their availability",
         "signal": (
             "Interviewer asks about scheduling needs without treating caregiving as a "

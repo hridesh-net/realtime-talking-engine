@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /llm/factory.py
@@ -32,7 +34,8 @@ REALTIME_PROVIDERS: dict[str, Callable[[str, str], RealtimeBroker]] = {
     "openai": OpenAIRealtimeBroker}          # deliberately PARTIAL
 DEFAULT_REALTIME_MODEL_IDS = {"openai": "gpt-realtime-2"}
 ROLE_PREFIXES  = {"expectation": "EXPECTATION", "candidate": "CANDIDATE",
-                  "session": "SESSION", "judge": "JUDGE", "voice": "VOICE"}
+                  "session": "SESSION", "judge": "JUDGE",
+                  "role_facts": "ROLE_FACTS", "voice": "VOICE"}
 
 def resolve_provider(role: str) -> str
 def resolve_model_id(role: str, provider: str) -> str
@@ -73,6 +76,7 @@ stripped and falsiness-checked), which is what makes the blank entries in
 * **`build_realtime_broker` does not use `resolve_provider`.** It resolves against `REALTIME_PROVIDERS` alone, because the configured text provider may have no realtime API — falling through to it would fail at mint time with an error about the wrong thing. An explicit `VOICE_PROVIDER` naming a provider without realtime support is rejected up front, by name.
 * `realtime_providers_available()` exists so the UI can ask *before* offering a Voice button. No key configured is a configuration answer (`available: false`), not an error.
 * `judge` is a live role prefix with no consumer yet. Setting `JUDGE_MODEL` today changes nothing; it is here so the evaluation layer lands without an env-var migration.
+* `role_facts` backs the [evaluation agent](/concepts/subsystems/evaluation-agent.md)'s checklist drafting at temperature 0.1 — extraction, so pin it to a steady model rather than a creative one.
 
 ## Adding a provider
 

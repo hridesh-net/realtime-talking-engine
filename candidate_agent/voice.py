@@ -38,6 +38,21 @@ _EAGERNESS = {"slow": "low", "measured": "medium", "fast": "high"}
 #: the evidence the evaluation layer reads, so this is not optional.
 TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 
+#: ISO-639-1 hint for the transcriber, per interview language.
+#:
+#: Hinglish maps to **None on purpose**. The vendor's `languages` (plural)
+#: parameter is rejected by every transcription model — verified against the
+#: live API on 2026-08-22 for `gpt-4o-mini-transcribe`, `gpt-4o-transcribe` and
+#: `whisper-1` — so a code-mixed session can only be pinned to one language or
+#: to none. Pinning either one systematically mangles the other half of the
+#: sentence, so auto-detection is the least-wrong option until a transcriber
+#: accepts a language set.
+_TRANSCRIBE_LANGUAGE: dict[str, str | None] = {
+    "english_indian": "en",
+    "hindi": "hi",
+    "hinglish": None,
+}
+
 
 def pick_voice(candidate_id: str, voices: Sequence[str]) -> str:
     """Choose this persona's voice, deterministically and stably.
@@ -75,6 +90,11 @@ def build_realtime_session(
     # diverge without one silently dragging the other.
     eagerness = "high" if directives.get("may_interrupt") else _EAGERNESS.get(pace, "medium")
 
+    transcription: dict[str, object] = {"model": TRANSCRIBE_MODEL}
+    hint = _TRANSCRIBE_LANGUAGE.get(str(directives.get("language", "english_indian")))
+    if hint:
+        transcription["language"] = hint
+
     return {
         "instructions": build_voice_system_prompt(
             contract.system_prompt,
@@ -86,7 +106,7 @@ def build_realtime_session(
         "output_modalities": ["audio"],
         "audio": {
             "input": {
-                "transcription": {"model": TRANSCRIBE_MODEL},
+                "transcription": transcription,
                 "turn_detection": {
                     "type": "semantic_vad",
                     "eagerness": eagerness,

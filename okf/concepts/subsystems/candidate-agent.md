@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /candidate_agent/agent.py
@@ -28,13 +30,13 @@ and then plays that persona through a live typed interview. Imports only `llm`.
 
 | Module | Role |
 |---|---|
-| `archetypes.py` (987 ln) | [The fixed catalog](/concepts/modules/candidate-agent-archetypes.md) — 11 archetypes, registered with validation |
-| `agent.py` (373 ln) | [`VirtualCandidateAgent.generate(...)`](/concepts/modules/candidate-agent-agent.md) — seed, call, re-impose, fingerprint |
-| `engine_contract.py` (190 ln) | [Compiles the runtime slice](/concepts/modules/candidate-agent-engine-contract.md) and the system prompt |
+| `archetypes.py` (809 ln) | [The fixed catalog](/concepts/modules/candidate-agent-archetypes.md) — seven archetypes, registered with validation |
+| `agent.py` (381 ln) | [`VirtualCandidateAgent.generate(...)`](/concepts/modules/candidate-agent-agent.md) — seed, call, re-impose, fingerprint |
+| `engine_contract.py` (215 ln) | [Compiles the runtime slice](/concepts/modules/candidate-agent-engine-contract.md) and the system prompt |
 | `schema.py` (254 ln) | [`VirtualCandidate`, `EngineContract`, the draft schema](/concepts/contracts/virtual-candidate.md) |
 | `session.py` (95 ln) | [`CandidateSessionAgent.reply(...)`](/concepts/modules/candidate-agent-session.md) — one persona turn, stateless |
-| `voice.py` (105 ln) | [`build_realtime_session(...)`](/concepts/modules/candidate-agent-voice.md) — the persona's spoken session config |
-| `prompts.py` (240 ln) | Casting-director persona, 11 hard rules, user prompt builder, `expectation_note()`, `build_session_system_prompt()` |
+| `voice.py` (125 ln) | [`build_realtime_session(...)`](/concepts/modules/candidate-agent-voice.md) — the persona's spoken session config |
+| `prompts.py` (345 ln) | Casting-director persona, 11 hard rules, user prompt builder, `expectation_note()`, `build_session_system_prompt()` |
 | `trait_dimensions.py` | Compose an archetype or a `HumanTraitProfile` from fixed presets instead of hand-writing one — see below |
 
 ## The idea
@@ -46,32 +48,39 @@ stopped meaning anything when the assessed subject became the manager.
 
 | Archetype | Stresses hardest | Tests whether the manager… |
 |---|---|---|
-| `cooperative_trap` *(default)* | Unconscious Bias | declines a volunteered protected detail and routes the accommodation ask to policy |
+| `cooperative_trap` *(default)* | Fair & Inclusive | declines a volunteered protected detail and routes the accommodation ask to policy |
 | `evasive` *(default)* | Structured Interviewing | asks again after a platitude, and lets a silence do the work |
-| `nervous_fresher` | Communication, Candidate Experience | warms the room before assessing, and scores content not delivery |
+| `nervous_fresher` | Communication & Presence | warms the room before assessing, and scores content not delivery |
 | `inflated_resume` | Structured Interviewing | converts "we" into "I" and probes a claim to its breaking point |
 | `comp_first` | Hiring with Clarity | sells the role and states the band honestly without caving |
-| `defensive` | Communication & Tone | holds composure through provocation and re-plans around a hard stop |
+| `defensive` | Communication & Presence | holds composure through provocation and re-plans around a hard stop |
 | `rambler` | Structured Interviewing | redirects without rudeness and still covers what was planned |
 | `frontline_network_candidate` | Unconscious Bias | explains shifts/conditions beyond the JD, probes with open follow-ups, stays bias-free about a volunteered career gap |
 | `frontline_sales_candidate` | Unconscious Bias | explains targets/incentives concretely, verifies claims with numbers, stays bias-free about age/re-entry |
 
-Nine archetypes — though the verdict is now only persona metadata. What the
-catalog is balanced on instead is rubric coverage: a test asserts every one of
-the five criteria is stressed at level ≥3 by at least one persona, so no
-competency is untrainable. The two `frontline_*` entries are Airtel/telecom
-profiles, predating the v2.0 rubric reframe — their `interviewer_challenge`
-text already targeted clarity/structure/bias/communication directly, so they
-needed only `session_beats`/`stresses` added to satisfy `_register`, not a
-rewrite.
+Nine archetypes: **3 select, 2 reject, 4 borderline** — though the verdict is
+now only persona metadata. What the catalog is balanced on instead is rubric
+coverage: a test asserts every one of the four criteria is stressed at level ≥3
+by at least one persona, so no competency is untrainable. The criteria are the
+training-wizard spec's four, owned by
+[`evaluation_agent.rubric`](/concepts/modules/evaluation-agent-rubric.md) and
+re-declared here — the two are pinned together by
+`test_rubric_vocabulary_agrees_across_the_two_agents`.
+
+The two `frontline_*` entries are Airtel/telecom profiles added on the persona-
+composition branch, written before the four-criterion rubric landed. Merging the
+two lines required remapping their `stresses` the same way the original seven
+were: `bias` → `fairness`, and `experience` folded into `communication`. They
+take the catalog to nine against a Phase 0 specification that names seven, which
+is an open product question rather than a settled one.
 
 The two defaults are no longer "one hire, one no-hire". They are the bias trap
 (the one manager failure that cannot be walked back) and the evasive candidate
 (the one that separates structured interviewing from conversation).
 
-**Nothing here scores anything.** `stresses` is advisory until the evaluation
-layer lands, and by explicit product decision no criterion — bias included —
-is a critical-fail gate.
+**Nothing here scores anything.** `stresses` is advisory — the rubric instrument
+exists but nothing scores a session yet — and by explicit product decision no
+criterion, fairness included, is a critical-fail gate.
 
 ## The casting-director persona
 
@@ -165,8 +174,9 @@ side of this.
 
 ## Testing
 
-Offline: `tests/test_candidate_rubric.py` (279 ln) is the real safety net —
-determinism, clamping, scorecard integrity, prompt byte-stability.
+Offline: `tests/test_candidate_rubric.py` (401 ln) is the real safety net —
+determinism, clamping, scorecard integrity, prompt byte-stability, and the
+language/operator-notes guarantees.
 `tests/test_session.py` covers the session agent against a fake `ChatModel`;
 `tests/test_voice.py` covers voice compilation against a fake broker.
 `tests/test_trait_dimensions.py` covers both composers (valid composition,

@@ -17,9 +17,8 @@
   "rubric_criteria": {
     "clarity": "Hiring with Clarity",
     "structure": "Structured Interviewing",
-    "bias": "Unconscious Bias",
-    "experience": "Candidate Experience",
-    "communication": "Communication & Tone"
+    "fairness": "Fair & Inclusive",
+    "communication": "Communication & Presence"
   },
   "stress_labels": [
     "light",
@@ -82,11 +81,10 @@
         "Never invites a follow-up on the personal detail"
       ],
       "stresses": {
-        "bias": 4,
+        "fairness": 4,
         "clarity": 3,
-        "experience": 3,
-        "structure": 1,
-        "communication": 1
+        "communication": 2,
+        "structure": 1
       },
       "knowledge_band": [
         6,
@@ -195,8 +193,7 @@
         "structure": 4,
         "communication": 2,
         "clarity": 2,
-        "experience": 2,
-        "bias": 1
+        "fairness": 1
       },
       "knowledge_band": [
         3,
@@ -303,10 +300,9 @@
       ],
       "stresses": {
         "communication": 4,
-        "experience": 4,
         "structure": 2,
         "clarity": 2,
-        "bias": 1
+        "fairness": 1
       },
       "knowledge_band": [
         6,
@@ -416,8 +412,7 @@
         "structure": 4,
         "clarity": 2,
         "communication": 2,
-        "experience": 2,
-        "bias": 1
+        "fairness": 1
       },
       "knowledge_band": [
         3,
@@ -527,8 +522,7 @@
         "clarity": 4,
         "structure": 2,
         "communication": 2,
-        "experience": 2,
-        "bias": 1
+        "fairness": 1
       },
       "knowledge_band": [
         6,
@@ -636,10 +630,9 @@
       ],
       "stresses": {
         "communication": 4,
-        "experience": 3,
         "structure": 3,
         "clarity": 2,
-        "bias": 1
+        "fairness": 1
       },
       "knowledge_band": [
         5,
@@ -749,8 +742,7 @@
         "structure": 4,
         "communication": 3,
         "clarity": 2,
-        "experience": 2,
-        "bias": 1
+        "fairness": 1
       },
       "knowledge_band": [
         6,
@@ -860,11 +852,10 @@
         "Asks what a typical shift actually looks like"
       ],
       "stresses": {
-        "bias": 4,
+        "fairness": 4,
         "clarity": 3,
         "structure": 3,
-        "communication": 3,
-        "experience": 1
+        "communication": 3
       },
       "knowledge_band": [
         4,
@@ -975,11 +966,10 @@
         "Asks how incentives and targets actually work"
       ],
       "stresses": {
-        "bias": 4,
+        "fairness": 4,
         "clarity": 3,
         "structure": 3,
-        "communication": 3,
-        "experience": 2
+        "communication": 3
       },
       "knowledge_band": [
         6,

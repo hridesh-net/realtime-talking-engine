@@ -30,10 +30,12 @@ from control_plane.ports import (
 from control_plane.repository import InterviewRepository
 from control_plane.schemas import (
     CandidateEnrollRequest,
+    ClarityFact,
     CustomPersonaSpec,
     InterviewCreateRequest,
     InterviewResponse,
     RealtimeCredentialResponse,
+    RoleFactsRequest,
     SessionCreateRequest,
     SessionResponse,
     SessionSummary,
@@ -42,6 +44,7 @@ from control_plane.schemas import (
     TurnRequest,
     VoiceCapabilityResponse,
 )
+from evaluation_agent.role_facts import RoleFactsAgent
 from expectation_agent.agent import InterviewExpectationAgent
 from expectation_agent.schema import InterviewExpectation
 from llm.base import ModelError, RealtimeBroker
@@ -142,6 +145,28 @@ def get_expectation(
 def get_candidate_agent() -> VirtualCandidateAgent:
     """Build the virtual candidate agent from environment configuration."""
     return VirtualCandidateAgent()
+
+
+def get_role_facts_agent() -> RoleFactsAgent:
+    """Build the role-facts agent from environment configuration."""
+    return RoleFactsAgent()
+
+
+@router.post("/role-facts", response_model=list[ClarityFact])
+async def draft_role_facts(
+    req: RoleFactsRequest,
+    agent: RoleFactsAgent = Depends(get_role_facts_agent),
+) -> list[ClarityFact]:
+    """Draft the role-fact checklist from a job description; calls the model.
+
+    Returns every key on the fixed checklist, in order, with an empty statement
+    for anything the job description does not actually say. Nothing is stored —
+    the operator edits these before the interview is created.
+    """
+    try:
+        return await agent.extract(job_title=req.job_title, jd=req.jd, location=req.location)
+    except ModelError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @router.get("/candidate-archetypes")
@@ -255,6 +280,8 @@ async def enroll_candidates(
                 job_location_type=interview.job_location_type,
                 duration_minutes=interview.config.duration_minutes,
                 interview_type=(expectation.interview_type if expectation else "mixed"),
+                language=interview.language,
+                candidate_notes=interview.candidate_notes,
                 expectation=expectation,
                 seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
                 avoid_names=taken,
@@ -384,6 +411,8 @@ async def start_session(
                 job_location_type=interview.job_location_type,
                 duration_minutes=interview.config.duration_minutes,
                 interview_type="mixed",
+                language=interview.language,
+                candidate_notes=interview.candidate_notes,
                 expectation=None,
                 avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
             )

@@ -32,11 +32,25 @@ prompt. Model-mediated: a beat is a tendency, not a scripted event.
 Which manager competencies this persona pressures, and how hard. Advisory —
 it feeds the picker, and scores nothing.
 
-**Rubric criterion** — one of the five fixed manager competencies: `clarity`,
-`structure`, `bias`, `experience`, `communication`. Declared in
-`candidate_agent.RUBRIC_CRITERIA` today; `evaluation_agent/rubric.py` will own
-them. **No criterion is a critical-fail gate** — the report is an analytical
-estimate, and nothing caps or overrides a score.
+**Rubric criterion** — one of the four fixed manager competencies: `clarity`
+(Hiring with Clarity, 25%), `structure` (Structured Interviewing, 30%),
+`fairness` (Fair & Inclusive, 25%), `communication` (Communication & Presence,
+20%). Owned by `evaluation_agent/rubric.py` and re-declared in
+`candidate_agent.RUBRIC_CRITERIA` so the archetypes can name what they stress;
+`test_rubric_vocabulary_agrees_across_the_two_agents` stops the two drifting.
+**No criterion is a critical-fail gate** — the report is an analytical estimate,
+and nothing caps or overrides a score. The design mockup does specify a gate on
+Fair & Inclusive; it is knowingly not implemented, and
+`test_the_rubric_has_no_critical_fail_gate` guards the decision.
+
+**Readiness band** — `Competent` (≥65), `Developing` (45-64), `Needs practice`
+(<45). Thresholds live in the rubric config, not in the report renderer.
+
+**Clarity fact** — one of six fixed role facts a manager is expected to convey:
+`targets`, `shifts`, `location`, `comp_band`, `growth_path`, `next_steps`. The
+*keys* are fixed in `evaluation_agent.schema` so scores stay comparable across
+managers; the *statement* is per-interview and may be drafted from the job
+description. An empty statement drops the fact from that interview's checklist.
 
 **Verdict** — `select` | `reject` | `borderline`. Persona metadata since catalog
 v2.0: it keeps a cast persona internally consistent and picks the two default

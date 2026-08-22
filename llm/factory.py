@@ -70,6 +70,7 @@ ROLE_PREFIXES: dict[str, str] = {
     "candidate": "CANDIDATE",
     "session": "SESSION",
     "judge": "JUDGE",
+    "role_facts": "ROLE_FACTS",
     "voice": "VOICE",
 }
 

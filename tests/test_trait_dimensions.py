@@ -126,8 +126,8 @@ def test_stresses_are_derived_from_the_chosen_presets_not_constant():
         honesty="transparent",
     )
     assert hard.stresses != easy.stresses
-    assert hard.stresses["bias"] == 4
-    assert easy.stresses["bias"] == 1
+    assert hard.stresses["fairness"] == 4
+    assert easy.stresses["fairness"] == 1
     assert hard.stresses["communication"] > easy.stresses["communication"]
     for stresses in (hard.stresses, easy.stresses):
         assert set(stresses) == set(catalog.RUBRIC_CRITERIA)

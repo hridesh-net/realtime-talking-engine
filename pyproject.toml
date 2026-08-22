@@ -87,7 +87,7 @@ ban-relative-imports = "all"
 [tool.mypy]
 plugins = ["pydantic.mypy"]
 python_version = "3.11"
-files = ["control_plane", "expectation_agent", "candidate_agent", "llm"]
+files = ["control_plane", "expectation_agent", "candidate_agent", "evaluation_agent", "llm"]
 strict_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true

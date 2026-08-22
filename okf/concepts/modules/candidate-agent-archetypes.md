@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T18:40:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /candidate_agent/archetypes.py
@@ -34,9 +36,11 @@ TRAIT_NAMES = ("smartness", "dumbness", "seriousness", "effort",
                "interest", "honesty", "preparedness", "nervousness")
 VERDICTS = ("select", "reject", "borderline")
 
-# The five BRD v3 manager competencies. Re-declared here rather than imported:
-# sibling agent packages never import each other.
-RUBRIC_CRITERIA = ("clarity", "structure", "bias", "experience", "communication")
+# The four manager competencies, from the training-wizard spec. Owned by
+# `evaluation_agent.rubric` (DEFAULT_RUBRIC) and re-declared here: sibling agent
+# packages never import each other, so `test_rubric_vocabulary_agrees_across_the_two_agents`
+# (in the control-plane tests, which sit above both) asserts they never drift.
+RUBRIC_CRITERIA = ("clarity", "structure", "fairness", "communication")
 RUBRIC_LABELS: dict[str, str]        # id -> "Hiring with Clarity", ...
 STRESS_LABELS = ("light", "moderate", "high", "very high")
 
@@ -88,9 +92,9 @@ So a malformed archetype breaks the import, not a request.
 
 | key | label | verdict | band | stresses hardest | adjacent | default |
 |---|---|---|---|---|---|---|
-| `cooperative_trap` | The cooperative candidate | select | 6–8 | bias 4 | | select |
+| `cooperative_trap` | The cooperative candidate | select | 6–8 | fairness 4 | | select |
 | `evasive` | The evasive candidate | reject | 3–5 | structure 4 | | reject |
-| `nervous_fresher` | The nervous fresher | select | 6–8 | communication 4, experience 4 | | |
+| `nervous_fresher` | The nervous fresher | select | 6–8 | communication 4 | | |
 | `inflated_resume` | The inflated resume | reject | 3–5 | structure 4 | | |
 | `comp_first` | The comp-first candidate | borderline | 6–8 | clarity 4 | ✓ | |
 | `defensive` | The defensive candidate | borderline | 5–7 | communication 4 | | |
@@ -98,17 +102,18 @@ So a malformed archetype breaks the import, not a request.
 | `frontline_network_candidate` | Frontline network technician | borderline | 4–7 | bias 4 | | |
 | `frontline_sales_candidate` | Frontline sales candidate | select | 6–8 | bias 4 | | |
 
-Every archetype carries exactly **4** `must_discover` signals. A test asserts
+Every archetype carries exactly **4** `must_discover` signals. 3 select, 2
+reject, 4 borderline. `test_the_catalog_covers_every_rubric_criterion` asserts
 every rubric criterion is stressed at level ≥3 by at least one persona — no
 manager competency is left without a persona that exercises it.
 
 The two `frontline_*` entries are Airtel/telecom-specific additions (see
 [Candidate agent § composing personas from presets](/concepts/subsystems/candidate-agent.md)):
 `frontline_network_candidate` carries a career-gap bias trap,
-`frontline_sales_candidate` an age/re-entry one — both were written against the
-v1 schema originally and updated with `session_beats`/`stresses` when the
-catalog moved to v2.0. `CATALOG_VERSION` was **not** bumped for their
-addition — pure content, no existing entry changed.
+`frontline_sales_candidate` an age/re-entry one. `CATALOG_VERSION` was **not**
+bumped for their addition — pure content, no existing entry changed. They take
+the catalog to nine, against a Phase 0 specification that names seven; that is
+an open product question, not a settled one.
 
 `comp_first` is the only one with `allows_adjacent_strength`: they are genuinely
 competent, so the agent lets extra skills through unclamped for it alone.
@@ -131,9 +136,11 @@ for exactly this reason.
 ## `stresses` is advisory
 
 It records which manager competency a persona pressures and how hard, and feeds
-the picker's stress bars. **It scores nothing** — there is no evaluation layer
-yet, and by explicit product decision there is no critical-fail gate on any
-criterion, including bias. Do not reintroduce one.
+the picker's stress bars. **It scores nothing** — the rubric itself now lives in
+[`evaluation_agent.rubric`](/concepts/modules/evaluation-agent-rubric.md), but
+nothing yet scores a session against it, and by explicit product decision there
+is no critical-fail gate on any criterion, fairness included. Do not reintroduce
+one — `test_the_rubric_has_no_critical_fail_gate` guards the decision.
 
 ## Adding an archetype
 

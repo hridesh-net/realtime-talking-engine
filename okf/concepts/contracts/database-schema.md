@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /control_plane/database.py
@@ -30,6 +32,14 @@ column requires manual intervention on an existing database.
 `id` PK, job spec columns, `mode`, `status`, `config` JSON, `ai_persona` JSON
 (legacy), `scheduled_at`, `started_at`, `completed_at`, `recording_id`,
 `metadata` JSON, `created_at`, `updated_at`.
+
+The M1 configuration columns (2026-08-22): `location`, `department`,
+`manager_level` (plain text, default `''`), `language` CHECK
+`(english_indian,hinglish,hindi)` default `english_indian`, `proctoring` CHECK
+`(off,identity,full)` default `off` (**recorded only — nothing in this service
+accesses a camera at any setting**, says the column comment), `candidate_notes`
+(default `''`), `clarity_facts` JSON (default `'[]'`), `report_sections` JSON
+(default `'{}'`).
 
 CHECK constraints mirror the Pydantic patterns: `job_location_type ∈
 (remote,onsite,hybrid)`, `experience_level ∈ (junior,mid,senior)`, `company_type

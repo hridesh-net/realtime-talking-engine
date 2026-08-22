@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /control_plane/api.py
@@ -22,8 +24,9 @@ sources:
 ---
 # Control plane
 
-`control_plane/` — the top layer. Composes both agents and owns all storage. The
-only package allowed to import `sqlite3`.
+`control_plane/` — the top layer. Composes the three agent packages
+(`expectation_agent`, `candidate_agent`, `evaluation_agent`) and owns all
+storage. The only package allowed to import `sqlite3`.
 
 | Module | Role |
 |---|---|
@@ -44,8 +47,9 @@ the router. `main()` runs uvicorn against `control_plane.main:build_app` with
 
 ## Dependency injection
 
-Four provider functions — `get_repo()`, `get_expectation_agent()`,
-`get_candidate_agent()`, `get_session_agent()` — wired with `Depends(...)`.
+Five provider functions — `get_repo()`, `get_expectation_agent()`,
+`get_candidate_agent()`, `get_session_agent()`, `get_role_facts_agent()` — wired
+with `Depends(...)`, plus `get_realtime_broker()` for the voice path.
 Override these in tests rather than patching modules;
 `tests/test_session.py` does exactly that.
 

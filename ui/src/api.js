@@ -30,6 +30,11 @@ export const listArchetypes = () => request('/candidate-archetypes')
 
 export const listTraitDimensions = () => request('/trait-dimensions')
 
+// Drafts the role-fact checklist from a JD. Nothing is stored — the operator
+// edits the drafts before the interview is created.
+export const draftRoleFacts = (body) =>
+  request('/role-facts', { method: 'POST', body: JSON.stringify(body) })
+
 export const listCandidates = (id) => request(`/interviews/${id}/candidates`)
 
 export const enrollCandidates = (id, body) =>

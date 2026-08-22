@@ -22,6 +22,8 @@ from candidate_agent.archetypes import Archetype, ScorecardSignal
 from candidate_agent.session import CandidateSessionAgent
 from control_plane import ports
 from control_plane.repository import InterviewRepository
+from evaluation_agent.role_facts import RoleFactsAgent
+from evaluation_agent.rubric import DEFAULT_RUBRIC
 from expectation_agent.agent import InterviewExpectationAgent
 from llm import factory
 from llm.base import ChatModel, RealtimeBroker, StructuredModel
@@ -32,7 +34,7 @@ from llm.openai_realtime import OpenAIRealtimeBroker
 ROOT = Path(__file__).resolve().parent.parent
 
 #: Every first-party package, in dependency order.
-PACKAGES = ["llm", "expectation_agent", "candidate_agent", "control_plane"]
+PACKAGES = ["llm", "expectation_agent", "candidate_agent", "evaluation_agent", "control_plane"]
 
 #: package -> packages it is allowed to import from.
 #: Enforces one direction: adapters depend on domain, never the reverse.
@@ -40,13 +42,14 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
     "llm": set(),
     "expectation_agent": {"llm"},
     "candidate_agent": {"llm"},
-    "control_plane": {"llm", "expectation_agent", "candidate_agent"},
+    "evaluation_agent": {"llm"},
+    "control_plane": {"llm", "expectation_agent", "candidate_agent", "evaluation_agent"},
 }
 
 #: Vendor SDKs may only be imported inside the llm package.
 VENDOR_MODULES = {"google", "openai", "google.genai"}
 
-AGENTS = [InterviewExpectationAgent, VirtualCandidateAgent, CandidateSessionAgent]
+AGENTS = [InterviewExpectationAgent, VirtualCandidateAgent, CandidateSessionAgent, RoleFactsAgent]
 BACKENDS = [GeminiModel, OpenAIModel]
 CHAT_BACKENDS = [GeminiChatModel, OpenAIChatModel]
 REALTIME_BACKENDS = [OpenAIRealtimeBroker]
@@ -323,6 +326,38 @@ def test_ocp_new_archetype_needs_no_agent_change() -> None:
         assert VirtualCandidateAgent._build_scorecard({}, probe).expected_verdict == "borderline"
     finally:
         del catalog.ARCHETYPES[key]
+
+
+def test_rubric_vocabulary_agrees_across_the_two_agents() -> None:
+    """`candidate_agent` re-declares the rubric ids; they must not drift.
+
+    Sibling agent packages never import each other, so `archetypes.py` cannot
+    import the criterion ids from `evaluation_agent.rubric` even though that is
+    where they are owned. The duplication is deliberate and this test is the
+    price of it: the control plane sits above both, so it is the only place the
+    two can be compared.
+    """
+    assert DEFAULT_RUBRIC.ids == catalog.RUBRIC_CRITERIA, (
+        "candidate_agent.RUBRIC_CRITERIA has drifted from evaluation_agent.rubric"
+    )
+    assert {c.id: c.label for c in DEFAULT_RUBRIC.criteria} == catalog.RUBRIC_LABELS, (
+        "criterion labels disagree between the catalog and the rubric"
+    )
+
+
+def test_the_rubric_has_no_critical_fail_gate() -> None:
+    """An explicit guard on a decision that has been reversed once already.
+
+    The design mockup makes Fair & Inclusive a gate that caps the category and
+    flags the report. The standing product rule is that nothing caps, fails or
+    overrides a score — the report is an analytical estimate. If a gate is ever
+    wanted it must arrive as a deliberate change to this test, not as a quiet
+    field on a criterion.
+    """
+    for criterion in DEFAULT_RUBRIC.criteria:
+        assert not hasattr(criterion, "gate"), f"{criterion.id} grew a gate field"
+        assert not hasattr(criterion, "cap"), f"{criterion.id} grew a cap field"
+    assert round(sum(c.weight for c in DEFAULT_RUBRIC.criteria), 4) == 1.0
 
 
 def test_ocp_realtime_table_is_a_documented_subset() -> None:

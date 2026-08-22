@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /control_plane/api.py
@@ -47,6 +49,7 @@ when a candidate is assigned, so `resume_probing.required` is currently always
 
 | Method | Path | Port used | Status | Notes |
 |---|---|---|---|---|
+| `POST` | `/api/v1/role-facts` | — | 200 / **502** | `{job_title, jd, location}` → `list[ClarityFact]`. **Calls the model.** Stores nothing. |
 | `GET` | `/api/v1/candidate-archetypes` | — | 200 | `{catalog_version, defaults, rubric_criteria[], stress_labels[], archetypes[]}`. Pure data, no I/O. |
 | `GET` | `/api/v1/trait-dimensions` | — | 200 | `trait_dimensions.dimension_catalog()` — every preset/vocabulary a `custom_persona` value can come from. Pure data, no I/O. |
 | `POST` | `/api/v1/interviews/{id}/candidates` | `EnrollmentStore` | **201** / 404 / 422 | **Calls the model, once per archetype or custom persona.** Body optional. |
@@ -129,7 +132,7 @@ evaluation layer's evidence on the wire for a UI convenience.
 
 The archetype catalog ships the **rubric vocabulary** alongside the personas
 (`rubric_criteria`, `stress_labels`) so the picker can label a persona's stress
-bars without keeping its own copy of the five criteria — a UI-side copy would
+bars without keeping its own copy of the four criteria — a UI-side copy would
 drift the moment the rubric is retuned.
 
 Behavior worth knowing:
@@ -140,12 +143,19 @@ Behavior worth knowing:
 * `POST /sessions` on an already-enrolled archetype makes **no model call** and reuses the cast persona, so the same person shows up across repeated practice runs.
 * Every timestamp is stamped **server-side**. The request body carries no clock.
 
+`POST /role-facts` is the wizard's "auto-fill from the job description" button.
+It is deliberately **not** part of interview creation: the operator sees the
+drafts and corrects them before anything is stored, and `POST /interviews` stays
+a fast, model-free call. It always returns every key on the fixed checklist, in
+order, with an empty statement for anything the description does not actually
+say — see [Evaluation agent](/concepts/subsystems/evaluation-agent.md).
+
 ## Cross-cutting
 
 * Errors are FastAPI's `{"detail": ...}`; the UI's fetch wrapper unwraps `detail` when it is a string.
 * No authentication, rate limiting, or pagination anywhere.
 * `get_repo()` opens a **new SQLite connection per request** via `init_db()`. The source notes this should be a pooled dependency in production.
-* Dependency injection is `Depends(get_repo)` / `Depends(get_expectation_agent)` / `Depends(get_candidate_agent)` / `Depends(get_session_agent)` / `Depends(get_realtime_broker)` — override these in tests rather than patching modules. `tests/test_session.py` does exactly that.
+* Dependency injection is `Depends(get_repo)` / `Depends(get_expectation_agent)` / `Depends(get_candidate_agent)` / `Depends(get_session_agent)` / `Depends(get_role_facts_agent)` / `Depends(get_realtime_broker)` — override these in tests rather than patching modules. `tests/test_session.py` does exactly that.
 
 ## Related
 

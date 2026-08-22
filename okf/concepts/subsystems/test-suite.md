@@ -36,7 +36,7 @@ The standout is `test_ocp_new_provider_needs_no_agent_change` /
 and archetype at runtime and prove the system absorbs them, rather than asserting
 that extension is theoretically possible.
 
-### `tests/test_candidate_rubric.py` (279 ln)
+### `tests/test_candidate_rubric.py` (401 ln)
 
 The real safety net for the persona pipeline. Groups:
 
@@ -44,6 +44,7 @@ The real safety net for the persona pipeline. Groups:
 * **Determinism** — traits land inside archetype bounds; the same seed reproduces the same person; different interviews produce different people; `smartness_ratio` points the same direction as the verdict.
 * **Clamping and repair** — the model cannot exceed the knowledge band; missing and renamed skills are restored; adjacent strength survives only where allowed.
 * **Scorecard** — catalog ids and weights survive; model wording is used only when ids match.
+* **Language and operator notes** — every language reaches both the casting prompt and the compiled contract; a hostile `candidate_notes` stays subordinated in the prompt and the knowledge clamp holds regardless.
 * **Engine contract** — self-consistency (`min ≤ target ≤ max`, ceilings present); the system prompt carries the behavioural contract; **the system prompt is byte-stable**.
 * **Validation** — resume claims reject bad truthfulness values.
 
@@ -95,3 +96,12 @@ re-impose.
 * Nothing checks that `EXPECTATION_JSON_SCHEMA` matches `InterviewExpectation` — two hand-maintained representations of one shape.
 * `expectation_agent/agent.py` has no offline test of its overwrite logic, which is where its determinism guarantee actually lives.
 * No JS tests for `ui/`.
+
+## Guards added with the Phase 0 MVP (2026-08-22)
+
+Three tests exist to stop a decision being reversed by accident rather than to
+catch a bug:
+
+* `test_operator_notes_cannot_override_the_archetype` — free operator text reaches the casting prompt, so this asserts both that the prompt subordinates it and that the knowledge clamp still holds afterwards.
+* `test_rubric_vocabulary_agrees_across_the_two_agents` — `candidate_agent` re-declares the rubric criterion ids because siblings may not import each other. The control plane sits above both and is the only place they can be compared.
+* `test_the_rubric_has_no_critical_fail_gate` — the design mockup specifies a gate on Fair & Inclusive that the standing product rule forbids. If a gate is ever wanted it must arrive as a deliberate edit to this test, not as a quiet field on a criterion.

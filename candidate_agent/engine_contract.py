@@ -33,6 +33,27 @@ UNIVERSAL_FORBIDDEN: list[str] = [
     "Never end the interview yourself — the interviewer controls the session",
 ]
 
+#: How the persona speaks. `language` is the interviewer-facing setting; these
+#: are the instructions that make it behaviour rather than a label.
+LANGUAGE_DIRECTIVES: dict[str, str] = {
+    "english_indian": (
+        "You speak Indian English. Natural Indian phrasing and rhythm, no attempt at "
+        "an American or British accent. Occasional Hindi words only where an Indian "
+        "English speaker would genuinely use them."
+    ),
+    "hinglish": (
+        "You speak Hinglish — Hindi and English mixed the way it is actually spoken "
+        "in an Indian workplace. Switch mid-sentence where it is natural. English for "
+        "work and technical words, Hindi for feeling, emphasis and connectives. Never "
+        "translate yourself, and never speak a full paragraph in only one language."
+    ),
+    "hindi": (
+        "You speak Hindi. Use English only for words that have no everyday Hindi "
+        "equivalent in this line of work. Do not translate yourself into English."
+    ),
+}
+DEFAULT_LANGUAGE = "english_indian"
+
 _PACE_MS = {"slow": 1200, "measured": 700, "fast": 250}
 _VERBOSITY_TURNS = {"terse": (1, 3), "balanced": (3, 6), "verbose": (6, 14)}
 _DEPTH_SENTENCES = {"minimal": 2, "adequate": 5, "thorough": 9}
@@ -445,6 +466,7 @@ def _compile_system_prompt(
     knowledge_map: list[SkillKnowledge],
     policy: AnswerPolicy,
     human_traits: HumanTraitProfile | None = None,
+    language: str = DEFAULT_LANGUAGE,
 ) -> str:
     """Build the realtime model's system instruction. Injected verbatim."""
     knowledge_lines = []
@@ -472,6 +494,7 @@ BACKGROUND
 Years of experience: {years_experience}.
 
 HOW YOU TALK
+{LANGUAGE_DIRECTIVES.get(language, LANGUAGE_DIRECTIVES[DEFAULT_LANGUAGE])}
 Pace: {speech.pace}. Verbosity: {speech.verbosity}. Register: {speech.formality}.
 Tone: {speech.tone}.
 Filler words ({speech.filler_frequency}/10) and hesitation ({speech.hesitation_frequency}/10)
@@ -529,6 +552,7 @@ def build_engine_contract(
     policy: AnswerPolicy,
     opening_line: str,
     human_traits: HumanTraitProfile | None = None,
+    language: str = DEFAULT_LANGUAGE,
 ) -> EngineContract:
     """Compile the runtime contract the Go engine consumes for one persona."""
     return EngineContract(
@@ -545,9 +569,10 @@ def build_engine_contract(
             knowledge_map=knowledge_map,
             policy=policy,
             human_traits=human_traits,
+            language=language,
         ),
         opening_line=opening_line,
-        voice_directives=_speech_directives(speech, aptitude),
+        voice_directives={**_speech_directives(speech, aptitude), "language": language},
         turn_policy=_turn_policy(policy, speech),
         knowledge_ceiling={k.skill: k.level for k in knowledge_map},
         unlock_condition=policy.reveals_depth_when,
