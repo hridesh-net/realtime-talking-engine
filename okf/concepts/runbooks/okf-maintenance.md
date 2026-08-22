@@ -34,7 +34,7 @@ Route from the changed path via the [Repo Map](/concepts/repo-map.md), then:
 | Compiled persona prompt | [engine_contract.py card](/concepts/modules/candidate-agent-engine-contract.md), [EngineContract](/concepts/contracts/engine-contract.md) — and bump `ENGINE_CONTRACT_VERSION` |
 | New env var | [Dev setup](/concepts/runbooks/dev-setup.md) |
 | New endpoint | [REST API](/concepts/contracts/rest-api.md), [api.py card](/concepts/modules/control-plane-api.md) |
-| New test file or coverage area | [Test suite](/concepts/subsystems/test-suite.md) |
+| New test file or coverage area | [Test suite](/concepts/subsystems/test-suite.md) — **and** the check table in [Checks](/concepts/runbooks/checks.md) if `check.sh` runs it |
 | Shipping something from a "not built" list | [Project Overview](/concepts/project-overview.md) build state |
 
 Then append to `/log.md` under today's date:
@@ -67,9 +67,9 @@ done
 `index.md` files carry **no** frontmatter except `okf_version` in the bundle root.
 Full spec summary: [OKF v0.2](/references/okf-spec.md).
 
-## ⚠️ Two `.gitignore` problems
+## `.gitignore` — resolved 2026-08-22
 
-Both were found while writing this bundle and neither is fixed:
-
-1. **Lines 22–23 ignore `owner_handover/` and `docs/`**, directly above a comment saying those deliverables are *"tracked on purpose"*. Eight files — including every candidate/engine schema and `docs/GO_ENGINE_CONTRACT.md`, the spec the Go team needs — are not in git. See [Owner handover](/concepts/subsystems/owner-handover.md).
-2. **`okf/` is not ignored**, which is probably correct (this bundle should travel with the repo) — but it is worth a deliberate decision rather than an accident. If it should be shared, commit it.
+The rules that ignored `owner_handover/` and `docs/` — directly above a comment
+saying those deliverables were *"tracked on purpose"* — were removed, and the
+comment now explains why they must stay tracked. `okf/` is deliberately **not**
+ignored: this bundle travels with the repo.

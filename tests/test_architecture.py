@@ -19,13 +19,15 @@ import pytest
 from candidate_agent import archetypes as catalog
 from candidate_agent.agent import VirtualCandidateAgent
 from candidate_agent.archetypes import Archetype, ScorecardSignal
+from candidate_agent.session import CandidateSessionAgent
 from control_plane import ports
 from control_plane.repository import InterviewRepository
 from expectation_agent.agent import InterviewExpectationAgent
 from llm import factory
-from llm.base import StructuredModel
-from llm.gemini import GeminiModel
-from llm.openai_model import OpenAIModel
+from llm.base import ChatModel, RealtimeBroker, StructuredModel
+from llm.gemini import GeminiChatModel, GeminiModel
+from llm.openai_model import OpenAIChatModel, OpenAIModel
+from llm.openai_realtime import OpenAIRealtimeBroker
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,8 +46,10 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
 #: Vendor SDKs may only be imported inside the llm package.
 VENDOR_MODULES = {"google", "openai", "google.genai"}
 
-AGENTS = [InterviewExpectationAgent, VirtualCandidateAgent]
+AGENTS = [InterviewExpectationAgent, VirtualCandidateAgent, CandidateSessionAgent]
 BACKENDS = [GeminiModel, OpenAIModel]
+CHAT_BACKENDS = [GeminiChatModel, OpenAIChatModel]
+REALTIME_BACKENDS = [OpenAIRealtimeBroker]
 
 
 def _modules(package: str) -> list[Path]:
@@ -115,7 +119,19 @@ def test_dip_handlers_depend_on_ports_not_the_sqlite_adapter() -> None:
 # Interface segregation — no consumer depends on methods it does not use
 # ---------------------------------------------------------------------------
 
-NARROW_PORTS = [ports.InterviewStore, ports.ExpectationStore, ports.CandidateStore]
+NARROW_PORTS = [
+    ports.InterviewStore,
+    ports.ExpectationStore,
+    ports.CandidateStore,
+    ports.SessionStore,
+]
+
+COMPOSITION_PORTS = [
+    ports.ExpectationWorkflowStore,
+    ports.EnrollmentStore,
+    ports.SessionWorkflowStore,
+    ports.TurnWorkflowStore,
+]
 
 
 @pytest.mark.parametrize("port", NARROW_PORTS, ids=lambda p: p.__name__)
@@ -138,7 +154,7 @@ def test_isp_ports_do_not_overlap(port: type) -> None:
 
 @pytest.mark.parametrize(
     "port",
-    [*NARROW_PORTS, ports.ExpectationWorkflowStore, ports.EnrollmentStore],
+    [*NARROW_PORTS, *COMPOSITION_PORTS],
     ids=lambda p: p.__name__,
 )
 def test_isp_sqlite_adapter_satisfies_every_port(port: type) -> None:
@@ -181,13 +197,67 @@ def test_lsp_backends_implement_the_whole_contract(backend: type) -> None:
     assert isinstance(backend.provider, property)
 
 
-@pytest.mark.parametrize("backend", BACKENDS, ids=lambda c: c.__name__)
-def test_lsp_backends_are_constructed_identically(backend: type) -> None:
-    """The factory constructs every provider through one call shape."""
+@pytest.mark.parametrize("backend", CHAT_BACKENDS, ids=lambda c: c.__name__)
+def test_lsp_chat_backends_share_the_base_signature(backend: type) -> None:
+    """Any ChatModel can replace any other without changing call sites."""
+    assert issubclass(backend, ChatModel)
+    base = inspect.signature(ChatModel.generate_text)
+    impl = inspect.signature(backend.generate_text)
+    assert impl.parameters == base.parameters, (
+        f"{backend.__name__}.generate_text signature diverges from the base class"
+    )
+    assert impl.return_annotation == base.return_annotation
+
+
+@pytest.mark.parametrize("backend", [*BACKENDS, *CHAT_BACKENDS], ids=lambda c: c.__name__)
+def test_lsp_every_backend_is_constructed_identically(backend: type) -> None:
+    """The factory constructs every provider, on either port, through one call shape."""
     params = list(inspect.signature(backend.__init__).parameters)
     assert params == ["self", "model_id", "temperature", "api_key"], (
         f"{backend.__name__} cannot be built by llm.factory's uniform constructor call"
     )
+
+
+def test_isp_the_two_model_ports_stay_separate() -> None:
+    """A chat model must not drag a JSON-schema method behind it, or vice versa."""
+    assert not issubclass(ChatModel, StructuredModel)
+    assert not issubclass(StructuredModel, ChatModel)
+    assert "generate_json" not in dir(ChatModel)
+    assert "generate_text" not in dir(StructuredModel)
+
+
+def test_isp_the_realtime_broker_is_not_a_model_port() -> None:
+    """Voice is a credential-minting job, not a third way to call a model."""
+    assert not issubclass(RealtimeBroker, StructuredModel)
+    assert not issubclass(RealtimeBroker, ChatModel)
+    for leaked in ("generate_json", "generate_text"):
+        assert leaked not in dir(RealtimeBroker)
+
+
+@pytest.mark.parametrize("backend", REALTIME_BACKENDS, ids=lambda c: c.__name__)
+def test_lsp_realtime_backends_share_the_base_signature(backend: type) -> None:
+    """Any RealtimeBroker can replace any other without changing call sites."""
+    assert issubclass(backend, RealtimeBroker)
+    base = inspect.signature(RealtimeBroker.mint)
+    impl = inspect.signature(backend.mint)
+    assert impl.parameters == base.parameters, (
+        f"{backend.__name__}.mint signature diverges from the base class"
+    )
+    assert not getattr(backend, "__abstractmethods__", set()), f"{backend.__name__} is abstract"
+    assert list(inspect.signature(backend.__init__).parameters) == [
+        "self",
+        "model_id",
+        "api_key",
+    ], f"{backend.__name__} cannot be built by llm.factory's uniform constructor call"
+
+
+@pytest.mark.parametrize("backend", REALTIME_BACKENDS, ids=lambda c: c.__name__)
+def test_realtime_backends_advertise_stable_voices(backend: type) -> None:
+    """Voice choice indexes into this tuple, so its order is part of the contract."""
+    assert isinstance(backend.voices, property)
+    voices = backend.voices.fget(backend.__new__(backend))  # type: ignore[misc]
+    assert isinstance(voices, tuple) and voices, f"{backend.__name__} advertises no voices"
+    assert len(set(voices)) == len(voices), "duplicate voice names shift persona assignments"
 
 
 @pytest.mark.parametrize("a", list(catalog.ARCHETYPES.values()), ids=lambda a: a.key)
@@ -229,15 +299,21 @@ def test_ocp_new_archetype_needs_no_agent_change() -> None:
         interviewer_challenge="none",
         traits=dict.fromkeys(catalog.TRAIT_NAMES, (5, 5)),
         knowledge_band=(4, 6),
-        speech=catalog.get("lazy").speech,
-        answer_policy=catalog.get("lazy").answer_policy,
+        speech=catalog.get("evasive").speech,
+        answer_policy=catalog.get("evasive").answer_policy,
         must_discover=[ScorecardSignal(id="only", signal="s", weight=1.0, how_to_surface="h")],
         interviewer_failure_modes=["none"],
+        session_beats=["does the probe thing"],
+        stresses={"structure": 2},
     )
     catalog.ARCHETYPES[key] = probe
     try:
         assert catalog.get(key) is probe
-        assert any(row["key"] == key for row in catalog.catalog())
+        row = next(r for r in catalog.catalog() if r["key"] == key)
+        # The picker's two panels come straight off the catalog row, so a new
+        # archetype must arrive with them rather than needing a UI edit.
+        assert row["session_beats"] == ["does the probe thing"]
+        assert row["stresses"] == {"structure": 2}
         # The agent's deterministic half handles it without knowing it exists.
         from candidate_agent.agent import derive_traits
 
@@ -249,9 +325,31 @@ def test_ocp_new_archetype_needs_no_agent_change() -> None:
         del catalog.ARCHETYPES[key]
 
 
+def test_ocp_realtime_table_is_a_documented_subset() -> None:
+    """Realtime voice is optional per provider — but never a provider we do not know.
+
+    Unlike the text tables, ``REALTIME_PROVIDERS`` is deliberately partial: not
+    every provider offers speech-to-speech on comparable terms, and shipping a
+    Voice button that cannot work is worse than not offering one. What must hold
+    is that it names only known providers, and that each has a realtime model id.
+    """
+    assert set(factory.REALTIME_PROVIDERS) <= set(factory.PROVIDERS), (
+        "REALTIME_PROVIDERS names a provider missing from PROVIDERS"
+    )
+    assert set(factory.REALTIME_PROVIDERS) == set(factory.DEFAULT_REALTIME_MODEL_IDS), (
+        "every realtime provider needs a realtime model id; the text model id will not work"
+    )
+
+
 def test_ocp_new_provider_needs_no_agent_change() -> None:
     """Providers are registered in one table, not branched on inside agents."""
-    assert set(factory.PROVIDERS) == set(factory.API_KEY_VARS) == set(factory.DEFAULT_MODEL_IDS), (
+    tables = (
+        factory.PROVIDERS,
+        factory.CHAT_PROVIDERS,
+        factory.API_KEY_VARS,
+        factory.DEFAULT_MODEL_IDS,
+    )
+    assert len({frozenset(t) for t in tables}) == 1, (
         "provider tables are out of sync; adding a provider means adding one row to each"
     )
     for module in (*_modules("candidate_agent"), *_modules("expectation_agent")):

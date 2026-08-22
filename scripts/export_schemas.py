@@ -18,7 +18,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from candidate_agent import archetypes as catalog
 from candidate_agent.schema import EngineContract, VirtualCandidate
-from control_plane.schemas import CandidateEnrollRequest, InterviewResponse
+from control_plane.schemas import (
+    CandidateEnrollRequest,
+    InterviewResponse,
+    RealtimeCredentialResponse,
+    SessionCreateRequest,
+    SessionResponse,
+    SessionSummary,
+    TranscriptAppendRequest,
+)
 from expectation_agent.schema import InterviewExpectation
 
 OUT = Path(__file__).resolve().parent.parent / "owner_handover"
@@ -28,8 +36,8 @@ EXPORTS = [
         "candidate_enroll_schema.json",
         CandidateEnrollRequest,
         "Body for POST /api/v1/interviews/{interview_id}/candidates. Send no body to "
-        "enroll the two defaults: one candidate who should be selected and one who "
-        "should be rejected.",
+        "enroll the two defaults: the bias trap and the evasive candidate, which "
+        "carry the heaviest rubric criteria between them.",
     ),
     (
         "candidate_output_schema.json",
@@ -47,6 +55,40 @@ EXPORTS = [
         "interview_response_schema.json",
         InterviewResponse,
         "Interview record returned by the interview endpoints.",
+    ),
+    (
+        "session_create_schema.json",
+        SessionCreateRequest,
+        "Body for POST /api/v1/sessions. Opens a live typed interview against one "
+        "persona, casting it first if that archetype is not yet enrolled.",
+    ),
+    (
+        "session_output_schema.json",
+        SessionResponse,
+        "A live or finished interview session with its full server-stamped "
+        "transcript. Returned by the session endpoints; this is the artifact the "
+        "evaluation layer reads, and the shape the Go voice engine will emit.",
+    ),
+    (
+        "session_summary_schema.json",
+        SessionSummary,
+        "One row of GET /api/v1/interviews/{interview_id}/sessions. A session "
+        "without its transcript, for listing what has been run against an "
+        "interview.",
+    ),
+    (
+        "session_realtime_schema.json",
+        RealtimeCredentialResponse,
+        "Returned by POST /api/v1/sessions/{session_id}/realtime. Everything a "
+        "browser needs to open a speech-to-speech session with the realtime "
+        "vendor directly. The persona instructions are sealed into the minted "
+        "credential vendor-side and are deliberately not included here.",
+    ),
+    (
+        "session_transcript_append_schema.json",
+        TranscriptAppendRequest,
+        "Body for POST /api/v1/sessions/{session_id}/transcript. Records a turn "
+        "that was spoken elsewhere (a voice session) without generating a reply.",
     ),
     (
         "expectation_output_schema.json",
@@ -73,6 +115,8 @@ def _rendered() -> dict[str, str]:
                 "catalog_version": catalog.CATALOG_VERSION,
                 "defaults": catalog.default_keys(),
                 "trait_axes": list(catalog.TRAIT_NAMES),
+                "rubric_criteria": {c: catalog.RUBRIC_LABELS[c] for c in catalog.RUBRIC_CRITERIA},
+                "stress_labels": list(catalog.STRESS_LABELS),
                 "archetypes": [
                     {
                         **row,

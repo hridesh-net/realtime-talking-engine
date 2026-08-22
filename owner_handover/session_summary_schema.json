@@ -1,0 +1,73 @@
+{
+  "description": "One row of GET /api/v1/interviews/{interview_id}/sessions. A session without its transcript, for listing what has been run against an interview.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "interview_id": {
+      "title": "Interview Id",
+      "type": "string"
+    },
+    "persona_key": {
+      "title": "Persona Key",
+      "type": "string"
+    },
+    "candidate_name": {
+      "title": "Candidate Name",
+      "type": "string"
+    },
+    "status": {
+      "pattern": "^(live|completed|abandoned)$",
+      "title": "Status",
+      "type": "string"
+    },
+    "modality": {
+      "default": "text",
+      "pattern": "^(text|voice)$",
+      "title": "Modality",
+      "type": "string"
+    },
+    "planned_minutes": {
+      "title": "Planned Minutes",
+      "type": "integer"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "ended_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ended At"
+    },
+    "turn_count": {
+      "description": "Turns stored so far, both speakers.",
+      "minimum": 0,
+      "title": "Turn Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "interview_id",
+    "persona_key",
+    "candidate_name",
+    "status",
+    "planned_minutes",
+    "started_at",
+    "turn_count"
+  ],
+  "title": "SessionSummary",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -9,13 +9,14 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /llm/base.py
   - resource: /llm/factory.py
   - resource: /llm/gemini.py
   - resource: /llm/openai_model.py
+  - resource: /llm/openai_realtime.py
 ---
 # LLM port
 
@@ -25,16 +26,40 @@ an AST scan in `tests/test_architecture.py`.
 
 | Module | Contents |
 |---|---|
-| `base.py` | [`StructuredModel` ABC + `ModelError`](/concepts/contracts/structured-model.md) |
-| `gemini.py` | `GeminiModel` — native JSON mode via `response_schema` |
-| `openai_model.py` | `OpenAIModel` — JSON mode with the schema restated in the system turn |
-| `factory.py` | [`build_model(role, temperature)`](/concepts/modules/llm-factory.md) — the only place that knows which providers exist |
+| `base.py` | `ModelClient` + [`StructuredModel`](/concepts/contracts/structured-model.md) + [`ChatModel`](/concepts/contracts/chat-model.md) + [`RealtimeBroker`](/concepts/contracts/realtime-voice.md) + `ModelError` |
+| `gemini.py` | `GeminiModel` (native JSON mode via `response_schema`), `GeminiChatModel` |
+| `openai_model.py` | `OpenAIModel` (JSON mode with the schema restated in the system turn), `OpenAIChatModel` |
+| `openai_realtime.py` | `OpenAIRealtimeBroker` — mints ephemeral WebRTC credentials; the only realtime provider |
+| `factory.py` | [`build_model` / `build_chat_model`](/concepts/modules/llm-factory.md) — the only place that knows which providers exist |
 
-## The shape
+## Three ports, five adapters
 
-One method: `async generate_json(*, system, prompt, schema) -> dict`. One error
-type: `ModelError`. Two properties every backend exposes: `model_id`,
-`temperature`, plus an abstract `provider` name.
+| Port | Method | Used by |
+|---|---|---|
+| `StructuredModel` | `async generate_json(*, system, prompt, schema) -> dict` | expectation agent, persona casting, the future judge pass |
+| `ChatModel` | `async generate_text(*, system, messages) -> str` | the live text session |
+| `RealtimeBroker` | `async mint(*, session, ttl_seconds) -> RealtimeCredential` | the live **voice** session |
+
+`RealtimeBroker` is the odd one out and deliberately so: nothing here ever
+receives a model token through it. It mints a credential a *browser* redeems, so
+the audio path is peer-to-vendor and never enters this process. See
+[Realtime voice](/concepts/contracts/realtime-voice.md).
+
+They are deliberately **not** one interface — see
+[ChatModel § why this is not a method on StructuredModel](/concepts/contracts/chat-model.md).
+Both inherit `ModelClient`, which carries `model_id`, `temperature`, and an
+abstract `provider`, so the factory builds either through the same
+`(model_id, temperature, api_key)` call. One error type throughout: `ModelError`.
+
+A provider must implement both **text** ports. `PROVIDERS`, `CHAT_PROVIDERS`,
+`API_KEY_VARS`, and `DEFAULT_MODEL_IDS` are asserted to carry identical key
+sets, so a half-added provider fails the architecture gate rather than blowing
+up at the first session turn.
+
+`REALTIME_PROVIDERS` is the documented exception — a **subset**, because realtime
+speech-to-speech is not something every vendor offers on comparable terms.
+OpenAI is the only entry today. A provider missing from it simply has no voice
+mode.
 
 Agents receive an **already-built** model. They never call the factory for
 credentials, never read `GEMINI_API_KEY`, and never import an SDK — tested three
@@ -43,7 +68,13 @@ separate ways.
 ## Configuration
 
 Resolution order per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/
-`LLM_MODEL` → the provider default. Roles are `expectation` and `candidate`.
+`LLM_MODEL` → the provider default. Roles are `expectation`, `candidate`,
+`session`, and `judge` — one per workload, so the hot path (a session call per
+turn) can move provider without dragging the once-per-interview calls with it.
+`judge` is wired in config ahead of the evaluation layer that will use it.
+`voice` resolves against the realtime-capable providers **only** — it does not
+fall through to `LLM_PROVIDER`, because the text provider may offer no realtime
+API at all, and a fallback there would fail at mint time with a confusing error.
 Defaults: `gemini` → `gemini-2.5-flash`, `openai` → `gpt-4o-mini`. Model IDs are
 config, never hardcoded at a call site.
 
@@ -54,10 +85,15 @@ present, iterating `PROVIDERS` in insertion order — **Gemini first**.
 
 Set by the agent, not the config: expectation **0.1** (the document must be
 stable across runs), candidate **0.35** (personas need texture, and everything
-reproducible is computed outside the model anyway).
+reproducible is computed outside the model anyway), session **0.8** (a persona
+that answers like a form letter defeats the exercise; nothing reproducible
+depends on the call). Voice sessions set no temperature — the realtime vendor
+owns sampling, and the persona is shaped by the compiled instructions instead.
 
 ## Adding a provider
 
-Add the class, then one row each in `PROVIDERS`, `API_KEY_VARS`, and
-`DEFAULT_MODEL_IDS`. That is the whole change — proven by an OCP test that
+Add **both** text classes — a `StructuredModel` and a `ChatModel` — then one row
+each in `PROVIDERS`, `CHAT_PROVIDERS`, `API_KEY_VARS`, and `DEFAULT_MODEL_IDS`.
+Voice is optional: add a `RealtimeBroker` plus rows in `REALTIME_PROVIDERS` and
+`DEFAULT_REALTIME_MODEL_IDS` only if that vendor has a realtime API. That is the whole change — proven by an OCP test that
 registers a provider at runtime.

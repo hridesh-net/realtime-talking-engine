@@ -61,7 +61,7 @@ All of `generate` is keyword-only.
 
 * Indexes the model's entries by `skill.strip().lower()`.
 * For **every** `skills_required` entry, in order: pops the model's entry (or `{}`), takes `level` if numeric else the band midpoint `(low+high)//2`, and **clamps into `[low, high]`**. The comment says it plainly: `# clamp — the ceiling is ours`. The original spelling is preserved.
-* Stance default is chosen by band: `solid` if `low >= 7`, `bluffs` for `confident_bluffer`, else `shallow`.
+* Stance default is chosen by band: `solid` if `low >= 7`, `bluffs` for `inflated_resume`, else `shallow`.
 * Leftover skills the model invented survive **only** when `allows_adjacent_strength`, clamped to 0–10 rather than the band.
 * Caps: 5 talking points, 4 wrong beliefs.
 

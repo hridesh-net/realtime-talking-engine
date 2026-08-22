@@ -1,0 +1,68 @@
+{
+  "description": "The runtime slice the Go interview-candidate engine consumes. Served by GET /api/v1/candidates/{candidate_id}/engine-contract.",
+  "properties": {
+    "contract_version": {
+      "default": "v1.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "candidate_id": {
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "interview_id": {
+      "title": "Interview Id",
+      "type": "string"
+    },
+    "system_prompt": {
+      "title": "System Prompt",
+      "type": "string"
+    },
+    "opening_line": {
+      "title": "Opening Line",
+      "type": "string"
+    },
+    "voice_directives": {
+      "additionalProperties": true,
+      "title": "Voice Directives",
+      "type": "object"
+    },
+    "turn_policy": {
+      "additionalProperties": true,
+      "title": "Turn Policy",
+      "type": "object"
+    },
+    "knowledge_ceiling": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Knowledge Ceiling",
+      "type": "object"
+    },
+    "unlock_condition": {
+      "title": "Unlock Condition",
+      "type": "string"
+    },
+    "forbidden_behaviors": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Forbidden Behaviors",
+      "type": "array"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "interview_id",
+    "system_prompt",
+    "opening_line",
+    "voice_directives",
+    "turn_policy",
+    "knowledge_ceiling",
+    "unlock_condition",
+    "forbidden_behaviors"
+  ],
+  "title": "EngineContract",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

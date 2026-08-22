@@ -19,9 +19,12 @@ dist/
 # Node / UI
 node_modules/
 ui/dist/
-owner_handover/
-docs/
-# Owner deliverables are hand-maintained, not generated — tracked on purpose.
+# owner_handover/ and docs/ are deliberately NOT ignored. They are hand-maintained
+# deliverables — the engine contract schema the Go build generates its types from,
+# the BRD, the implementation plans — and losing them to an ignore rule would lose
+# the specification, not just a build output. They were ignored here until
+# 2026-08-22, which left 7 of 12 owner_handover files and 5 of 6 docs files
+# untracked, including GO_ENGINE_CONTRACT.md.
 
 .DS_Store
 .claude/settings.local.json

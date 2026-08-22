@@ -20,6 +20,8 @@ Data shapes live in [Contracts](/concepts/contracts/index.md) instead —
 * [candidate_agent/archetypes.py](/concepts/modules/candidate-agent-archetypes.md) - the fixed catalog.
 * [candidate_agent/agent.py](/concepts/modules/candidate-agent-agent.md) - casting and re-imposition.
 * [candidate_agent/engine_contract.py](/concepts/modules/candidate-agent-engine-contract.md) - the compiled runtime slice.
+* [candidate_agent/session.py](/concepts/modules/candidate-agent-session.md) - one persona turn in a live text interview.
+* [candidate_agent/voice.py](/concepts/modules/candidate-agent-voice.md) - the persona's realtime voice session config.
 
 ## control_plane
 * [control_plane/api.py](/concepts/modules/control-plane-api.md) - routes and dependency injection.

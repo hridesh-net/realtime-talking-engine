@@ -41,12 +41,12 @@ JOB = {
 
 #: One per behavioural family, plus both defaults.
 SCENARIOS: list[str] = [
-    "strong_hire",
-    "clear_reject",
-    "smart_but_lazy",
-    "confident_bluffer",
-    "nervous_but_capable",
-    "specialist_mismatch",
+    "cooperative_trap",
+    "evasive",
+    "nervous_fresher",
+    "inflated_resume",
+    "comp_first",
+    "rambler",
 ]
 
 
@@ -118,7 +118,7 @@ def validate(c: VirtualCandidate, archetype_key: str) -> list[str]:
     # --- persona texture the whole exercise depends on ---
     if not c.speech_profile.sample_phrases:
         fail.append("no sample_phrases — the voice model has nothing to anchor to")
-    if a.key == "confident_bluffer" and not any(k.wrong_beliefs for k in c.knowledge_map):
+    if a.key == "inflated_resume" and not any(k.wrong_beliefs for k in c.knowledge_map):
         fail.append("bluffer has no wrong_beliefs to be caught out on")
     # Dishonest archetypes must inflate something, or resume probing has no target.
     if a.traits["honesty"][1] <= 4 and all(r.truthfulness == "true" for r in c.resume_claims):
@@ -179,10 +179,10 @@ async def run() -> dict[str, list[str]]:
         print(f"  - {f}")
 
     # --- determinism: same seed must reproduce the same person ---
-    print("\nRe-casting strong_hire with the same seed ...")
+    print("\nRe-casting cooperative_trap with the same seed ...")
     again = await agent.generate(
         interview_id=interview.id,
-        archetype_key="strong_hire",
+        archetype_key="cooperative_trap",
         job_title=interview.job_title,
         jd=interview.jd,
         skills_required=interview.skills_required,
@@ -191,7 +191,7 @@ async def run() -> dict[str, list[str]]:
         job_location_type=interview.job_location_type,
         duration_minutes=interview.config.duration_minutes,
     )
-    first = next(c for c in cast if c.archetype == "strong_hire")
+    first = next(c for c in cast if c.archetype == "cooperative_trap")
     det: list[str] = []
     if again.candidate_id != first.candidate_id:
         det.append("candidate_id is not stable for the same seed")

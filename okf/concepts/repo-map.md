@@ -9,16 +9,17 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 ---
 # Repo Map
 
 | Path | Concept |
 |---|---|
-| `llm/base.py` | [StructuredModel contract](/concepts/contracts/structured-model.md) |
+| `llm/base.py` | [StructuredModel](/concepts/contracts/structured-model.md) and [ChatModel](/concepts/contracts/chat-model.md) — the two model ports |
 | `llm/factory.py` | [llm/factory.py](/concepts/modules/llm-factory.md) — provider/model resolution |
 | `llm/gemini.py`, `llm/openai_model.py` | [LLM port subsystem](/concepts/subsystems/llm-port.md) |
+| `llm/openai_realtime.py` | [Realtime voice](/concepts/contracts/realtime-voice.md) — the only realtime provider |
 | `expectation_agent/agent.py` | [expectation_agent/agent.py](/concepts/modules/expectation-agent-agent.md) |
 | `expectation_agent/rubric.py` | [expectation_agent/rubric.py](/concepts/modules/expectation-agent-rubric.md) — the deterministic tables |
 | `expectation_agent/schema.py` | [InterviewExpectation contract](/concepts/contracts/interview-expectation.md) |
@@ -27,20 +28,28 @@ status: stable
 | `candidate_agent/archetypes.py` | [candidate_agent/archetypes.py](/concepts/modules/candidate-agent-archetypes.md) — the catalog |
 | `candidate_agent/engine_contract.py` | [candidate_agent/engine_contract.py](/concepts/modules/candidate-agent-engine-contract.md) |
 | `candidate_agent/schema.py` | [VirtualCandidate contract](/concepts/contracts/virtual-candidate.md), [EngineContract](/concepts/contracts/engine-contract.md) |
-| `candidate_agent/prompts.py` | [Candidate agent subsystem](/concepts/subsystems/candidate-agent.md) |
+| `candidate_agent/session.py` | [candidate_agent/session.py](/concepts/modules/candidate-agent-session.md) — one persona turn in a live interview |
+| `candidate_agent/voice.py` | [candidate_agent/voice.py](/concepts/modules/candidate-agent-voice.md) — the persona's spoken session config |
+| `candidate_agent/prompts.py` | [Candidate agent subsystem](/concepts/subsystems/candidate-agent.md) — casting prompts and `build_session_system_prompt()` |
 | `control_plane/api.py` | [control_plane/api.py](/concepts/modules/control-plane-api.md), [REST API](/concepts/contracts/rest-api.md) |
 | `control_plane/ports.py` | [Storage ports](/concepts/contracts/storage-ports.md) |
 | `control_plane/repository.py` | [control_plane/repository.py](/concepts/modules/control-plane-repository.md) |
 | `control_plane/database.py` | [Database schema](/concepts/contracts/database-schema.md) |
-| `control_plane/schemas.py` | [Interview record](/concepts/contracts/interview-record.md) |
+| `control_plane/schemas.py` | [Interview record](/concepts/contracts/interview-record.md), [Session transcript](/concepts/contracts/session-transcript.md) |
 | `control_plane/persona.py` | [Control plane subsystem § legacy persona](/concepts/subsystems/control-plane.md) |
 | `control_plane/main.py` | [Dev setup](/concepts/runbooks/dev-setup.md) |
+| `ui/src/SessionView.jsx`, `ui/src/VoiceSessionView.jsx` | [Test UI § conducting an interview](/concepts/subsystems/ui.md), [Run an interview](/concepts/runbooks/run-an-interview.md) |
+| `ui/src/PersonaPicker.jsx` | [Test UI § the persona picker](/concepts/subsystems/ui.md), [archetypes.py](/concepts/modules/candidate-agent-archetypes.md) |
+| `ui/src/{Shell,InterviewList,Wizard,InterviewDetail}.jsx` | [Test UI](/concepts/subsystems/ui.md) |
+| `ui/src/index.css`, `interview_training_wizard (1).html` | [Test UI](/concepts/subsystems/ui.md) — the mockup is the design source of truth |
 | `ui/` | [Test UI](/concepts/subsystems/ui.md) |
 | `tests/` | [Test suite](/concepts/subsystems/test-suite.md), [Architecture](/concepts/architecture.md) |
 | `scripts/check.sh` | [Checks](/concepts/runbooks/checks.md) |
 | `scripts/export_schemas.py` | [Owner handover](/concepts/subsystems/owner-handover.md) |
 | `owner_handover/` | [Owner handover](/concepts/subsystems/owner-handover.md) |
-| `docs/BRD_AI_Interview_Platform_v2.md` | [BRD](/references/brd.md) |
+| `docs/BRD_AI_Interview_Platform_v2.md` | [BRD](/references/brd.md) — **superseded** by BRD v3 |
+| `docs/BRD_Interviewer_Upskilling_v3.{html,pdf}` | Current requirements. The manager is assessed, not the candidate; the job card does not drive the rubric; no criterion has a hard limit |
+| `docs/PIVOT_PLAN_MANAGER_ASSESSMENT.md` | The BRD v3 pivot — 5 phases, 34 ToDos; retires `expectation_agent/`, session is text-first. **Phase 1 (tasks 1–6) is done**; Phases 2–5 open |
 | `docs/GO_ENGINE_CONTRACT.md` | [EngineContract](/concepts/contracts/engine-contract.md) |
 | `docs/ENGINE_IMPLEMENTATION_PLAN.md` | [Live-session engine](/concepts/subsystems/engine.md) |
 | `docs/ENGINE_ONE_BRAIN_TWO_PARTS.html` | [Live-session engine](/concepts/subsystems/engine.md) — diagrams of the Speaker/Thinker sync; open in a browser |
@@ -58,7 +67,11 @@ status: stable
 | Change what the persona prompt says | [engine_contract.py](/concepts/modules/candidate-agent-engine-contract.md) — **bump `ENGINE_CONTRACT_VERSION`** |
 | Change phase durations, criteria, or flags | [rubric.py](/concepts/modules/expectation-agent-rubric.md) |
 | Change what the model is allowed to author | [Determinism split](/concepts/determinism.md) first, then the agent's `_build_*` helpers |
+| Anything touching what is scored, or who is scored | `docs/BRD_Interviewer_Upskilling_v3.html` first — the rubric is fixed configuration and no criterion may gate the result |
 | Add or change an endpoint | [REST API](/concepts/contracts/rest-api.md), [api.py](/concepts/modules/control-plane-api.md) — pick the narrowest port |
+| Anything about how a persona behaves *in conversation* | [session.py](/concepts/modules/candidate-agent-session.md) and [Determinism § session agent](/concepts/determinism.md) — the contract prompt is appended to, never edited |
+| Anything about how a persona **sounds**, or the voice call | [voice.py](/concepts/modules/candidate-agent-voice.md), [Realtime voice](/concepts/contracts/realtime-voice.md) — and note that voice ordering is contract, not cosmetics |
+| The transcript shape, turn timing, or session status | [Session transcript](/concepts/contracts/session-transcript.md) — the evaluation layer and the Go engine both depend on it |
 | Swap SQLite for Postgres | [Storage ports](/concepts/contracts/storage-ports.md), [Database schema](/concepts/contracts/database-schema.md) |
 | Anything inside `engine/` | [Live-session engine](/concepts/subsystems/engine.md) — then `go test ./internal/arch`, which enforces the layering |
 | Change any Pydantic model in the public surface | [Owner handover](/concepts/subsystems/owner-handover.md) — regenerate, or CI fails |

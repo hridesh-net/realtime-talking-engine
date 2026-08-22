@@ -63,7 +63,7 @@ curl -s -X POST http://localhost:8081/api/v1/interviews/<id>/candidates
 curl -s http://localhost:8081/api/v1/candidate-archetypes
 curl -s -X POST http://localhost:8081/api/v1/interviews/<id>/candidates \
   -H 'Content-Type: application/json' \
-  -d '{"archetypes": ["confident_bluffer", "nervous_but_capable"]}'
+  -d '{"archetypes": ["inflated_resume", "nervous_fresher"]}'
 ```
 
 One model call **per archetype**, sequential — expect it to be slow. Already-

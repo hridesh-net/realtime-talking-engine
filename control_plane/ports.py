@@ -18,7 +18,13 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from candidate_agent.schema import VirtualCandidate
-from control_plane.schemas import InterviewCreateRequest, InterviewResponse
+from control_plane.schemas import (
+    InterviewCreateRequest,
+    InterviewResponse,
+    SessionResponse,
+    SessionSummary,
+    Turn,
+)
 from expectation_agent.schema import InterviewExpectation
 
 
@@ -80,6 +86,45 @@ class CandidateStore(Protocol):
 
 
 @runtime_checkable
+class SessionStore(Protocol):
+    """Persistence for live interview sessions and their transcripts.
+
+    Turn indexes and timestamps are assigned here, not by the caller: the
+    transcript is the evaluation layer's evidence, so its clock and its ordering
+    belong to one place that cannot be argued with.
+    """
+
+    def create_session(
+        self,
+        *,
+        interview_id: str,
+        candidate_id: str,
+        persona_key: str,
+        planned_minutes: int,
+        opening_line: str,
+        modality: str = "text",
+    ) -> SessionResponse:
+        """Open a session, seeding turn 0 with the persona's opening line."""
+        ...
+
+    def get_session(self, session_id: str) -> SessionResponse | None:
+        """Return one session with its full transcript, or None."""
+        ...
+
+    def append_turn(self, session_id: str, speaker: str, text: str) -> Turn:
+        """Append a turn, stamping its index, wall time, and elapsed offset."""
+        ...
+
+    def end_session(self, session_id: str, status: str = "completed") -> SessionResponse | None:
+        """Close a session. Returns the final record, or None when unknown."""
+        ...
+
+    def list_sessions(self, interview_id: str) -> list[SessionSummary]:
+        """Every session held against one interview, newest first, no transcripts."""
+        ...
+
+
+@runtime_checkable
 class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol):
     """Composition for handlers that read an interview and write its expectation."""
 
@@ -90,4 +135,22 @@ class EnrollmentStore(InterviewStore, ExpectationStore, CandidateStore, Protocol
 
     Composed from the narrow ports rather than widened into one interface, so
     each port stays independently implementable.
+    """
+
+
+@runtime_checkable
+class SessionWorkflowStore(InterviewStore, CandidateStore, SessionStore, Protocol):
+    """Composition for opening a session.
+
+    Reads the interview, casts or reuses the persona, then opens the session
+    against it.
+    """
+
+
+@runtime_checkable
+class TurnWorkflowStore(CandidateStore, SessionStore, Protocol):
+    """Composition for running a turn: read the persona's contract, write turns.
+
+    Deliberately excludes :class:`InterviewStore` — the busiest endpoint in the
+    system has no business depending on job-spec storage.
     """

@@ -9,13 +9,15 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /candidate_agent/agent.py
   - resource: /expectation_agent/agent.py
   - resource: /candidate_agent/archetypes.py
   - resource: /expectation_agent/rubric.py
+  - resource: /candidate_agent/session.py
+  - resource: /candidate_agent/voice.py
 ---
 # The determinism split
 
@@ -52,6 +54,51 @@ the call:
 * `_build_scorecard` iterates `archetype.must_discover`, so invented ids are silently discarded and weights always come from the catalog.
 * `_stance` and `ResumeClaim.truthfulness` reject out-of-enum values.
 * Trait scores never touch the model at all — `derive_traits` seeds `random.Random` from `SHA256(seed)`.
+
+## Candidate session agent
+
+The same split, restated for the live conversation. Casting decides *who* the
+persona is; the session only decides *what they say next*.
+
+| Owned by code | Owned by the model |
+|---|---|
+| The system instruction — the contract's `system_prompt`, appended to but never edited | The words of the reply |
+| The text-mode preamble and the sentence-length rule, interpolated from `turn_policy` | |
+| Turn order, and the `manager`→`user` / `candidate`→`assistant` mapping | |
+| Turn 0 — the persona's `opening_line`, written at session creation | |
+| Every timestamp and turn index, stamped by the repository | |
+
+`build_session_system_prompt` **appends**; it never rewrites what
+`engine_contract.py` compiled. That is the property that lets the Go voice engine
+and the Python text session run the same persona — both inject the same
+`system_prompt` verbatim, and the only difference is the modality preamble.
+
+The session call runs at temperature **0.8**. Nothing reproducible depends on
+it: the transcript is stored, so re-reading a session is exact even though
+re-running one would not be.
+
+## Voice sessions
+
+The same discipline again, and one new reproducibility claim.
+
+| Owned by code | Owned by the model |
+|---|---|
+| The instructions — contract prompt verbatim, plus the spoken-mode preamble | Everything said aloud |
+| **The voice**, hashed from `candidate_id` so a persona always sounds the same | |
+| Speaking rate and turn-detection eagerness, from `voice_directives.pace` | |
+| That the human can always interrupt, and is always transcribed | |
+
+`pick_voice` makes voice a persona property rather than a setting: two managers
+practising against "Ravi Sharma" hear the same person, which is the same
+comparability argument as `seed_fingerprint`. The cost is that the provider's
+voice **ordering** becomes contract — reordering it reassigns every persona.
+
+**Where the split is weaker than elsewhere, said plainly.** In voice mode the
+knowledge ceiling exists only as prompt text. There is no post-hoc clamp (as in
+casting) and no deterministic pre-gate (as the Go engine's Thinker will have), so
+a persona can be argued above its ceiling more easily than in text. That is a
+known Speaker-only limitation, not an oversight — see
+[Realtime voice](/concepts/contracts/realtime-voice.md).
 
 ## Expectation agent
 

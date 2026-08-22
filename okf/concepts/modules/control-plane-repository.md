@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /control_plane/repository.py
@@ -17,14 +17,16 @@ sources:
 ---
 # control_plane/repository.py
 
-273 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
-`ExpectationStore`, and `CandidateStore` structurally — it imports none of them.
+400 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
+`ExpectationStore`, `CandidateStore`, and `SessionStore` structurally — it
+imports none of them.
 
 # Schema
 
 ```python
 def _utcnow() -> str          # datetime.now(UTC).isoformat()
 def _new_id() -> str          # str(uuid.uuid4())
+def _parse_ts(value: str) -> datetime   # the "Z" -> "+00:00" fix-up, one place
 
 class InterviewRepository:
     def __init__(self, conn: sqlite3.Connection)
@@ -39,6 +41,11 @@ class InterviewRepository:
     def get_candidate(self, candidate_id) -> VirtualCandidate | None
     def get_candidate_by_archetype(self, interview_id, archetype) -> VirtualCandidate | None
     def delete_candidate(self, candidate_id) -> bool
+    def create_session(self, *, interview_id, candidate_id, persona_key,
+                       planned_minutes, opening_line, modality="text") -> SessionResponse
+    def get_session(self, session_id) -> SessionResponse | None
+    def append_turn(self, session_id, speaker, text) -> Turn
+    def end_session(self, session_id, status="completed") -> SessionResponse | None
 ```
 
 `import builtins` at the top exists solely so the `list` **method** can annotate
@@ -52,6 +59,13 @@ a return type of `builtins.list[...]` without shadowing.
 
 Both upserts persist `model_dump_json(exclude={"raw_model_output"})`, so the raw
 draft never reaches disk.
+
+## Sessions
+
+* **`create_session`** — writes the session row, and for `modality == "text"` **also turn 0** (the persona's opening line, `elapsed_ms = 0`) in the same transaction, then re-reads. A text session whose transcript did not open with what the persona said would misreport time-to-first-question. A **voice** session skips that insert: the persona says the line aloud and the browser reports it back, so writing it here too would duplicate turn 0. This branch is the one non-obvious thing in the method — `test_a_voice_session_does_not_prewrite_the_opening_line` pins it.
+* **`append_turn`** — reads `started_at`, stamps `at = now`, computes `elapsed_ms` (clamped at 0), takes the next index as `COALESCE(MAX(idx) + 1, 0)`, inserts, and returns the built `Turn`. Raises `KeyError` for an unknown session; the handler has already 404'd by then, so this is a guard, not a path.
+* **`end_session`** — `UPDATE ... WHERE id = ? AND status = 'live'`. Re-ending a completed session updates nothing and returns the stored record unchanged, so `ended_at` never moves; an unknown id returns `None`.
+* **`get_session`** — joins the persona's `name` for display, falling back to `"(deleted persona)"` rather than failing, because a transcript outlives the persona that produced it.
 
 ## Reads
 
@@ -70,4 +84,4 @@ additionally forces `raw_model_output = None` before validating.
 * `with self.conn:` gives transaction-per-statement-group semantics, not a connection context manager — the connection is never closed here (`main.py` closes the startup one).
 * Every write re-serializes the whole persona document; a large training set is fine at this scale but this is not a partial-update design.
 * `create` writes `status='scheduled'` as a SQL literal; nothing ever transitions it.
-* No test exercises this file directly.
+* `tests/test_session.py` exercises the session methods directly against `:memory:`. The interview, expectation, and candidate methods are still only covered indirectly.

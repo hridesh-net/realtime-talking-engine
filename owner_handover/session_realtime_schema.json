@@ -1,0 +1,44 @@
+{
+  "description": "Returned by POST /api/v1/sessions/{session_id}/realtime. Everything a browser needs to open a speech-to-speech session with the realtime vendor directly. The persona instructions are sealed into the minted credential vendor-side and are deliberately not included here.",
+  "properties": {
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "client_secret": {
+      "description": "Ephemeral. Expires; scoped to one session.",
+      "title": "Client Secret",
+      "type": "string"
+    },
+    "expires_at": {
+      "description": "Unix seconds. Connect before this.",
+      "title": "Expires At",
+      "type": "integer"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "call_url": {
+      "description": "POST the SDP offer here with the secret as bearer.",
+      "title": "Call Url",
+      "type": "string"
+    },
+    "voice": {
+      "description": "Derived from the persona; stable across sessions.",
+      "title": "Voice",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "client_secret",
+    "expires_at",
+    "model",
+    "call_url",
+    "voice"
+  ],
+  "title": "RealtimeCredentialResponse",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

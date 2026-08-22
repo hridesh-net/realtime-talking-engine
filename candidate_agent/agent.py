@@ -155,6 +155,7 @@ class VirtualCandidateAgent:
                 archetype_description=archetype.description,
                 verdict=archetype.verdict,
                 interviewer_challenge=archetype.interviewer_challenge,
+                session_beats=archetype.session_beats,
                 traits=traits,
                 speech=archetype.speech,
                 policy=archetype.answer_policy,
@@ -277,7 +278,7 @@ class VirtualCandidateAgent:
 
         if low >= 7:
             stance_default = "solid"
-        elif archetype.key == "confident_bluffer":
+        elif archetype.key == "inflated_resume":
             stance_default = "bluffs"
         else:
             stance_default = "shallow"

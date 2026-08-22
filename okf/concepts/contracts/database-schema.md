@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /control_plane/database.py
@@ -55,6 +55,36 @@ Indexes on `interview_id` and `verdict`.
 `expectation_json`, `model_used`, `created_at`. Upsert on `interview_id`, so
 regenerating replaces.
 
+## `sessions`
+`id` PK, `interview_id` FK (CASCADE), `candidate_id` FK (CASCADE),
+`persona_key`, `status` CHECK `(live,completed,abandoned)`, `modality` CHECK
+`(text,voice)` default `text`, `planned_minutes`, `opening_line`, `started_at`,
+`ended_at`, `created_at`. Indexes on `interview_id` and `status`.
+
+`opening_line` is denormalised onto the session on purpose: for a text session
+it is also turn 0 of the transcript, and re-reading it from the persona later
+would silently change the stored record if the persona were re-cast.
+
+**A `modality='voice'` session has no turn 0 row.** The persona speaks its
+opening line over the audio channel and the browser reports it back through
+`POST /sessions/{id}/transcript`, so writing it here as well would duplicate the
+turn and shift every `elapsed_ms` after it. `opening_line` is still stored, as
+the record of what the persona was told to open with.
+
+## `session_turns`
+`session_id` FK (CASCADE), `idx`, `speaker` CHECK `(manager,candidate)`, `text`,
+`at`, `elapsed_ms`, **`PRIMARY KEY (session_id, idx)`**.
+
+The composite primary key replaces a surrogate id deliberately: turn order *is*
+the conversation, so a duplicate index should be a constraint violation, not a
+silently reordered replay. `append_turn` computes the next index as
+`COALESCE(MAX(idx) + 1, 0)` inside the same transaction as the insert.
+
+**Concurrency limit worth knowing:** two turns appended to one session at the
+same instant race on that `MAX(idx)`; the loser hits the primary-key constraint
+and raises. That is the correct failure for a single-manager interview, but it
+is not a queue — a multi-writer session would need one.
+
 ## `ai_personas` (legacy)
 `candidate_id` PK, `interview_id` FK, `name`, `background`, `attributes` JSON,
 `fingerprint`, `created_at`. Written only at creation when `mode ==
@@ -68,7 +98,7 @@ that does not exist yet. Nothing writes to it.
 
 ## Gotchas
 
-* **Foreign keys are not enforced.** SQLite requires `PRAGMA foreign_keys = ON` per connection, and it is never set — so the `ON DELETE CASCADE` clauses do nothing. Deleting an interview leaves orphaned personas and expectations.
+* **Foreign keys are not enforced.** SQLite requires `PRAGMA foreign_keys = ON` per connection, and it is never set — so the `ON DELETE CASCADE` clauses do nothing. Deleting an interview leaves orphaned personas, expectations, sessions, and turns. Deleting a persona out from under a live session is the case the API handles explicitly: `POST /turns` returns **410**.
 * Timestamps are ISO strings via `datetime.now(UTC).isoformat()`; reads do `.replace("Z", "+00:00")` before `fromisoformat`.
 * `raw_model_output` is excluded from both persona and expectation JSON on save.
 * `updated_at` on a candidate upsert is set to the same value as `created_at` in the insert branch — on conflict only `updated_at` moves, so `created_at` correctly reflects the first cast.

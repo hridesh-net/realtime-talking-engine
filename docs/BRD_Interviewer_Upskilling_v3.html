@@ -1,0 +1,843 @@
+<title>Interviewer Upskilling BRD</title>
+
+<style>
+  /* Deliberately single-world: this is a paper document. Every colour is
+     painted explicitly so it holds on any host ground, light or dark. */
+  :root {
+    --paper:    #FFFFFF;
+    --tint:     #F4F5F3;
+    --tint-2:   #ECEEEB;
+    --ink:      #16191A;
+    --ink-soft: #474E50;
+    --ink-mute: #767E80;
+    --rule:     #D3D8D6;
+    --rule-2:   #E4E8E5;
+
+    --accent:   #1F5E54;   /* deep teal — assessment, neutrality */
+    --accent-w: #E2EDE9;
+    --flag:     #9C2A1B;   /* open risks and cautions only, never decorative */
+    --flag-w:   #F6E6E2;
+    --gold:     #8A6A17;   /* the "new in v3" marker */
+    --gold-w:   #F5EEDC;
+
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 10.4pt;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet { max-width: 190mm; margin: 0 auto; padding: 18mm 14mm 24mm; }
+
+  /* ── Cover ───────────────────────────────────────────────────────────── */
+  .cover { border-bottom: 2.5pt solid var(--ink); padding-bottom: 14pt; margin-bottom: 20pt; }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 8pt;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10pt;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: 27pt;
+    line-height: 1.08;
+    letter-spacing: -0.012em;
+    font-weight: 600;
+    margin: 0 0 8pt;
+    text-wrap: balance;
+  }
+  .sub {
+    font-size: 12pt;
+    line-height: 1.42;
+    color: var(--ink-soft);
+    max-width: 46em;
+    margin: 0 0 16pt;
+  }
+  .meta {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10pt;
+    font-size: 8.6pt;
+  }
+  .meta div { border-top: 1pt solid var(--rule); padding-top: 6pt; }
+  .meta dt {
+    font-family: var(--mono);
+    font-size: 7.4pt;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 3pt;
+  }
+  .meta dd { margin: 0; font-weight: 600; }
+
+  /* ── Structure ───────────────────────────────────────────────────────── */
+  h2 {
+    font-family: var(--serif);
+    font-size: 15.5pt;
+    letter-spacing: -0.008em;
+    font-weight: 600;
+    margin: 26pt 0 8pt;
+    padding-bottom: 5pt;
+    border-bottom: 1pt solid var(--rule);
+    break-after: avoid;
+  }
+  h2 .num {
+    font-family: var(--mono);
+    font-size: 9pt;
+    color: var(--accent);
+    margin-right: 8pt;
+    letter-spacing: 0.06em;
+  }
+  h3 {
+    font-size: 10.8pt;
+    font-weight: 660;
+    margin: 15pt 0 5pt;
+    color: var(--ink);
+    break-after: avoid;
+  }
+  h4 {
+    font-family: var(--mono);
+    font-size: 8pt;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    font-weight: 600;
+    margin: 13pt 0 5pt;
+    break-after: avoid;
+  }
+  p { margin: 0 0 7pt; max-width: 46em; }
+  strong { font-weight: 650; }
+  em { font-style: italic; }
+
+  ul, ol { margin: 0 0 8pt; padding-left: 16pt; max-width: 46em; }
+  li { margin-bottom: 3pt; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--tint-2);
+    padding: 0.1em 0.32em;
+    border-radius: 2px;
+  }
+
+  /* ── Callouts ────────────────────────────────────────────────────────── */
+  .callout {
+    border-left: 2.5pt solid var(--accent);
+    background: var(--accent-w);
+    padding: 9pt 12pt;
+    margin: 10pt 0 12pt;
+    max-width: 46em;
+    break-inside: avoid;
+  }
+  .callout.warn { border-left-color: var(--flag); background: var(--flag-w); }
+  .callout.new  { border-left-color: var(--gold); background: var(--gold-w); }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .lbl {
+    font-family: var(--mono);
+    font-size: 7.4pt;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 4pt;
+    font-weight: 600;
+  }
+  .callout.warn .lbl { color: var(--flag); }
+  .callout.new  .lbl { color: var(--gold); }
+
+  /* ── Tables ──────────────────────────────────────────────────────────── */
+  .tw { overflow-x: auto; margin: 8pt 0 12pt; break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.8pt; line-height: 1.4; }
+  th, td { text-align: left; padding: 6pt 8pt; border-bottom: 0.75pt solid var(--rule-2); vertical-align: top; }
+  thead th {
+    font-family: var(--mono);
+    font-size: 7.2pt;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    font-weight: 600;
+    border-bottom: 1pt solid var(--rule);
+    background: var(--tint);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  table.grid { border: 1pt solid var(--rule); }
+  td.num, th.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.crit { color: var(--flag); font-weight: 650; }
+  .pill {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 7pt;
+    letter-spacing: 0.06em;
+    padding: 1.5pt 5pt;
+    border: 0.75pt solid var(--rule);
+    border-radius: 2px;
+    background: var(--tint);
+    color: var(--ink-soft);
+    white-space: nowrap;
+  }
+  .pill.a { border-color: var(--accent); color: var(--accent); background: var(--accent-w); }
+  .pill.f { border-color: var(--flag); color: var(--flag); background: var(--flag-w); }
+
+  /* ── Figures ─────────────────────────────────────────────────────────── */
+  figure { margin: 10pt 0 14pt; break-inside: avoid; }
+  .plate { border: 1pt solid var(--rule); background: var(--tint); padding: 12pt 10pt; overflow-x: auto; }
+  .plate svg { display: block; width: 100%; height: auto; }
+  figcaption { font-size: 8.4pt; color: var(--ink-soft); margin-top: 6pt; line-height: 1.45; max-width: 46em; }
+  figcaption b { color: var(--ink); font-weight: 650; }
+
+  .plate svg text { font-family: var(--sans); }
+  .plate svg text.m { font-family: var(--mono); }
+  .fi { fill: var(--ink); }  .fs { fill: var(--ink-soft); }  .fm { fill: var(--ink-mute); }
+  .fa { fill: var(--accent); } .ff { fill: var(--flag); } .fg { fill: var(--gold); }
+  .bx     { fill: var(--paper);    stroke: var(--ink-mute); stroke-width: 1; }
+  .bx-a   { fill: var(--accent-w); stroke: var(--accent);   stroke-width: 1.4; }
+  .bx-f   { fill: var(--flag-w);   stroke: var(--flag);     stroke-width: 1.4; }
+  .bx-g   { fill: var(--gold-w);   stroke: var(--gold);     stroke-width: 1.4; }
+  .bx-d   { fill: none; stroke: var(--ink-mute); stroke-width: 1; stroke-dasharray: 3 2.5; }
+  .ln     { stroke: var(--ink-mute); stroke-width: 1.1; fill: none; }
+  .ln-a   { stroke: var(--accent);   stroke-width: 1.4; fill: none; }
+  .ln-f   { stroke: var(--flag);     stroke-width: 1.4; fill: none; }
+  .hd     { fill: var(--ink-mute); }  .hd-a { fill: var(--accent); } .hd-f { fill: var(--flag); }
+
+  /* ── Requirement IDs ─────────────────────────────────────────────────── */
+  .rid { font-family: var(--mono); font-size: 7.6pt; color: var(--accent); white-space: nowrap; font-weight: 600; }
+
+  footer {
+    margin-top: 26pt;
+    padding-top: 10pt;
+    border-top: 1pt solid var(--rule);
+    font-family: var(--mono);
+    font-size: 7.6pt;
+    letter-spacing: 0.06em;
+    color: var(--ink-mute);
+    display: flex;
+    justify-content: space-between;
+    gap: 12pt;
+    flex-wrap: wrap;
+  }
+
+  /* ── Print ───────────────────────────────────────────────────────────── */
+  @page { size: A4; margin: 14mm 12mm 16mm; }
+  @media print {
+    .sheet { max-width: none; padding: 0; }
+    body { font-size: 9.6pt; }
+    h2 { break-after: avoid; }
+    .pagebreak { break-before: page; }
+    .plate, .tw, .callout, figure { break-inside: avoid; }
+  }
+</style>
+
+<div class="sheet">
+
+  <!-- ══ COVER ═════════════════════════════════════════════════════════ -->
+  <div class="cover">
+    <p class="kicker">Business Requirements Document · v3.0 · supersedes v2</p>
+    <h1>Interviewer Upskilling Simulation</h1>
+    <p class="sub">
+      A mock interview in which the AI plays the candidate and a hiring manager
+      practises interviewing. The manager is the one being assessed — against a
+      rubric, not against a job description. The output is an analytical estimate
+      of how they interviewed — no pass, no fail, no gate.
+    </p>
+    <dl class="meta">
+      <div><dt>Client</dt><dd>Atibhee · Airtel</dd></div>
+      <div><dt>Product</dt><dd>SkillBrew.AI</dd></div>
+      <div><dt>Status</dt><dd>Draft for review</dd></div>
+      <div><dt>Immediate ask</dt><dd>Small POC, ~2 days</dd></div>
+    </dl>
+  </div>
+
+  <!-- ══ 1 ═════════════════════════════════════════════════════════════ -->
+  <h2><span class="num">01</span>What changed, and why</h2>
+
+  <p>
+    Version 2 of this document described a platform that scores <em>candidates</em>
+    on technical depth, system design and code quality. That is the wrong product
+    for this client. Atibhee's objective is to <strong>upskill hiring managers</strong>.
+    The candidate is simulated; the manager is the learner; the report is about
+    the manager.
+  </p>
+
+  <p>
+    Two consequences follow, and they are the substance of this revision.
+  </p>
+
+  <div class="callout new">
+    <span class="lbl">Change 1 — the assessed subject flips</span>
+    <p>
+      The rubric no longer measures whether the candidate is any good. It measures
+      whether the <strong>manager interviewed well</strong>: five fixed criteria,
+      owned by Atibhee's L&amp;D function, identical across every role and every
+      session. Comparability across 3,000 managers depends on that rubric being
+      fixed.
+    </p>
+  </div>
+
+  <div class="callout new">
+    <span class="lbl">Change 2 — the job description stops driving anything</span>
+    <p>
+      Previously a JD was parsed into skills, and those skills generated the
+      expectations and the persona. That coupling is removed. A role is now a
+      <strong>job title and a two-to-three line description</strong>, nothing more.
+      It gives the persona a plausible background and gives the manager something
+      to explain — but it never generates the rubric.
+    </p>
+  </div>
+
+  <p>
+    What replaces the JD as the organising input is <strong>the competency the
+    manager needs to practise</strong>. The trainer picks a weakness; the system
+    picks a candidate persona that forces that weakness into the open.
+  </p>
+
+  <figure>
+    <div class="plate">
+      <svg viewBox="0 0 880 250" role="img"
+           aria-label="Previously the job description generated skills, which generated expectations and the persona, and the candidate was scored. Now the manager competency to train selects a persona, the role family only supplies vocabulary, and the manager is scored against a fixed rubric.">
+        <defs>
+          <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="hd"/></marker>
+          <marker id="ha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="hd-a"/></marker>
+          <marker id="hf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="hd-f"/></marker>
+        </defs>
+
+        <text x="0" y="14" class="m fm" font-size="10.4" letter-spacing="0.12em">V2 — JOB-DESCRIPTION DRIVEN</text>
+        <rect x="0"   y="28" width="118" height="34" class="bx-d"/><text x="59" y="49" text-anchor="middle" class="fs" font-size="11.4">Job description</text>
+        <line x1="118" y1="45" x2="150" y2="45" class="ln" marker-end="url(#h)"/>
+        <rect x="150" y="28" width="112" height="34" class="bx-d"/><text x="206" y="49" text-anchor="middle" class="fs" font-size="11.4">Skills</text>
+        <line x1="262" y1="45" x2="294" y2="45" class="ln" marker-end="url(#h)"/>
+        <rect x="294" y="28" width="122" height="34" class="bx-d"/><text x="355" y="49" text-anchor="middle" class="fs" font-size="11.4">Expectations</text>
+        <line x1="416" y1="45" x2="448" y2="45" class="ln" marker-end="url(#h)"/>
+        <rect x="448" y="28" width="112" height="34" class="bx-d"/><text x="504" y="49" text-anchor="middle" class="fs" font-size="11.4">Persona</text>
+        <line x1="560" y1="45" x2="592" y2="45" class="ln" marker-end="url(#h)"/>
+        <rect x="592" y="28" width="180" height="34" class="bx-f"/><text x="682" y="49" text-anchor="middle" class="ff" font-size="11.4" font-weight="600">Candidate is scored</text>
+        <text x="784" y="49" class="ff" font-size="15">✕</text>
+        <text x="0" y="82" class="fm" font-size="10.2" font-style="italic">Rubric is different every session — no comparability across managers.</text>
+
+        <line x1="0" y1="104" x2="880" y2="104" stroke="var(--rule)" stroke-width="1"/>
+
+        <text x="0" y="130" class="m fa" font-size="10.4" letter-spacing="0.12em">V3 — COMPETENCY DRIVEN</text>
+        <rect x="0" y="144" width="150" height="42" class="bx-a"/>
+        <text x="75" y="161" text-anchor="middle" class="fa" font-size="11.4" font-weight="600">Competency to train</text>
+        <text x="75" y="176" text-anchor="middle" class="fs" font-size="10.1">e.g. “probing”</text>
+        <line x1="150" y1="165" x2="186" y2="165" class="ln-a" marker-end="url(#ha)"/>
+        <rect x="186" y="144" width="140" height="42" class="bx-a"/>
+        <text x="256" y="161" text-anchor="middle" class="fa" font-size="11.4" font-weight="600">Persona</text>
+        <text x="256" y="176" text-anchor="middle" class="fs" font-size="10.1">trait bundle</text>
+
+        <rect x="186" y="200" width="140" height="34" class="bx"/>
+        <text x="256" y="215" text-anchor="middle" class="fs" font-size="10.5">Role family</text>
+        <text x="256" y="228" text-anchor="middle" class="fm" font-size="9.6">vocabulary only</text>
+        <line x1="256" y1="200" x2="256" y2="190" class="ln" marker-end="url(#h)"/>
+
+        <line x1="326" y1="165" x2="362" y2="165" class="ln-a" marker-end="url(#ha)"/>
+        <rect x="362" y="144" width="140" height="42" class="bx-a"/>
+        <text x="432" y="169" text-anchor="middle" class="fa" font-size="11.4" font-weight="600">Live session</text>
+        <line x1="502" y1="165" x2="538" y2="165" class="ln-a" marker-end="url(#ha)"/>
+        <rect x="538" y="144" width="200" height="42" class="bx-a"/>
+        <text x="638" y="161" text-anchor="middle" class="fa" font-size="11.4" font-weight="600">Manager is scored</text>
+        <text x="638" y="176" text-anchor="middle" class="fs" font-size="10.1">fixed 5-criterion rubric</text>
+
+        <rect x="538" y="200" width="200" height="34" class="bx"/>
+        <text x="638" y="215" text-anchor="middle" class="fs" font-size="10.5">Job title + 3 lines</text>
+        <text x="638" y="228" text-anchor="middle" class="fm" font-size="9.6">context, not criteria</text>
+        <line x1="638" y1="200" x2="638" y2="190" class="ln" marker-end="url(#h)"/>
+      </svg>
+    </div>
+    <figcaption>
+      <b>The input that drives the session changes.</b> In v2 the job description
+      cascaded all the way to the score. In v3 the entry point is the manager
+      competency being trained; the role family and the job card sit to one side,
+      supplying realism only. The rubric is constant, which is what makes one
+      manager's result comparable to another's.
+    </figcaption>
+  </figure>
+
+  <!-- ══ 2 ═════════════════════════════════════════════════════════════ -->
+  <h2><span class="num">02</span>Business context</h2>
+
+  <div class="tw">
+    <table class="grid">
+      <tbody>
+        <tr><td style="width:26%"><strong>Objective</strong></td><td>Upskill hiring managers inside the organisation.</td></tr>
+        <tr><td><strong>Method</strong></td><td>Mock AI interview simulation. AI plays the candidate; the hiring manager interviews it.</td></tr>
+        <tr><td><strong>Primary audience</strong></td><td>Frontline managers hiring frontline workers — initially network and sales.</td></tr>
+        <tr><td><strong>Manager backgrounds</strong></td><td>Network, marketing, sales, engineering, finance. Telecom sector.</td></tr>
+        <tr><td><strong>Scale</strong></td><td class="num">500 interviews / month at launch · 3,000+ managers in total</td></tr>
+        <tr><td><strong>Commercials</strong></td><td class="num">₹250 per 15–20 min · ₹450 per 30 min · charged per <em>completed</em> interview</td></tr>
+        <tr><td><strong>Licensing</strong></td><td>Credit-based wallet. Creating roles and simulations is free; only completed interviews draw credit.</td></tr>
+        <tr><td><strong>Integration</strong></td><td>To sit alongside an existing online learning module.</td></tr>
+        <tr><td><strong>Collaboration</strong></td><td>Atibhee's team co-authors the simulations for each frontline profile.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="lbl">Commercial consequence — define "completed"</span>
+    <p>
+      Revenue is per <em>completed</em> interview, so "completed" is a billing
+      term and needs a contractual definition before launch. A session abandoned
+      at minute two, one ended by a network drop, and one cut short by the manager
+      at minute twelve are three different cases. Proposal: a session is billable
+      when it reaches the wrap-up stage <em>or</em> exceeds 60% of its booked
+      duration; anything less is refunded to the wallet automatically.
+    </p>
+  </div>
+
+  <!-- ══ 3 ═════════════════════════════════════════════════════════════ -->
+  <h2><span class="num">03</span>What replaces the job description</h2>
+
+  <p>
+    Two objects, both deliberately thin.
+  </p>
+
+  <h3>3.1 Role family</h3>
+  <p>
+    A closed list. It supplies vocabulary, plausible work history, and the register
+    a candidate of that type would speak in. It carries no assessment weight.
+  </p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead><tr><th style="width:16%">Family</th><th style="width:34%">Supplies</th><th>Typical frontline example</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill a">sales</span></td><td>Targets, territory, channel partners, retention talk</td><td>Field sales executive, retail store promoter</td></tr>
+        <tr><td><span class="pill a">marketing</span></td><td>Campaigns, brand, local activation, agency vocabulary</td><td>Regional marketing coordinator</td></tr>
+        <tr><td><span class="pill a">technical</span></td><td>Field equipment, tickets, uptime, escalation vocabulary</td><td>Network field engineer, tower technician</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">Recommendation</span>
+    <p>
+      Atibhee names <strong>network and sales</strong> as the launch frontline
+      profiles. "Technical" as written above leans engineering; a telecom network
+      field role is a distinct register. Suggest either renaming the third family
+      <strong>Network / Field Operations</strong>, or adding it as a fourth. This
+      is a naming decision for Atibhee's team, and it is cheap to change before
+      the simulations are authored.
+    </p>
+  </div>
+
+  <h3>3.2 Job card</h3>
+  <p>
+    Replaces the job description entirely. One title, two to three lines, and the
+    handful of facts a manager is expected to be able to explain — which is what
+    Criterion 1 measures. The card exists so that "Hiring with Clarity" has
+    something to be clear <em>about</em>.
+  </p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead><tr><th style="width:22%">Field</th><th style="width:12%">Required</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>job_title</code></td><td><span class="pill">yes</span></td><td>Names the role. One line.</td></tr>
+        <tr><td><code>summary</code></td><td><span class="pill">yes</span></td><td>Two to three lines. Everything the persona knows about the job it applied for.</td></tr>
+        <tr><td><code>role_family</code></td><td><span class="pill">yes</span></td><td>One of the closed list above.</td></tr>
+        <tr><td><code>clarity_facts</code></td><td><span class="pill a">optional</span></td><td>Day-in-the-life, reporting line, targets, shift, travel, location, growth path, comp band, next steps. Each fact the manager states is a tick on the Criterion 1 coverage checklist. Absent facts are simply not scored.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">Design note</span>
+    <p>
+      <code>clarity_facts</code> is the one place a role definition touches the
+      score — and only as a <em>checklist of what was covered</em>, never as
+      subject-matter difficulty. It is a coverage measure, not a knowledge test.
+      No model reads the job card to decide what good looks like.
+    </p>
+  </div>
+
+  <!-- ══ 4 ═════════════════════════════════════════════════════════════ -->
+  <h2 class="pagebreak"><span class="num">04</span>The assessment rubric</h2>
+
+  <p>
+    Five criteria, fixed, organisation-owned. Weights below are a starting
+    proposal — <strong>Atibhee's team should own them</strong>, and the system
+    treats them as configuration, not as code.
+  </p>
+
+  <p>
+    <strong>No criterion has a hard limit.</strong> Nothing caps, fails or
+    overrides the overall result. Each criterion is judged on its own evidence
+    and contributes at its weight, and the report reads as an analytical
+    estimation of how the manager interviewed — closer to a diagnostic than to
+    a grade.
+  </p>
+
+  <p>
+    Each criterion splits in two. <strong>Deterministic signals</strong> are
+    counted by code from the transcript and session telemetry: they are exact,
+    reproducible, and auditable. <strong>Judge assessment</strong> is the part
+    that needs reading comprehension. Keeping the split explicit is what makes a
+    score defensible to a manager who disagrees with it.
+  </p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th class="num" style="width:4%">#</th>
+          <th style="width:15%">Criterion</th>
+          <th class="num" style="width:9%">Weight</th>
+          <th style="width:36%">Deterministic signals</th>
+          <th>Judge assesses</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">1</td>
+          <td><strong>Hiring with Clarity</strong></td>
+          <td class="num">20%</td>
+          <td>Coverage checklist — role scope, day-in-the-life, team &amp; reporting, targets/KPIs, shift &amp; travel, location, growth path, comp range, next steps. Candidate-question answer rate.</td>
+          <td>Did the explanation go beyond reading the job card? Was it tailored to <em>this</em> candidate?</td>
+        </tr>
+        <tr>
+          <td class="num">2</td>
+          <td><strong>Structured Interviewing</strong></td>
+          <td class="num">25%</td>
+          <td>Open vs closed question ratio · behavioural / STAR-eliciting question count · probing follow-up count · probe handling on vague answers and inflated claims · same-competency question consistency.</td>
+          <td>Quality of STAR completion — Situation, Task, Action, <em>Result</em>; most managers never reach Result. Whether probes were purposeful or interrogative.</td>
+        </tr>
+        <tr>
+          <td class="num">3</td>
+          <td><strong>Unconscious Bias</strong></td>
+          <td class="num">20%</td>
+          <td>Protected-topic detector on manager turns: marital status, children &amp; family planning, pregnancy, age, religion, caste or community, native place, gender-role assumptions, disability, "will your family allow", "adjust". Handling of bias-bait probes.</td>
+          <td>Subtler bias — differential warmth, assumption-loaded framing, stereotype inference from name or region.</td>
+        </tr>
+        <tr>
+          <td class="num">4</td>
+          <td><strong>Candidate Experience</strong></td>
+          <td class="num">20%</td>
+          <td>Greeting · self-introduction · agenda and duration stated · time to first invitation for candidate questions · abrupt-end detector (no close, next steps or thanks) · manager interruptions · silence handling.</td>
+          <td>Warmth. Whether the candidate could plausibly leave with a good impression of the employer.</td>
+        </tr>
+        <tr>
+          <td class="num">5</td>
+          <td><strong>Communication &amp; Tone</strong></td>
+          <td class="num">15%</td>
+          <td>Talk-to-listen ratio · longest monologue · words per minute · filler density · interruptions · aggression / curtness classifier per manager turn · composure during the provocation probe.</td>
+          <td>Tone trajectory across the call, clarity for a frontline (non-corporate) audience, jargon load.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">No hard limits — this is an estimate, not a gate</span>
+    <p>
+      No criterion caps, fails or overrides the result. Every criterion is scored
+      on its own evidence and contributes at its weight; the output is an
+      <strong>analytical estimation of how this manager interviewed</strong>, not a
+      pass/fail certification.
+    </p>
+    <p>
+      Unconscious Bias is therefore reported like the others — a score, the exact
+      turns that produced it, and what to do differently. It is the criterion most
+      likely to matter to the organisation, so the report surfaces it prominently
+      and quotes it precisely, but prominence is a presentation decision, not a
+      scoring rule.
+    </p>
+  </div>
+
+  <!-- ══ 5 ═════════════════════════════════════════════════════════════ -->
+  <h2><span class="num">05</span>Persona configuration by traits</h2>
+
+  <p>
+    A persona is a bundle of trait values plus a set of behaviours. It is
+    <strong>independent of the role family</strong> — the same "Vague Responder"
+    works as a sales candidate or a network technician, because vagueness is a
+    behaviour, not a subject.
+  </p>
+
+  <h3>5.1 Trait axes</h3>
+  <p>Every persona is a point in this space. All axes are integers 0–10.</p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead><tr><th style="width:20%">Axis</th><th>What it changes in the room</th></tr></thead>
+      <tbody>
+        <tr><td><code>smartness</code> / <code>dumbness</code></td><td>Ceiling of insight. The ratio between them is what the manager is trying to read.</td></tr>
+        <tr><td><code>seriousness</code></td><td>How much the candidate treats this as mattering.</td></tr>
+        <tr><td><code>effort</code></td><td>Whether they work to answer, or wait to be dragged.</td></tr>
+        <tr><td><code>interest</code></td><td>Engagement with this role specifically. Low interest tests whether the manager can tell disinterest from inability.</td></tr>
+        <tr><td><code>honesty</code></td><td>Gap between what is claimed and what is true. Drives the inflated-claim probe.</td></tr>
+        <tr><td><code>preparedness</code></td><td>Whether they researched the company and the role.</td></tr>
+        <tr><td><code>nervousness</code></td><td>Drives hesitation, self-correction and pauses. High values test warmth.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Delivery layer, configured alongside the traits</h4>
+  <p>
+    <code>filler_frequency</code> and <code>hesitation_frequency</code> (0–10),
+    pace, verbosity, formality, verbal tics, whether the candidate may interrupt,
+    and a per-skill <code>knowledge_ceiling</code> (0–10) that the persona can
+    never exceed however hard the manager pushes.
+  </p>
+
+  <h3>5.2 Persona library — each one exists to stress a criterion</h3>
+  <p>
+    This is the heart of the change. A trainer does not pick a persona because it
+    is realistic; they pick it because it <strong>forces a specific manager
+    competency into the open</strong>. Every persona in the library must earn its
+    place by stressing something the rubric measures.
+  </p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead>
+        <tr><th style="width:19%">Persona</th><th style="width:26%">Trait signature</th><th style="width:9%">Stresses</th><th>What the manager has to do</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Vague Responder</strong></td>
+          <td class="num">effort 3 · smartness 4 · honesty 6</td>
+          <td><span class="pill a">C2</span></td>
+          <td>Answers in generalities. Only concrete detail reaches a STAR Result — the manager must probe three times or leave with nothing.</td>
+        </tr>
+        <tr>
+          <td><strong>Inflated CV</strong></td>
+          <td class="num">honesty 3 · preparedness 7 · smartness 5</td>
+          <td><span class="pill a">C2</span></td>
+          <td>Claims ownership of work they supported. The manager must convert "we" to "I" without accusing.</td>
+        </tr>
+        <tr>
+          <td><strong>Curt / Unprofessional</strong></td>
+          <td class="num">seriousness 3 · interest 4 · may_interrupt</td>
+          <td><span class="pill a">C5</span> <span class="pill a">C4</span></td>
+          <td>Short, faintly dismissive, interrupts. Tests composure — does the manager mirror the tone or hold it?</td>
+        </tr>
+        <tr>
+          <td><strong>Off-Topic Asker</strong></td>
+          <td class="num">preparedness 3 · interest 7</td>
+          <td><span class="pill a">C1</span> <span class="pill a">C4</span></td>
+          <td>Asks irrelevant or premature questions (salary in minute two). Tests redirection without dismissal, and whether role facts get covered anyway.</td>
+        </tr>
+        <tr>
+          <td><strong>Bias Bait</strong></td>
+          <td class="num">honesty 8 · nervousness 6</td>
+          <td><span class="pill f">C3</span></td>
+          <td>Volunteers protected-category information unprompted — marriage plans, family, native place. Tests whether the manager follows the thread or steers away. <strong>The single most important persona in the library.</strong></td>
+        </tr>
+        <tr>
+          <td><strong>Nervous but Capable</strong></td>
+          <td class="num">nervousness 8 · smartness 7 · effort 7</td>
+          <td><span class="pill a">C4</span></td>
+          <td>Real ability behind visible anxiety. Rewards warmth; punishes managers who read nerves as incompetence.</td>
+        </tr>
+        <tr>
+          <td><strong>Rambler</strong></td>
+          <td class="num">verbosity high · seriousness 6</td>
+          <td><span class="pill a">C5</span> <span class="pill a">C2</span></td>
+          <td>Long, drifting answers. Tests time control and courteous interruption inside a fixed slot.</td>
+        </tr>
+        <tr>
+          <td><strong>Monosyllabic</strong></td>
+          <td class="num">effort 2 · nervousness 5 · interest 4</td>
+          <td><span class="pill a">C4</span> <span class="pill a">C2</span></td>
+          <td>Yes / no answers and silences. Tests whether the manager can open a closed room, and how they handle dead air.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">Why this is the right shape</span>
+    <p>
+      Because the rubric is fixed and the personas are role-agnostic, coverage
+      becomes a grid: <strong>8 personas × 3 role families = 24 simulations</strong>
+      from one authoring effort, with no job descriptions written at all. Atibhee's
+      team tunes trait values and adds personas; neither requires engineering work,
+      which is also what makes "no charge for creating roles and simulations"
+      economically safe.
+    </p>
+  </div>
+
+  <div class="callout warn">
+    <span class="lbl">Open question for Atibhee</span>
+    <p>
+      Does the trainer choose the persona, or does the system choose it from the
+      manager's weakest prior criterion? Manager-chosen is simpler and ships in
+      the POC. System-chosen is the stronger learning product — it closes the loop
+      by sending each manager the candidate they handle worst — but it needs
+      history, so it belongs after launch.
+    </p>
+  </div>
+
+  <!-- ══ 6 ═════════════════════════════════════════════════════════════ -->
+  <h2 class="pagebreak"><span class="num">06</span>Session flow</h2>
+
+  <p>Mapped directly to the flow Atibhee described.</p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead><tr><th class="num" style="width:5%">#</th><th style="width:24%">Stage</th><th style="width:11%">Observed for</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>Manager greets and introduces themselves</td><td><span class="pill a">C4</span></td><td>Greeting, self-introduction, agenda and duration are each a deterministic tick.</td></tr>
+        <tr><td class="num">2</td><td>AI candidate introduces itself</td><td>—</td><td>Spoken from a fixed opening line so every session starts in character.</td></tr>
+        <tr><td class="num">3</td><td>Manager explains the role</td><td><span class="pill a">C1</span></td><td>Coverage checklist runs here and stays open for the rest of the call.</td></tr>
+        <tr><td class="num">4</td><td>Behavioural questions and probing</td><td><span class="pill a">C2</span></td><td>The main body. Persona behaviour determines how hard probing has to work.</td></tr>
+        <tr><td class="num">5</td><td>Scripted disruption</td><td><span class="pill a">C5</span> <span class="pill f">C3</span></td><td>The persona introduces its designed difficulty — curtness, an off-topic question, or bias bait — at a controlled point rather than at random, so sessions stay comparable.</td></tr>
+        <tr><td class="num">6</td><td>Candidate questions</td><td><span class="pill a">C1</span> <span class="pill a">C4</span></td><td>Answer rate is counted; quality is judged.</td></tr>
+        <tr><td class="num">7</td><td>Close and next steps</td><td><span class="pill a">C4</span></td><td>Abrupt-end detector fires if the call ends with no close, next steps or thanks.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">Design note — disruptions are placed, not random</span>
+    <p>
+      Atibhee asked for scenarios like unprofessional tone and irrelevant
+      questions. If those fire randomly, two managers get different difficulty and
+      their scores stop being comparable. Each persona therefore carries a
+      <em>scripted</em> disruption at a defined point in the session. Same persona,
+      same challenge, every manager.
+    </p>
+  </div>
+
+  <!-- ══ 7 ═════════════════════════════════════════════════════════════ -->
+  <h2><span class="num">07</span>The feedback report</h2>
+
+  <p>
+    Atibhee asked for three things: what the manager did perfectly, where they
+    need to focus, and areas for development. The report is structured exactly
+    that way, and <strong>every statement in it is anchored to a quoted turn</strong>
+    with a timestamp. Unevidenced feedback is not actionable and will not survive
+    contact with 3,000 managers.
+  </p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead><tr><th style="width:24%">Section</th><th>Contents</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Outcome</strong></td><td>Weighted estimate across the five criteria, with a confidence note where the session was too short or too quiet to judge a criterion fairly. No pass/fail verdict.</td></tr>
+        <tr><td><strong>Criterion breakdown</strong></td><td>Per criterion: score, the deterministic counts behind it, and the judge's reasoning. The counts are shown because they are checkable.</td></tr>
+        <tr><td><strong>Done well</strong></td><td>Two to four specific moments, quoted.</td></tr>
+        <tr><td><strong>Focus areas</strong></td><td>The lowest-scoring criteria, each with the moment it went wrong and what to have said instead.</td></tr>
+        <tr><td><strong>Development plan</strong></td><td>Which persona to practise against next, and why.</td></tr>
+        <tr><td><strong>Transcript</strong></td><td>Full, timestamped, with the manager's and the candidate's turns separated. Doubles as the audit record.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">Aggregate reporting — worth naming now</span>
+    <p>
+      With 3,000 managers, the organisational view is likely to be the thing
+      Atibhee's leadership actually buys: bias-flag rate by business unit, STAR
+      completion trend, average talk-to-listen ratio. It is out of scope for the
+      POC, but the report schema should be designed so it can be aggregated later
+      rather than retrofitted.
+    </p>
+  </div>
+
+  <!-- ══ 8 ═════════════════════════════════════════════════════════════ -->
+  <h2 class="pagebreak"><span class="num">08</span>First runnable milestone</h2>
+
+  <p>
+    Before any client-facing scope is fixed, the product has to be real enough to
+    sit down with: <strong>pick a persona, hold an actual interview with it, and
+    read the report afterwards</strong>. Billing, accounts, LMS integration and
+    aggregate reporting are all downstream of that, and none of them is worth
+    scoping until the conversation itself is convincing.
+  </p>
+
+  <div class="tw">
+    <table class="grid">
+      <thead><tr><th style="width:50%">Needed to converse and assess</th><th>Deliberately deferred</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>
+            <ul>
+              <li>The full persona library, any one selectable at session start</li>
+              <li>One job card per role family &mdash; title and three lines</li>
+              <li>Live two-way session of realistic length</li>
+              <li>Turn-by-turn transcript of both sides</li>
+              <li>Deterministic signals counted from the transcript</li>
+              <li>Judge pass across all five criteria</li>
+              <li>Analytical report with quoted evidence</li>
+            </ul>
+          </td>
+          <td>
+            <ul>
+              <li>Credit wallet and billing</li>
+              <li>LMS integration</li>
+              <li>Manager accounts, history, dashboards</li>
+              <li>Aggregate or leadership reporting</li>
+              <li>System-chosen persona selection</li>
+              <li>Client-facing POC packaging</li>
+            </ul>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">Why this ordering</span>
+    <p>
+      A persona can read convincingly on paper and fall apart in conversation, and
+      no amount of specification settles which. Interviewing every persona in the
+      library is the only way to find out whether each one actually stresses the
+      criterion it was designed to stress &mdash; and that judgement has to come
+      before scope is promised to anyone.
+    </p>
+  </div>
+
+
+  <!-- ══ 9 ═════════════════════════════════════════════════════════════ -->
+  <h2><span class="num">09</span>Decisions needed from Atibhee</h2>
+
+  <div class="tw">
+    <table class="grid">
+      <thead><tr><th class="num" style="width:7%">Ref</th><th style="width:32%">Question</th><th>Why it matters</th></tr></thead>
+      <tbody>
+        <tr><td class="rid">D-1</td><td>Confirm or replace the five weights.</td><td>Stated as a starting proposal. The rubric is Atibhee's instrument, and weights encode what the organisation values.</td></tr>
+        <tr><td class="rid">D-2</td><td>What score bands should the estimate map to, and what are they called?</td><td>Decided: no criterion gates the result. Remaining question is presentation — bands need names Atibhee's managers will accept as developmental rather than punitive.</td></tr>
+        <tr><td class="rid">D-3</td><td>Definition of a "completed" interview.</td><td>It is the billing unit. Needs to be contractual, not implied.</td></tr>
+        <tr><td class="rid">D-4</td><td>Third role family: Technical, or Network / Field Operations?</td><td>Launch profiles are network and sales. Cheap now, expensive after simulations are authored.</td></tr>
+        <tr><td class="rid">D-5</td><td>Who picks the persona — trainer or system?</td><td>Manager-chosen ships in the POC; system-chosen is the stronger learning loop.</td></tr>
+        <tr><td class="rid">D-6</td><td>Language and code-mixing.</td><td>Frontline interviews in Indian telecom are frequently conducted in Hindi or mixed Hindi-English. This materially affects the voice model, the transcript and every deterministic signal. Not yet scoped.</td></tr>
+        <tr><td class="rid">D-7</td><td>Recording consent and retention.</td><td>Sessions record a real manager's voice. Needs a policy before the first live user.</td></tr>
+        <tr><td class="rid">D-8</td><td>Does a manager's report go to their reporting line?</td><td>Determines whether this is a safe practice space or an evaluation. It changes manager behaviour inside the session, and therefore what the scores mean.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="lbl">D-6 and D-8 deserve early attention</span>
+    <p>
+      Language is the larger engineering risk in this document: a Hindi or
+      code-mixed session breaks talk-time analysis, filler detection, the
+      protected-topic detector and STAR extraction all at once. If frontline
+      interviews are not conducted in English, that must surface now rather than
+      after the POC.
+    </p>
+    <p>
+      D-8 is the larger product risk. A manager who believes their score reaches
+      their boss will interview defensively, and the tool measures performance
+      rather than habit.
+    </p>
+  </div>
+
+  <footer>
+    <span>SkillBrew.AI · Interviewer Upskilling · BRD v3.0</span>
+    <span>Proprietary and confidential</span>
+  </footer>
+
+</div>

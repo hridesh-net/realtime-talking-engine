@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /llm/base.py
@@ -18,14 +18,17 @@ sources:
 ---
 # StructuredModel
 
+One of **two** ports in `llm/base.py`. This one is for calls whose answer the
+code will index into; [`ChatModel`](/concepts/contracts/chat-model.md) is for
+free-text conversation turns. They share `ModelClient` (model id, temperature,
+provider) and nothing else — see that page for why they are not one interface.
+
 ```python
 class ModelError(RuntimeError): ...
 
-class StructuredModel(ABC):
-    def __init__(self, model_id: str, temperature: float) -> None
-    @property def model_id(self) -> str
-    @property def temperature(self) -> float
-    @property @abstractmethod def provider(self) -> str
+class StructuredModel(ModelClient):
+    # from ModelClient: __init__(model_id, temperature), model_id,
+    #                   temperature, abstract provider
     @abstractmethod
     async def generate_json(self, *, system: str, prompt: str,
                             schema: dict[str, Any]) -> dict[str, Any]
@@ -62,8 +65,8 @@ Both share an identical private `_parse` that rejects non-dict JSON.
 
 ## Adding a provider
 
-1. Implement `StructuredModel` in `llm/`.
-2. Add a row to `PROVIDERS` and `API_KEY_VARS` in [`llm/factory.py`](/concepts/modules/llm-factory.md), plus `DEFAULT_MODEL_IDS`.
+1. Implement `StructuredModel` **and** [`ChatModel`](/concepts/contracts/chat-model.md) in `llm/` — a provider that serves only one port is not supported, and the factory tables are asserted to hold the same keys.
+2. Add a row to `PROVIDERS`, `CHAT_PROVIDERS`, `API_KEY_VARS`, and `DEFAULT_MODEL_IDS` in [`llm/factory.py`](/concepts/modules/llm-factory.md).
 3. Nothing else. `tests/test_architecture.py::test_ocp_new_provider_needs_no_agent_change` registers a provider at runtime and proves the agents absorb it.
 
 Keep the SDK import inside `__init__` and keep `_parse`'s dict check — the agents

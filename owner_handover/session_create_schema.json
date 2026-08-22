@@ -1,0 +1,35 @@
+{
+  "description": "Body for POST /api/v1/sessions. Opens a live typed interview against one persona, casting it first if that archetype is not yet enrolled.",
+  "properties": {
+    "interview_id": {
+      "title": "Interview Id",
+      "type": "string"
+    },
+    "archetype": {
+      "description": "Archetype key from GET /api/v1/candidate-archetypes.",
+      "title": "Archetype",
+      "type": "string"
+    },
+    "planned_minutes": {
+      "default": 20,
+      "maximum": 45,
+      "minimum": 5,
+      "title": "Planned Minutes",
+      "type": "integer"
+    },
+    "modality": {
+      "default": "text",
+      "description": "A voice session still opens here; the browser then redeems a credential from POST /sessions/{id}/realtime and talks to the vendor directly.",
+      "pattern": "^(text|voice)$",
+      "title": "Modality",
+      "type": "string"
+    }
+  },
+  "required": [
+    "interview_id",
+    "archetype"
+  ],
+  "title": "SessionCreateRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

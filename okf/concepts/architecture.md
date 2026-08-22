@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /tests/test_architecture.py
@@ -33,7 +33,7 @@ Ports and adapters, four packages, dependencies pointing one way.
         └───────┬──────────┘   └────────┬─────────┘
                 │ imports               │ imports
         ┌───────▼───────────────────────▼───────────────┐
-        │ llm/    StructuredModel port + Gemini/OpenAI   │
+        │ llm/ Structured + Chat + Realtime + adapters   │
         │         ← the ONLY place a vendor SDK appears  │
         └───────────────────────────────────────────────┘
 ```
@@ -60,11 +60,13 @@ run offline in `tests/test_architecture.py` (331 lines, AST-based).
 | **DIP** | Vendor SDKs (`google`, `openai`, `google.genai`) only inside `llm/` | AST import scan over every module in every package |
 | **DIP** | Agents accept an injected model and never read provider credentials | Signature inspection + source scan for `os.getenv`/`API_KEY` |
 | **DIP** | Handlers type against ports, not `InterviewRepository` | `control_plane/api.py` must not annotate the SQLite adapter |
-| **ISP** | `InterviewStore` / `ExpectationStore` / `CandidateStore` stay small and non-overlapping | Method-count and set-intersection checks per protocol |
+| **ISP** | `InterviewStore` / `ExpectationStore` / `CandidateStore` / `SessionStore` stay small and non-overlapping | Method-count and set-intersection checks per protocol |
+| **ISP** | `StructuredModel`, `ChatModel` and `RealtimeBroker` stay separate ports | None subclasses another; none exposes another's method |
 | **ISP** | The SQLite adapter satisfies every port | `runtime_checkable` isinstance against an in-memory connection |
-| **LSP** | Every `StructuredModel` shares the base signature, implements the whole contract, and constructs identically | Signature comparison across `GeminiModel` / `OpenAIModel` |
+| **LSP** | Every `StructuredModel`, `ChatModel` and `RealtimeBroker` shares its base signature, implements the whole contract, and constructs identically | Signature comparison across all five adapters |
 | **LSP** | Every archetype honours the same shape | Parametrized over the whole catalog |
 | **OCP** | A new archetype or provider flows through with no agent edit | The test **registers one at runtime** and proves it works |
+| **OCP** | `REALTIME_PROVIDERS` names only known providers, each with a realtime model id — a *documented subset*, not a mirror of the text tables | Subset assertion, with the reason in the docstring |
 | **SRP** | Agents never import `sqlite3` or `control_plane`; generation does not persist | Import scan |
 | **SRP** | Prompt modules perform no I/O; schema modules hold no logic | AST scan for calls / function defs |
 | **Layering** | No package imports one above it | `ALLOWED_IMPORTS` |
@@ -76,7 +78,7 @@ The OCP test is the one worth reading — it does not assert that extension is
 ## Storage ports
 
 `control_plane/ports.py` defines `typing.Protocol` classes — structural, so
-`InterviewRepository` neither imports nor subclasses them. Three narrow ports
+`InterviewRepository` neither imports nor subclasses them. Four narrow ports
 plus two compositions:
 
 * `InterviewStore` — `create`, `get`, `list`

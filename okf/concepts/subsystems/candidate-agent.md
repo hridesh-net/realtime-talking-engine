@@ -9,20 +9,22 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /candidate_agent/agent.py
   - resource: /candidate_agent/archetypes.py
   - resource: /candidate_agent/engine_contract.py
   - resource: /candidate_agent/prompts.py
+  - resource: /candidate_agent/session.py
+  - resource: /candidate_agent/voice.py
   - resource: /candidate_agent/schema.py
 ---
 # Candidate agent
 
 `candidate_agent/` — the largest and most interesting package. Casts one persona
-per `(interview, archetype)` for a **human interviewer** to practise against.
-Imports only `llm`.
+per `(interview, archetype)` for a **human interviewer** to practise against,
+and then plays that persona through a live typed interview. Imports only `llm`.
 
 | Module | Role |
 |---|---|
@@ -30,31 +32,39 @@ Imports only `llm`.
 | `agent.py` (373 ln) | [`VirtualCandidateAgent.generate(...)`](/concepts/modules/candidate-agent-agent.md) — seed, call, re-impose, fingerprint |
 | `engine_contract.py` (190 ln) | [Compiles the runtime slice](/concepts/modules/candidate-agent-engine-contract.md) and the system prompt |
 | `schema.py` (254 ln) | [`VirtualCandidate`, `EngineContract`, the draft schema](/concepts/contracts/virtual-candidate.md) |
-| `prompts.py` (200 ln) | Casting-director persona, 11 hard rules, user prompt builder, `expectation_note()` |
+| `session.py` (95 ln) | [`CandidateSessionAgent.reply(...)`](/concepts/modules/candidate-agent-session.md) — one persona turn, stateless |
+| `voice.py` (105 ln) | [`build_realtime_session(...)`](/concepts/modules/candidate-agent-voice.md) — the persona's spoken session config |
+| `prompts.py` (240 ln) | Casting-director persona, 11 hard rules, user prompt builder, `expectation_note()`, `build_session_system_prompt()` |
 
 ## The idea
 
-Each archetype exists to test **one specific interviewer skill**. A persona that
-does not challenge the interviewer in a distinct way does not belong in the
-catalog.
+Each archetype exists to put **one manager competency** under pressure. A
+persona that does not stress the manager in a distinct way does not belong in
+the catalog. Catalog `v2.0` — v1 sorted personas by hiring outcome, which
+stopped meaning anything when the assessed subject became the manager.
 
-| Archetype | Verdict | Tests whether the interviewer… |
+| Archetype | Stresses hardest | Tests whether the manager… |
 |---|---|---|
-| `strong_hire` *(default)* | select | confirms strength with evidence, still finds the gap |
-| `clear_reject` *(default)* | reject | reaches a defensible no-hire with quotable evidence |
-| `lazy` | reject | separates low effort from low ability |
-| `smart_but_lazy` | borderline | probes past a shallow first answer |
-| `disengaged` | reject | names disinterest instead of scoring it as weak skill |
-| `eager_underqualified` | borderline | discounts enthusiasm when scoring depth |
-| `confident_bluffer` | reject | verifies claims instead of rewarding fluency |
-| `resume_inflater` | reject | asks ownership questions, converts "we" to "I" |
-| `nervous_but_capable` | select | separates presentation from ability |
-| `rambler` | borderline | controls time and still covers the rubric |
-| `specialist_mismatch` | borderline | assesses transferable depth, not keywords |
+| `cooperative_trap` *(default)* | Unconscious Bias | declines a volunteered protected detail and routes the accommodation ask to policy |
+| `evasive` *(default)* | Structured Interviewing | asks again after a platitude, and lets a silence do the work |
+| `nervous_fresher` | Communication, Candidate Experience | warms the room before assessing, and scores content not delivery |
+| `inflated_resume` | Structured Interviewing | converts "we" into "I" and probes a claim to its breaking point |
+| `comp_first` | Hiring with Clarity | sells the role and states the band honestly without caving |
+| `defensive` | Communication & Tone | holds composure through provocation and re-plans around a hard stop |
+| `rambler` | Structured Interviewing | redirects without rudeness and still covers what was planned |
 
-Eleven archetypes: **2 select, 5 reject, 4 borderline**. The catalog is
-deliberately weighted toward rejects and borderlines — those are the calls
-interviewers get wrong.
+Seven archetypes: **2 select, 2 reject, 3 borderline** — though the verdict is
+now only persona metadata. What the catalog is balanced on instead is rubric
+coverage: a test asserts every one of the five criteria is stressed at level ≥3
+by at least one persona, so no competency is untrainable.
+
+The two defaults are no longer "one hire, one no-hire". They are the bias trap
+(the one manager failure that cannot be walked back) and the evasive candidate
+(the one that separates structured interviewing from conversation).
+
+**Nothing here scores anything.** `stresses` is advisory until the evaluation
+layer lands, and by explicit product decision no criterion — bias included —
+is a critical-fail gate.
 
 ## The casting-director persona
 
@@ -62,14 +72,35 @@ interviewers get wrong.
 afternoon: a concrete history, a concrete ceiling, concrete things they get
 wrong. You never write a caricature."*
 
-Eleven hard rules. The ones that shape output most: the archetype and verdict are
-fixed and must not be softened; every required skill must appear spelled exactly
+Eleven hard rules, plus the archetype's `session_beats` rendered as a fixed
+block the cast persona must be written to perform. The ones that shape output
+most: the archetype and verdict are fixed and must not be softened; every required skill must appear spelled exactly
 as given; levels must stay inside the given band; `wrong_beliefs` must be a real
 mistaken belief an engineer holds, not "misunderstands caching";
 `breaking_point` must name a depth an interviewer could walk into; resume-claim
 truthfulness must match the honesty trait (high honesty → all `true`, low
 honesty → at least two `exaggerated`/`false`); names must be realistic and
 culturally varied.
+
+## Casting, then conversation
+
+The package has two jobs and they run at different times. `agent.py` casts a
+persona **once** per `(interview, archetype)` — a `StructuredModel` call whose
+output is validated, clamped, and fingerprinted. `session.py` then replays that
+persona's compiled contract on **every turn** of a live interview via a
+[`ChatModel`](/concepts/contracts/chat-model.md), adding nothing but a text-mode
+preamble.
+
+`voice.py` is the third: it compiles the same contract into a realtime voice
+session — instructions, voice, speaking rate, turn detection — which a browser
+then runs against the vendor directly ([Realtime voice](/concepts/contracts/realtime-voice.md)).
+
+None of the three share a model instance or a temperature (0.35 casting, 0.8 text
+session, vendor-owned for voice), and neither `session.py` nor `voice.py` imports
+`agent.py`. All three meet at the compiled
+[`EngineContract`](/concepts/contracts/engine-contract.md) — which is also exactly
+what the Go voice engine will consume. That one seam is why text, browser voice,
+and the future engine all run the same persona.
 
 ## The output
 
@@ -82,4 +113,6 @@ plus the scorecard that grades the interviewer afterwards.
 
 Offline: `tests/test_candidate_rubric.py` (279 ln) is the real safety net —
 determinism, clamping, scorecard integrity, prompt byte-stability.
+`tests/test_session.py` covers the session agent against a fake `ChatModel`;
+`tests/test_voice.py` covers voice compilation against a fake broker.
 Live: `tests/test_candidate_agent.py`, six archetypes plus a determinism check.

@@ -38,3 +38,53 @@ export const enrollCandidates = (id, body) =>
 
 export const deleteCandidate = (cid) =>
   request(`/candidates/${cid}`, { method: 'DELETE' })
+
+// --- Live text sessions -----------------------------------------------------
+
+export const startSession = (interviewId, archetype, plannedMinutes = 20) =>
+  request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      interview_id: interviewId,
+      archetype,
+      planned_minutes: plannedMinutes,
+    }),
+  })
+
+export const takeTurn = (sessionId, text) =>
+  request(`/sessions/${sessionId}/turns`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+
+export const endSession = (sessionId) =>
+  request(`/sessions/${sessionId}/end`, { method: 'POST' })
+
+export const getSession = (sessionId) => request(`/sessions/${sessionId}`)
+
+// Summaries, not transcripts — the detail screen's table.
+export const listSessions = (interviewId) => request(`/interviews/${interviewId}/sessions`)
+
+// --- Voice sessions ---------------------------------------------------------
+
+export const getVoiceCapability = () => request('/voice-capability')
+
+export const startVoiceSession = (interviewId, archetype, plannedMinutes = 20) =>
+  request('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      interview_id: interviewId,
+      archetype,
+      planned_minutes: plannedMinutes,
+      modality: 'voice',
+    }),
+  })
+
+export const mintRealtimeCredential = (sessionId) =>
+  request(`/sessions/${sessionId}/realtime`, { method: 'POST' })
+
+export const appendTranscript = (sessionId, speaker, text) =>
+  request(`/sessions/${sessionId}/transcript`, {
+    method: 'POST',
+    body: JSON.stringify({ speaker, text }),
+  })

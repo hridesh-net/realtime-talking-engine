@@ -77,14 +77,14 @@ class InterviewResponse(BaseModel):
 class CandidateEnrollRequest(BaseModel):
     """POST /api/v1/interviews/{id}/candidates body.
 
-    Omit `archetypes` to enroll the two defaults: one candidate who should be
-    selected and one who should be rejected.
+    Omit `archetypes` to enroll the two defaults — the two personas that carry
+    the heaviest rubric criteria between them.
     """
 
     archetypes: list[str] | None = Field(
         None,
         description="Archetype keys from GET /api/v1/candidate-archetypes. "
-        "Defaults to ['strong_hire', 'clear_reject'].",
+        "Defaults to ['cooperative_trap', 'evasive'].",
     )
     regenerate: bool = Field(
         False,
@@ -112,3 +112,132 @@ class CandidateSummary(BaseModel):
     seriousness: int
     interest: int
     effort: int
+
+
+# ---------------------------------------------------------------------------
+# Live text session
+#
+# Phase 1 of the manager-assessment pivot runs the conversation on the existing
+# interview/archetype domain model, so a session hangs off `interview_id`. That
+# field becomes `role_id` when the job card replaces the job spec; the rest of
+# the shape — turns, timestamps, modality — is already what the evaluation layer
+# and the Go voice engine will consume, so it does not move again.
+# ---------------------------------------------------------------------------
+
+
+class Turn(BaseModel):
+    """One line of the transcript.
+
+    ``at`` and ``elapsed_ms`` are stamped server-side, never by the client: they
+    are the evaluation layer's time base, and a client clock would make two
+    sessions incomparable.
+    """
+
+    index: int = Field(..., ge=0, description="Position in the transcript, from 0.")
+    speaker: str = Field(..., pattern="^(manager|candidate)$")
+    text: str
+    at: datetime
+    elapsed_ms: int = Field(..., ge=0, description="Milliseconds since the session started.")
+
+
+class SessionCreateRequest(BaseModel):
+    """POST /api/v1/sessions body.
+
+    Opens a live interview against one persona. If that archetype is not yet
+    enrolled for the interview it is cast on the spot, so starting a
+    conversation never needs a separate enrollment step.
+    """
+
+    interview_id: str
+    archetype: str = Field(..., description="Archetype key from GET /api/v1/candidate-archetypes.")
+    planned_minutes: int = Field(20, ge=5, le=45)
+    modality: str = Field(
+        "text",
+        pattern="^(text|voice)$",
+        description="A voice session still opens here; the browser then redeems a "
+        "credential from POST /sessions/{id}/realtime and talks to the vendor directly.",
+    )
+
+
+class TurnRequest(BaseModel):
+    """POST /api/v1/sessions/{id}/turns body — what the manager just said."""
+
+    text: str = Field(..., min_length=1)
+
+
+class SessionResponse(BaseModel):
+    """A live or finished interview session with its full transcript."""
+
+    id: str
+    interview_id: str
+    candidate_id: str
+    persona_key: str
+    candidate_name: str
+    status: str = Field(..., pattern="^(live|completed|abandoned)$")
+    modality: str = Field(
+        "text",
+        pattern="^(text|voice)$",
+        description="Voice arrives with the Go engine; the transcript shape does not change.",
+    )
+    planned_minutes: int
+    started_at: datetime
+    ended_at: datetime | None = None
+    opening_line: str
+    turns: list[Turn] = Field(default_factory=list)
+
+
+class SessionSummary(BaseModel):
+    """One row of GET /api/v1/interviews/{id}/sessions.
+
+    Deliberately transcript-free. The list screen needs to know that a session
+    happened and how long it ran; shipping every transcript to render a table
+    would send the evaluation layer's evidence over the wire to draw a row count.
+    """
+
+    id: str
+    interview_id: str
+    persona_key: str
+    candidate_name: str
+    status: str = Field(..., pattern="^(live|completed|abandoned)$")
+    modality: str = Field("text", pattern="^(text|voice)$")
+    planned_minutes: int
+    started_at: datetime
+    ended_at: datetime | None = None
+    turn_count: int = Field(..., ge=0, description="Turns stored so far, both speakers.")
+
+
+class TranscriptAppendRequest(BaseModel):
+    """POST /api/v1/sessions/{id}/transcript body.
+
+    Records a turn **without** generating a reply. Voice sessions need this: the
+    audio never passes through this service, so the browser reports each
+    finalised transcript back and the stored record stays complete.
+    """
+
+    speaker: str = Field(..., pattern="^(manager|candidate)$")
+    text: str = Field(..., min_length=1)
+
+
+class RealtimeCredentialResponse(BaseModel):
+    """POST /api/v1/sessions/{id}/realtime response.
+
+    Everything the browser needs to open a speech-to-speech session, and nothing
+    it does not. The persona instructions are baked into the minted credential
+    vendor-side, so they are deliberately **not** returned here — a client that
+    could read them could also edit them.
+    """
+
+    session_id: str
+    client_secret: str = Field(..., description="Ephemeral. Expires; scoped to one session.")
+    expires_at: int = Field(..., description="Unix seconds. Connect before this.")
+    model: str
+    call_url: str = Field(..., description="POST the SDP offer here with the secret as bearer.")
+    voice: str = Field(..., description="Derived from the persona; stable across sessions.")
+
+
+class VoiceCapabilityResponse(BaseModel):
+    """GET /api/v1/voice-capability — whether this deployment can do voice at all."""
+
+    available: bool
+    providers: list[str] = Field(default_factory=list)
+    detail: str

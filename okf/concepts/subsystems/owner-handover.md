@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /scripts/export_schemas.py
@@ -33,6 +33,10 @@ engine team) can generate types without running the service.
 | `candidate_output_schema.json` | `VirtualCandidate` |
 | `engine_contract_schema.json` | `EngineContract` |
 | `interview_response_schema.json` | `InterviewResponse` |
+| `session_create_schema.json` | `SessionCreateRequest` |
+| `session_output_schema.json` | [`SessionResponse`](/concepts/contracts/session-transcript.md) — the transcript the evaluation layer reads |
+| `session_realtime_schema.json` | `RealtimeCredentialResponse` — what a browser needs to open a voice call. Note what it omits: the persona instructions |
+| `session_transcript_append_schema.json` | `TranscriptAppendRequest` — recording a spoken turn |
 | `expectation_output_schema.json` | `InterviewExpectation` |
 
 Each gets `$schema` (draft 2020-12) and a `description` explaining which endpoint

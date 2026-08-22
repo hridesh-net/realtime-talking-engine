@@ -1,0 +1,534 @@
+{
+  "$defs": {
+    "AnswerPolicy": {
+      "description": "How the persona decides what to reveal. The engine treats this as law.",
+      "properties": {
+        "default_answer_depth": {
+          "pattern": "^(minimal|adequate|thorough)$",
+          "title": "Default Answer Depth",
+          "type": "string"
+        },
+        "reveals_depth_when": {
+          "title": "Reveals Depth When",
+          "type": "string"
+        },
+        "on_unknown_question": {
+          "title": "On Unknown Question",
+          "type": "string"
+        },
+        "on_pressure": {
+          "title": "On Pressure",
+          "type": "string"
+        },
+        "on_silence": {
+          "title": "On Silence",
+          "type": "string"
+        },
+        "always_does": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Always Does",
+          "type": "array"
+        },
+        "never_does": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Never Does",
+          "type": "array"
+        }
+      },
+      "required": [
+        "default_answer_depth",
+        "reveals_depth_when",
+        "on_unknown_question",
+        "on_pressure",
+        "on_silence"
+      ],
+      "title": "AnswerPolicy",
+      "type": "object"
+    },
+    "AptitudeProfile": {
+      "description": "Smartness/dumbness ratio and seriousness. All axes fixed across personas.",
+      "properties": {
+        "smartness": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Smartness",
+          "type": "integer"
+        },
+        "dumbness": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Dumbness",
+          "type": "integer"
+        },
+        "smartness_ratio": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Smartness Ratio",
+          "type": "number"
+        },
+        "seriousness": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Seriousness",
+          "type": "integer"
+        },
+        "effort": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Effort",
+          "type": "integer"
+        },
+        "interest": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Interest",
+          "type": "integer"
+        },
+        "honesty": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Honesty",
+          "type": "integer"
+        },
+        "preparedness": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Preparedness",
+          "type": "integer"
+        },
+        "nervousness": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Nervousness",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "smartness",
+        "dumbness",
+        "smartness_ratio",
+        "seriousness",
+        "effort",
+        "interest",
+        "honesty",
+        "preparedness",
+        "nervousness"
+      ],
+      "title": "AptitudeProfile",
+      "type": "object"
+    },
+    "EngineContract": {
+      "description": "Runtime slice consumed by the Go interview-candidate engine.",
+      "properties": {
+        "contract_version": {
+          "default": "v1.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "candidate_id": {
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "interview_id": {
+          "title": "Interview Id",
+          "type": "string"
+        },
+        "system_prompt": {
+          "title": "System Prompt",
+          "type": "string"
+        },
+        "opening_line": {
+          "title": "Opening Line",
+          "type": "string"
+        },
+        "voice_directives": {
+          "additionalProperties": true,
+          "title": "Voice Directives",
+          "type": "object"
+        },
+        "turn_policy": {
+          "additionalProperties": true,
+          "title": "Turn Policy",
+          "type": "object"
+        },
+        "knowledge_ceiling": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Knowledge Ceiling",
+          "type": "object"
+        },
+        "unlock_condition": {
+          "title": "Unlock Condition",
+          "type": "string"
+        },
+        "forbidden_behaviors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Behaviors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "interview_id",
+        "system_prompt",
+        "opening_line",
+        "voice_directives",
+        "turn_policy",
+        "knowledge_ceiling",
+        "unlock_condition",
+        "forbidden_behaviors"
+      ],
+      "title": "EngineContract",
+      "type": "object"
+    },
+    "InterviewerScorecard": {
+      "description": "Ground-truth answer key for grading the interviewer, not the candidate.",
+      "properties": {
+        "expected_verdict": {
+          "pattern": "^(select|reject|borderline)$",
+          "title": "Expected Verdict",
+          "type": "string"
+        },
+        "interviewer_challenge": {
+          "title": "Interviewer Challenge",
+          "type": "string"
+        },
+        "must_discover": {
+          "items": {
+            "$ref": "#/$defs/ScorecardItem"
+          },
+          "title": "Must Discover",
+          "type": "array"
+        },
+        "interviewer_failure_modes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Interviewer Failure Modes",
+          "type": "array"
+        },
+        "pass_condition": {
+          "title": "Pass Condition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expected_verdict",
+        "interviewer_challenge",
+        "must_discover",
+        "interviewer_failure_modes",
+        "pass_condition"
+      ],
+      "title": "InterviewerScorecard",
+      "type": "object"
+    },
+    "ResumeClaim": {
+      "description": "One claim on the persona's resume, and how truthful it is.",
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "truthfulness": {
+          "pattern": "^(true|exaggerated|false)$",
+          "title": "Truthfulness",
+          "type": "string"
+        },
+        "probe_that_exposes_it": {
+          "title": "Probe That Exposes It",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim",
+        "truthfulness",
+        "probe_that_exposes_it"
+      ],
+      "title": "ResumeClaim",
+      "type": "object"
+    },
+    "ScorecardItem": {
+      "description": "One weighted signal the interviewer is expected to surface.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "signal": {
+          "title": "Signal",
+          "type": "string"
+        },
+        "weight": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Weight",
+          "type": "number"
+        },
+        "how_to_surface": {
+          "title": "How To Surface",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "signal",
+        "weight",
+        "how_to_surface"
+      ],
+      "title": "ScorecardItem",
+      "type": "object"
+    },
+    "SkillKnowledge": {
+      "description": "What the persona actually knows about one required skill.",
+      "properties": {
+        "skill": {
+          "title": "Skill",
+          "type": "string"
+        },
+        "level": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Level",
+          "type": "integer"
+        },
+        "stance": {
+          "pattern": "^(solid|shallow|bluffs|absent)$",
+          "title": "Stance",
+          "type": "string"
+        },
+        "talking_points": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Talking Points",
+          "type": "array"
+        },
+        "breaking_point": {
+          "title": "Breaking Point",
+          "type": "string"
+        },
+        "wrong_beliefs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Wrong Beliefs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "skill",
+        "level",
+        "stance",
+        "breaking_point"
+      ],
+      "title": "SkillKnowledge",
+      "type": "object"
+    },
+    "SpeechProfile": {
+      "description": "Way of talking. Drives the realtime voice model in the Go engine.",
+      "properties": {
+        "pace": {
+          "pattern": "^(slow|measured|fast)$",
+          "title": "Pace",
+          "type": "string"
+        },
+        "verbosity": {
+          "pattern": "^(terse|balanced|verbose)$",
+          "title": "Verbosity",
+          "type": "string"
+        },
+        "filler_frequency": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Filler Frequency",
+          "type": "integer"
+        },
+        "hesitation_frequency": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Hesitation Frequency",
+          "type": "integer"
+        },
+        "formality": {
+          "pattern": "^(casual|neutral|formal)$",
+          "title": "Formality",
+          "type": "string"
+        },
+        "interrupts_interviewer": {
+          "title": "Interrupts Interviewer",
+          "type": "boolean"
+        },
+        "tone": {
+          "title": "Tone",
+          "type": "string"
+        },
+        "verbal_tics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verbal Tics",
+          "type": "array"
+        },
+        "sample_phrases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sample Phrases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pace",
+        "verbosity",
+        "filler_frequency",
+        "hesitation_frequency",
+        "formality",
+        "interrupts_interviewer",
+        "tone"
+      ],
+      "title": "SpeechProfile",
+      "type": "object"
+    }
+  },
+  "description": "One virtual candidate persona. Returned by the enrollment endpoint and by GET /api/v1/candidates/{candidate_id}.",
+  "properties": {
+    "persona_version": {
+      "default": "v1.0",
+      "title": "Persona Version",
+      "type": "string"
+    },
+    "candidate_id": {
+      "title": "Candidate Id",
+      "type": "string"
+    },
+    "interview_id": {
+      "title": "Interview Id",
+      "type": "string"
+    },
+    "archetype": {
+      "title": "Archetype",
+      "type": "string"
+    },
+    "archetype_label": {
+      "title": "Archetype Label",
+      "type": "string"
+    },
+    "catalog_version": {
+      "title": "Catalog Version",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "headline": {
+      "title": "Headline",
+      "type": "string"
+    },
+    "background": {
+      "title": "Background",
+      "type": "string"
+    },
+    "years_experience": {
+      "maximum": 40,
+      "minimum": 0,
+      "title": "Years Experience",
+      "type": "integer"
+    },
+    "verdict": {
+      "pattern": "^(select|reject|borderline)$",
+      "title": "Verdict",
+      "type": "string"
+    },
+    "verdict_rationale": {
+      "title": "Verdict Rationale",
+      "type": "string"
+    },
+    "speech_profile": {
+      "$ref": "#/$defs/SpeechProfile"
+    },
+    "aptitude": {
+      "$ref": "#/$defs/AptitudeProfile"
+    },
+    "knowledge_map": {
+      "items": {
+        "$ref": "#/$defs/SkillKnowledge"
+      },
+      "title": "Knowledge Map",
+      "type": "array"
+    },
+    "resume_claims": {
+      "items": {
+        "$ref": "#/$defs/ResumeClaim"
+      },
+      "title": "Resume Claims",
+      "type": "array"
+    },
+    "answer_policy": {
+      "$ref": "#/$defs/AnswerPolicy"
+    },
+    "interviewer_scorecard": {
+      "$ref": "#/$defs/InterviewerScorecard"
+    },
+    "engine_contract": {
+      "$ref": "#/$defs/EngineContract"
+    },
+    "fingerprint": {
+      "title": "Fingerprint",
+      "type": "string"
+    },
+    "seed_fingerprint": {
+      "title": "Seed Fingerprint",
+      "type": "string"
+    },
+    "seed": {
+      "title": "Seed",
+      "type": "string"
+    },
+    "raw_model_output": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Raw Model Output"
+    }
+  },
+  "required": [
+    "candidate_id",
+    "interview_id",
+    "archetype",
+    "archetype_label",
+    "catalog_version",
+    "name",
+    "headline",
+    "background",
+    "years_experience",
+    "verdict",
+    "verdict_rationale",
+    "speech_profile",
+    "aptitude",
+    "knowledge_map",
+    "answer_policy",
+    "interviewer_scorecard",
+    "engine_contract",
+    "fingerprint",
+    "seed_fingerprint",
+    "seed"
+  ],
+  "title": "VirtualCandidate",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

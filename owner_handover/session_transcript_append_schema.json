@@ -1,0 +1,22 @@
+{
+  "description": "Body for POST /api/v1/sessions/{session_id}/transcript. Records a turn that was spoken elsewhere (a voice session) without generating a reply.",
+  "properties": {
+    "speaker": {
+      "pattern": "^(manager|candidate)$",
+      "title": "Speaker",
+      "type": "string"
+    },
+    "text": {
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "speaker",
+    "text"
+  ],
+  "title": "TranscriptAppendRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

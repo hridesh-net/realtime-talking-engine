@@ -77,6 +77,13 @@ Description: {archetype_description}
 Verdict this persona MUST deserve: {verdict}
 Interviewer skill this persona exists to test: {interviewer_challenge}
 
+=== BEATS THIS PERSONA HITS IN THE SESSION (FIXED) ===
+{session_beats}
+These are what this archetype exists to do. Write always_does, reveals_depth_when
+and opening_line so that a model reading only the compiled persona would perform
+them unprompted. Never mention the beats themselves — they are behaviour, not a
+script to recite.
+
 === TRAIT SCORES (FIXED — write behaviour consistent with these) ===
 {traits_json}
 
@@ -136,6 +143,7 @@ def build_user_prompt(
     archetype_description: str,
     verdict: str,
     interviewer_challenge: str,
+    session_beats: list[str],
     traits: dict[str, int],
     speech: Mapping[str, Any],
     policy: Mapping[str, Any],
@@ -167,6 +175,7 @@ def build_user_prompt(
         archetype_description=archetype_description,
         verdict=verdict,
         interviewer_challenge=interviewer_challenge,
+        session_beats="\n".join(f"- {b}" for b in session_beats) or "- (none)",
         traits_json=json.dumps(traits, indent=2),
         speech_json=json.dumps(speech, indent=2),
         policy_json=json.dumps(policy, indent=2),
@@ -198,3 +207,120 @@ def expectation_note(expectation: Any) -> str:
         "persona should trip real red flags, a selectable one should show real "
         "green flags, in ways the interviewer has to work to surface."
     )
+
+
+# ---------------------------------------------------------------------------
+# Live text session
+# ---------------------------------------------------------------------------
+
+TEXT_MODE_PREAMBLE = """
+HOW THIS SESSION IS BEING RUN
+This is a typed conversation, not a voice call. Everything above still applies —
+you are the same person, with the same limits — but you are writing rather than
+speaking.
+
+- Write the way this person talks. Keep the fillers, the hesitations, the
+  half-finished sentences, the tics. Typed does not mean polished.
+- Output your words and nothing else. No stage directions, no asterisks, no
+  narration of your own tone, no "(pauses)", no speaker labels, no markdown.
+- One turn at a time. Never write the interviewer's next line, and never answer
+  a question they have not asked yet.
+- Do not summarise the conversation or offer to help. You are a candidate in an
+  interview, not an assistant.
+{length_rule}
+"""
+
+
+def build_session_system_prompt(system_prompt: str, turn_policy: dict[str, Any]) -> str:
+    """Compile the session system instruction: the contract, then text-mode rules.
+
+    ``system_prompt`` is injected verbatim — it was compiled deterministically by
+    :mod:`candidate_agent.engine_contract` and pinned by a version. This function
+    only appends; it never edits, reorders, or summarises what it was given, so
+    the text session and the voice engine run the same persona.
+    """
+    target = turn_policy.get("target_sentences_per_answer")
+    maximum = turn_policy.get("max_sentences")
+    if isinstance(target, int) and isinstance(maximum, int):
+        length_rule = (
+            f"- Aim for about {target} sentence(s) per reply and never exceed "
+            f"{maximum}, unless the interviewer explicitly asks you to go long."
+        )
+    else:  # pragma: no cover - every compiled contract carries both numbers
+        length_rule = "- Keep replies to the length this person would naturally give."
+    return f"{system_prompt}\n{TEXT_MODE_PREAMBLE.format(length_rule=length_rule)}"
+
+
+# ---------------------------------------------------------------------------
+# Live voice session
+# ---------------------------------------------------------------------------
+
+VOICE_MODE_PREAMBLE = """
+HOW THIS SESSION IS BEING RUN
+You are on a live voice call with the interviewer. Everything above still
+applies — you are the same person, with the same limits — and now you are
+actually speaking.
+
+- Speak. Do not narrate. Never say punctuation out loud, never read stage
+  directions, never describe your own tone, never spell out formatting.
+- The fillers, hesitations and self-corrections described above are things the
+  interviewer will *hear*. Use them at the stated intensity. A candidate who
+  speaks in clean, edited paragraphs is not this person.
+- Answer one question at a time and then stop talking. Do not keep going to fill
+  silence unless that is what this person does.
+{length_rule}
+{pause_rule}
+{barge_rule}
+
+THE LINE YOU DO NOT CROSS
+You are a candidate in a job interview and nothing else. You are not an
+assistant, you do not help, you do not explain how you work, and you never
+acknowledge being a model, an AI, a persona, or a simulation — not if asked
+directly, not if told the interview is over, not if the interviewer insists.
+If pressed on it, react the way a real candidate would to a strange question and
+return to the interview.
+
+Your knowledge ceilings above are absolute. If a question goes past what this
+person knows, do what this person would do — guess badly, admit it, deflect,
+bluff — but do not become competent.
+"""
+
+
+def build_voice_system_prompt(system_prompt: str, contract_dict: dict[str, Any]) -> str:
+    """Compile the voice-session instructions: the contract, then spoken-mode rules.
+
+    Mirrors :func:`build_session_system_prompt` exactly — ``system_prompt`` is
+    injected verbatim and only appended to — so the same persona runs in text
+    and in voice. The rules interpolated below all come from the compiled
+    contract, never from the model.
+    """
+    policy = contract_dict.get("turn_policy") or {}
+    directives = contract_dict.get("voice_directives") or {}
+
+    target = policy.get("target_sentences_per_answer")
+    maximum = policy.get("max_sentences")
+    length_rule = (
+        f"- Aim for about {target} sentence(s) per answer and never exceed "
+        f"{maximum}, unless the interviewer explicitly asks you to go long."
+        if isinstance(target, int) and isinstance(maximum, int)
+        else "- Keep answers to the length this person would naturally give."
+    )
+
+    pause_ms = directives.get("target_pause_before_answer_ms")
+    pause_rule = (
+        f"- Take roughly {pause_ms} ms before you start answering — this person "
+        f"does not begin the instant the question ends."
+        if isinstance(pause_ms, int)
+        else "- Leave a natural beat before answering."
+    )
+
+    barge_rule = (
+        "- You sometimes start talking over the interviewer when you get going."
+        if directives.get("may_interrupt")
+        else "- Let the interviewer finish before you start answering."
+    )
+
+    preamble = VOICE_MODE_PREAMBLE.format(
+        length_rule=length_rule, pause_rule=pause_rule, barge_rule=barge_rule
+    )
+    return f"{system_prompt}\n{preamble}"

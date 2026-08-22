@@ -1,0 +1,197 @@
+{
+  "$defs": {
+    "CandidatePersona": {
+      "description": "Seed-derived persona attached to a training-mode interview.",
+      "properties": {
+        "candidate_id": {
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "background": {
+          "title": "Background",
+          "type": "string"
+        },
+        "attributes": {
+          "items": {
+            "$ref": "#/$defs/PersonaAttribute"
+          },
+          "title": "Attributes",
+          "type": "array"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "name",
+        "background",
+        "attributes",
+        "fingerprint"
+      ],
+      "title": "CandidatePersona",
+      "type": "object"
+    },
+    "InterviewConfigInput": {
+      "description": "Runtime configuration overrides.",
+      "properties": {
+        "duration_minutes": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "maximum": 180,
+          "title": "Duration Minutes",
+          "type": "integer"
+        },
+        "question_mode": {
+          "default": "AI",
+          "pattern": "^(AI|HYBRID|MANUAL)$",
+          "title": "Question Mode",
+          "type": "string"
+        },
+        "interview_mode": {
+          "default": "STANDARD",
+          "pattern": "^(STANDARD|DEEP)$",
+          "title": "Interview Mode",
+          "type": "string"
+        },
+        "language": {
+          "default": "en",
+          "title": "Language",
+          "type": "string"
+        }
+      },
+      "title": "InterviewConfigInput",
+      "type": "object"
+    },
+    "PersonaAttribute": {
+      "description": "One scored attribute of a training-mode persona.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "integer"
+        },
+        "variance": {
+          "title": "Variance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "score",
+        "variance"
+      ],
+      "title": "PersonaAttribute",
+      "type": "object"
+    }
+  },
+  "description": "Interview record returned by the interview endpoints.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "job_title": {
+      "title": "Job Title",
+      "type": "string"
+    },
+    "jd": {
+      "title": "Jd",
+      "type": "string"
+    },
+    "skills_required": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Skills Required",
+      "type": "array"
+    },
+    "job_location_type": {
+      "title": "Job Location Type",
+      "type": "string"
+    },
+    "experience_level": {
+      "title": "Experience Level",
+      "type": "string"
+    },
+    "company_type": {
+      "title": "Company Type",
+      "type": "string"
+    },
+    "mode": {
+      "title": "Mode",
+      "type": "string"
+    },
+    "status": {
+      "title": "Status",
+      "type": "string"
+    },
+    "config": {
+      "$ref": "#/$defs/InterviewConfigInput"
+    },
+    "ai_persona": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CandidatePersona"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "scheduled_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scheduled At"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "start_url": {
+      "title": "Start Url",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "job_title",
+    "jd",
+    "skills_required",
+    "job_location_type",
+    "experience_level",
+    "company_type",
+    "mode",
+    "status",
+    "config",
+    "created_at",
+    "start_url",
+    "metadata"
+  ],
+  "title": "InterviewResponse",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

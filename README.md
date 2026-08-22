@@ -1,6 +1,6 @@
 # interview-watcher
 
-Interview control plane. Three things, all in Python:
+Interview control plane. Four things, all in Python:
 
 1. Create interviews from a job spec.
 2. Generate a deterministic **interviewer expectation** for each one — what must
@@ -8,6 +8,9 @@ Interview control plane. Three things, all in Python:
 3. Enroll **virtual candidates** — LLM-cast personas, stored in the database,
    that a human interviewer practises against. Each persona carries a
    ground-truth answer key used to grade the interviewer afterwards.
+4. **Run the interview** — a live session against one of those personas,
+   **typed or spoken**, stored as a timestamped transcript. Open the UI, pick a
+   persona, hit **Chat** or **🎙 Voice**, and conduct it.
 
 This project is **separate from `smart-Interview`** (the real-time voice
 interviewer engine). Nothing here imports from it. The runtime engine stays in
@@ -18,13 +21,14 @@ Go/Rust; this service owns the "what" of an interview.
 ```
 llm/                 Provider port + Gemini/OpenAI adapters (the only vendor SDKs)
 expectation_agent/   Expectation agent — persona, guardrails, fixed rubric
-candidate_agent/     Virtual candidate agent — archetype catalog, engine contract
+candidate_agent/     Virtual candidate agent — archetype catalog, engine contract, live session
 control_plane/       FastAPI service, storage ports, SQLite adapter
 owner_handover/      JSON Schemas + samples for the API contract (deliverables)
 ui/                  React + Vite test UI
 tests/               Offline checks (fast) + live scenario scripts
 scripts/             check.sh, export_schemas.py
-docs/                BRD, engine contract spec
+engine/              Go live-session engine (voice) — skeleton, parked
+docs/                BRDs, pivot plan, engine contract spec
 ```
 
 Dependencies point one way: `llm` ← agents ← `control_plane`. Nothing outside
@@ -64,6 +68,13 @@ The UI proxies `/api` to `127.0.0.1:8081`, so start the API first.
 | GET | `/api/v1/candidates/{cid}/engine-contract` | Runtime slice for the interview engine |
 | GET | `/api/v1/candidates/{cid}/scorecard` | Ground-truth key for grading the interviewer |
 | DELETE | `/api/v1/candidates/{cid}` | Remove a persona |
+| POST | `/api/v1/sessions` | Start a live interview against one persona (casts it first if needed) |
+| POST | `/api/v1/sessions/{id}/turns` | Send the manager's line, get the persona's reply (AI call) |
+| POST | `/api/v1/sessions/{id}/end` | Close the session |
+| GET | `/api/v1/sessions/{id}` | Session with its full timestamped transcript |
+| GET | `/api/v1/voice-capability` | Whether this deployment can run voice sessions |
+| POST | `/api/v1/sessions/{id}/realtime` | Mint the browser's ephemeral credential for a voice call |
+| POST | `/api/v1/sessions/{id}/transcript` | Record a spoken turn (no reply generated) |
 
 Interview creation captures the job spec only — `job_title`, `jd`,
 `skills_required`, `job_location_type`, `experience_level`, `company_type`.
@@ -88,22 +99,26 @@ Contracts live in `owner_handover/`, regenerated from the Pydantic models by
 
 ## Virtual candidates
 
-Eleven archetypes, fixed in `candidate_agent/archetypes.py`. Each one exists to
-test a different interviewer skill:
+Seven archetypes, fixed in `candidate_agent/archetypes.py` (catalog `v2.0`).
+The catalog is built around the **manager** being assessed: each persona exists
+to put one manager competency under pressure.
 
-| Archetype | Verdict | Tests whether the interviewer… |
+| Archetype | Stresses most | Tests whether the manager… |
 |---|---|---|
-| `strong_hire` *(default)* | select | confirms strength with evidence, still finds the gap |
-| `clear_reject` *(default)* | reject | reaches a defensible no-hire with quotable evidence |
-| `lazy` | reject | separates low effort from low ability |
-| `smart_but_lazy` | borderline | probes past a shallow first answer |
-| `disengaged` | reject | names disinterest instead of scoring it as weak skill |
-| `eager_underqualified` | borderline | discounts enthusiasm when scoring depth |
-| `confident_bluffer` | reject | verifies claims instead of rewarding fluency |
-| `resume_inflater` | reject | asks ownership questions, converts "we" to "I" |
-| `nervous_but_capable` | select | separates presentation from ability |
-| `rambler` | borderline | controls time and still covers the rubric |
-| `specialist_mismatch` | borderline | assesses transferable depth, not keywords |
+| `cooperative_trap` *(default)* | Unconscious Bias | declines a volunteered protected detail and routes the accommodation ask to policy |
+| `evasive` *(default)* | Structured Interviewing | asks again after a platitude, and lets a silence do the work |
+| `nervous_fresher` | Communication, Candidate Experience | warms the room before assessing, and scores content rather than delivery |
+| `inflated_resume` | Structured Interviewing | converts "we" into "I" and probes a claim to its breaking point |
+| `comp_first` | Hiring with Clarity | sells the role and states the band honestly without caving |
+| `defensive` | Communication & Tone | holds composure through provocation and re-plans around a hard stop |
+| `rambler` | Structured Interviewing | redirects without rudeness and still covers what was planned |
+
+Each also declares `session_beats` (what it tends to do — fed into casting, so
+it reaches the compiled prompt) and `stresses` (rubric criterion → 1-4). The
+five criteria are Hiring with Clarity, Structured Interviewing, Unconscious
+Bias, Candidate Experience, Communication & Tone. **Nothing is scored yet** —
+the evaluation layer has not been built, and there is no critical-fail gate on
+any criterion by design.
 
 Every persona carries the same fixed axes:
 
@@ -135,11 +150,55 @@ a persona that changed underneath a training set.
 ## Storage
 
 SQLite (`control_plane.db`, path via `CONTROL_PLANE_DB`) — tables `interviews`,
-`ai_personas`, `interview_expectations`, `virtual_candidates`. Personas are
+`ai_personas`, `interview_expectations`, `virtual_candidates`, `sessions`,
+`session_turns`. Personas are
 stored as the full JSON document plus indexed columns (archetype, verdict,
 fingerprints), unique on `(interview_id, archetype)` so a re-cast replaces
 rather than duplicates. The schema ports to PostgreSQL with minimal change;
 Postgres is the intended bridge to the Go/Rust runtime.
+
+## Running an interview
+
+```bash
+.venv/bin/python -m control_plane.main    # start this first
+cd ui && npm run dev                      # then http://localhost:3000
+```
+
+Select an interview, scroll to the persona catalog, and pick a card. An
+archetype that is not yet enrolled is cast on the spot.
+
+**Chat** — you type as the hiring manager; the persona answers in character.
+Enter sends, Shift+Enter breaks the line.
+
+**🎙 Voice** — a real spoken interview. The browser opens a WebRTC call straight
+to OpenAI Realtime and you talk; no push-to-talk, and you can interrupt the
+persona mid-sentence. The first click raises Chrome's microphone prompt, which
+you have to allow yourself. Needs `OPENAI_API_KEY` with Realtime access —
+`GET /api/v1/voice-capability` says whether it is available, and the UI disables
+the button with the reason if not.
+
+**End interview** closes the session either way and leaves the stored transcript
+on screen.
+
+Every turn is written to `session_turns` with a **server-side** timestamp and
+elapsed offset — the transcript is the evidence the evaluation layer will read,
+so its clock and ordering are not the client's to supply. Text and voice produce
+the same transcript shape.
+
+Both modes are driven by the same compiled `EngineContract` the Go voice engine
+will consume; each only appends its own modality preamble. In voice mode the
+audio never touches this service — the control plane compiles the persona,
+seals it into a short-lived credential (the browser never receives the prompt),
+and the media runs browser-to-vendor.
+
+**Voice is Speaker-only today.** One realtime model both decides what the persona
+knows and says it, with the knowledge ceiling carried as prompt text and nothing
+enforcing it. The deterministic pre-gate, false-belief injection and claims
+ledger live in the Go engine's Thinker, which is still at Phase 0. A voice
+persona is easier to argue past its ceiling than a text one; reproduce in Chat to
+tell a persona problem from a modality one.
+
+There is no report yet. Ending a session stores the transcript and stops.
 
 ## Determinism
 
@@ -164,8 +223,10 @@ scripts/check.sh --live     # also the model scenario tests (costs money)
 | `mypy` | `disallow_untyped_defs`, no implicit Optional, pydantic plugin |
 | `tests/test_architecture.py` | SOLID and layering (below) |
 | `tests/test_candidate_rubric.py` | Determinism, clamping, scorecard integrity |
+| `tests/test_session.py` | The text session — contract-verbatim prompt, transcript ordering, session endpoints |
+| `tests/test_voice.py` | The voice session — deterministic voice/speed, the never-leak-the-prompt guarantee, voice endpoints |
 | `scripts/export_schemas.py --check` | `owner_handover/` matches the code |
-| gofmt / go vet / golangci-lint | Skipped until Go source exists; standard recorded in `.golangci.yml` |
+| gofmt / go vet / go build / `go test -race` / go architecture | The Go engine in `engine/`, run from inside that module |
 
 ### SOLID checks (BRD NFR-003)
 
@@ -176,11 +237,13 @@ than a code-review convention:
   not persist. Prompt modules perform no I/O. Schema modules hold no logic.
 - **OCP** — registering a new archetype or provider flows through the system
   with no edit to any agent. The test registers one at runtime and proves it.
-- **LSP** — every `StructuredModel` shares the base signature, implements the
-  whole contract, and is constructible through one uniform call; every archetype
-  honours the same shape.
-- **ISP** — `InterviewStore` / `ExpectationStore` / `CandidateStore` stay small
-  and non-overlapping; handlers depend on the one they need.
+- **LSP** — every `StructuredModel`, `ChatModel` and `RealtimeBroker` shares its
+  base signature, implements the whole contract, and is constructible through one
+  uniform call; every archetype honours the same shape.
+- **ISP** — `InterviewStore` / `ExpectationStore` / `CandidateStore` /
+  `SessionStore` stay small and non-overlapping; handlers depend on the one they
+  need. `StructuredModel`, `ChatModel` and `RealtimeBroker` are three ports, not
+  one.
 - **DIP** — vendor SDKs appear only inside `llm/`; agents take an injected
   model and never read API keys; handlers are typed against ports, not the
   SQLite adapter.
@@ -203,13 +266,22 @@ person.
 ## Config
 
 Resolution order per role: `<ROLE>_PROVIDER` / `<ROLE>_MODEL`, then
-`LLM_PROVIDER` / `LLM_MODEL`, then the provider default.
+`LLM_PROVIDER` / `LLM_MODEL`, then the provider default. Four roles:
+`EXPECTATION` and `CANDIDATE` (one structured call each, per interview or
+persona), `SESSION` (one chat call **per turn** — the one that dominates cost
+and pace), and `JUDGE` (reserved for the evaluation layer).
+
+`VOICE` is resolved separately and does **not** fall back to `LLM_PROVIDER`:
+realtime speech-to-speech is OpenAI-only today, so a Gemini-configured
+deployment still gets voice from `OPENAI_API_KEY`, or gets no Voice button at
+all. `VOICE_MODEL` must name a realtime speech model, never a text one.
 
 | Var | Default | Meaning |
 |---|---|---|
-| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` | — | `gemini` or `openai` |
-| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` | — | Model ID — config, never hardcoded |
-| `LLM_PROVIDER` / `LLM_MODEL` | — | Fallback for both roles |
+| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` | — | `gemini` or `openai` |
+| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` | — | Model ID — config, never hardcoded |
+| `VOICE_PROVIDER` / `VOICE_MODEL` | — / `gpt-realtime-2` | Voice mode. Realtime providers only — **no** `LLM_*` fallback |
+| `LLM_PROVIDER` / `LLM_MODEL` | — | Fallback for the text roles |
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` | — | At least one required |
 | `CONTROL_PLANE_DB` | `control_plane.db` | SQLite path |
 | `CONTROL_PLANE_PORT` | `8081` | Service port |

@@ -1,0 +1,43 @@
+{
+  "description": "Body for POST /api/v1/interviews/{interview_id}/candidates. Send no body to enroll the two defaults: the bias trap and the evasive candidate, which carry the heaviest rubric criteria between them.",
+  "properties": {
+    "archetypes": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Archetype keys from GET /api/v1/candidate-archetypes. Defaults to ['cooperative_trap', 'evasive'].",
+      "title": "Archetypes"
+    },
+    "regenerate": {
+      "default": false,
+      "description": "Re-cast archetypes that are already enrolled instead of skipping them.",
+      "title": "Regenerate",
+      "type": "boolean"
+    },
+    "seed_prefix": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Overrides the persona seed. Same prefix reproduces the same people.",
+      "title": "Seed Prefix"
+    }
+  },
+  "title": "CandidateEnrollRequest",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

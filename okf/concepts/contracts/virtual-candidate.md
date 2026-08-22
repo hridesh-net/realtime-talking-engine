@@ -102,7 +102,7 @@ Everything else is computed. See [the determinism split](/concepts/determinism.m
 
 * Every `skills_required` entry appears in `knowledge_map` exactly once, with the original spelling, even if the model dropped or renamed it.
 * Levels for required skills are clamped into `archetype.knowledge_band`.
-* Extra skills survive **only** when `archetype.allows_adjacent_strength` (today: `specialist_mismatch` alone), and then unclamped within 0–10.
+* Extra skills survive **only** when `archetype.allows_adjacent_strength` (today: `comp_first` alone), and then unclamped within 0–10.
 * Scorecard items iterate the archetype, so invented ids vanish and weights are always the catalog's.
 * Falsy model output falls back to archetype text rather than empty strings.
 

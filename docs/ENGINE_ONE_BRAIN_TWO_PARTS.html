@@ -1,0 +1,612 @@
+<title>One Brain, Two Parts</title>
+
+<style>
+  /* ── Light palette: the complete token set lives on bare :root ───────── */
+  :root {
+    --ground:      #F1F3F4;
+    --surface:     #FAFBFB;
+    --ink:         #14191C;
+    --ink-soft:    #4A565D;
+    --ink-faint:   #8A959B;
+    --rule:        #D6DBDE;
+    --rule-soft:   #E6EAEC;
+
+    /* Semantic, not decorative: warm = audible, cool = silent thought. */
+    --mouth:       #AF4517;
+    --mouth-wash:  #F4E3DA;
+    --mind:        #26647F;
+    --mind-wash:   #DCE8EE;
+    --human:       #5B6469;
+    --human-wash:  #E3E7E9;
+
+    --font-sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  /* System-default viewers carry no [data-theme] stamp — only this query
+     separates them. Guarded so an explicit light choice beats a dark OS. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:     #101416;
+      --surface:    #171D20;
+      --ink:        #E3E8EA;
+      --ink-soft:   #A2AEB4;
+      --ink-faint:  #6C777D;
+      --rule:       #2B3336;
+      --rule-soft:  #212829;
+
+      --mouth:      #E58a58;
+      --mouth-wash: #3A2318;
+      --mind:       #74B8D6;
+      --mind-wash:  #172A33;
+      --human:      #98A3A8;
+      --human-wash: #242B2E;
+    }
+  }
+
+  /* Explicit dark choice wins from the other direction. */
+  :root[data-theme="dark"] {
+    --ground:     #101416;
+    --surface:    #171D20;
+    --ink:        #E3E8EA;
+    --ink-soft:   #A2AEB4;
+    --ink-faint:  #6C777D;
+    --rule:       #2B3336;
+    --rule-soft:  #212829;
+
+    --mouth:      #E58a58;
+    --mouth-wash: #3A2318;
+    --mind:       #74B8D6;
+    --mind-wash:  #172A33;
+    --human:      #98A3A8;
+    --human-wash: #242B2E;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 72px 28px 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 46px;
+  }
+
+  /* ── Masthead ────────────────────────────────────────────────────────── */
+  header { display: flex; flex-direction: column; gap: 20px; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: baseline;
+    margin: 0;
+  }
+  .eyebrow b { color: var(--mouth); font-weight: 600; }
+  .eyebrow i { color: var(--mind); font-style: normal; font-weight: 600; }
+
+  h1 {
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    line-height: 1.02;
+    letter-spacing: -0.033em;
+    font-weight: 700;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 1.19rem;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  hr.rule { height: 1px; background: var(--rule); border: 0; margin: 0; }
+
+  section { display: flex; flex-direction: column; gap: 18px; }
+
+  h2 {
+    font-size: 1.62rem;
+    letter-spacing: -0.02em;
+    font-weight: 660;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; max-width: 66ch; }
+  strong { font-weight: 640; }
+
+  /* ── Figures ─────────────────────────────────────────────────────────── */
+  figure { margin: 8px 0 4px; display: flex; flex-direction: column; gap: 14px; }
+  .plate {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 22px 20px;
+    overflow-x: auto;
+  }
+  .plate svg { display: block; width: 100%; min-width: 640px; height: auto; }
+
+  figcaption {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 68ch;
+  }
+  figcaption b { color: var(--ink); font-weight: 620; }
+  figcaption em { font-style: italic; }
+
+  /* ── SVG styling lives here, not in presentation attributes: var() is
+        unreliable inside them, and marker fills do not inherit context. ── */
+  .plate svg text { font-family: var(--font-sans); }
+  .plate svg text.mono { font-family: var(--font-mono); }
+
+  .f-ink   { fill: var(--ink); }
+  .f-soft  { fill: var(--ink-soft); }
+  .f-faint { fill: var(--ink-faint); }
+  .f-mouth { fill: var(--mouth); }
+  .f-mind  { fill: var(--mind); }
+
+  .box-mouth { fill: var(--mouth-wash); stroke: var(--mouth); stroke-width: 1.5; }
+  .box-mind  { fill: var(--mind-wash);  stroke: var(--mind);  stroke-width: 1.5; }
+  .box-human { fill: var(--human-wash); stroke: var(--human); stroke-width: 1.2; }
+  .box-plain { fill: var(--surface);    stroke: var(--ink-soft); stroke-width: 1.4; }
+  .box-ghost { fill: none; stroke: var(--mouth); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .box-wait  { fill: none; stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 3 2; }
+  .box-spec  { fill: var(--mind-wash); stroke: var(--mind); stroke-width: 1; stroke-dasharray: 3 2; }
+
+  .bar-mouth { fill: var(--mouth-wash); stroke: var(--mouth); stroke-width: 1.4; }
+  .bar-mind  { fill: var(--mind-wash);  stroke: var(--mind);  stroke-width: 1.4; }
+  .bar-human { fill: var(--human-wash); stroke: var(--human); stroke-width: 1; }
+
+  .ln-soft  { stroke: var(--ink-soft);  stroke-width: 1.3; fill: none; }
+  .ln-faint { stroke: var(--ink-faint); stroke-width: 1;   fill: none; }
+  .ln-rule  { stroke: var(--rule);      stroke-width: 1;   fill: none; }
+  .ln-mouth { stroke: var(--mouth);     stroke-width: 1.5; fill: none; }
+  .ln-mind  { stroke: var(--mind);      stroke-width: 1.5; fill: none; }
+  .dash     { stroke-dasharray: 4 3; }
+
+  .dot-faint { fill: var(--ink-faint); }
+  .dot-mind  { fill: var(--mind); }
+
+  .head-soft  { fill: var(--ink-soft); }
+  .head-mouth { fill: var(--mouth); }
+  .head-mind  { fill: var(--mind); }
+  .head-faint { fill: var(--ink-faint); }
+
+  /* ── Pull statement ──────────────────────────────────────────────────── */
+  .pull {
+    border-left: 2px solid var(--mouth);
+    padding: 2px 0 2px 20px;
+    font-size: 1.16rem;
+    line-height: 1.5;
+    color: var(--ink);
+    max-width: 60ch;
+  }
+
+  /* ── Ownership table ─────────────────────────────────────────────────── */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 0.93rem; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  thead th {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    border-bottom: 1px solid var(--rule);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.who { font-family: var(--font-mono); font-size: 0.83rem; }
+  td.who.m { color: var(--mouth); }
+  td.who.t { color: var(--mind); }
+  td.who.c { color: var(--ink-soft); }
+  td em { font-style: italic; }
+
+  /* ── Numbered beats: the turn really is a sequence ───────────────────── */
+  ol.beats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; counter-reset: beat; }
+  ol.beats li {
+    counter-increment: beat;
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 14px;
+    max-width: 70ch;
+  }
+  ol.beats li::before {
+    content: counter(beat, decimal-leading-zero);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    padding-top: 5px;
+    font-variant-numeric: tabular-nums;
+  }
+  ol.beats em { font-style: italic; }
+
+  footer {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+  }
+
+  @media (max-width: 620px) {
+    .wrap { padding: 48px 18px 80px; gap: 38px; }
+    body { font-size: 16px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">
+      <span>Live-session engine</span>
+      <span>·</span>
+      <b>Speaker = mouth</b>
+      <span>·</span>
+      <i>Thinker = subconscious</i>
+    </p>
+    <h1>One brain, two parts</h1>
+    <p class="standfirst">
+      The persona has a fast front brain that talks and a slow subconscious that
+      knows who it is. They are not two agents taking turns — they hear the same
+      words at the same instant, and they share one memory. Here is the mechanism.
+    </p>
+  </header>
+
+  <hr class="rule">
+
+  <!-- ══ 1. ANATOMY ═══════════════════════════════════════════════════════ -->
+  <section>
+    <h2>The anatomy</h2>
+    <p>
+      Both models receive the interviewer's speech from the first word. The Speaker
+      is the only one with a mouth; the Thinker never speaks, it only hands up
+      notes. What makes them one brain rather than two is the third box — a shared
+      ledger of everything this persona has already claimed.
+    </p>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 900 400" role="img"
+             aria-label="The interviewer's speech feeds the Speaker and the Thinker simultaneously. The Speaker alone produces audio. The Thinker passes notes up to the Speaker. Both read and write a shared claims ledger.">
+          <defs>
+            <marker id="a-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" class="head-soft"/>
+            </marker>
+            <marker id="a-mouth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" class="head-mouth"/>
+            </marker>
+            <marker id="a-mind" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" class="head-mind"/>
+            </marker>
+          </defs>
+
+          <!-- human -->
+          <rect x="22" y="168" width="132" height="70" class="box-human"/>
+          <text x="88" y="196" text-anchor="middle" class="mono f-ink" font-size="11" letter-spacing="0.08em">INTERVIEWER</text>
+          <text x="88" y="216" text-anchor="middle" class="f-soft" font-size="12">asks a question</text>
+
+          <!-- fan-out -->
+          <line x1="154" y1="203" x2="206" y2="203" class="ln-soft"/>
+          <line x1="206" y1="106" x2="206" y2="300" class="ln-soft"/>
+          <line x1="206" y1="106" x2="270" y2="106" class="ln-soft" marker-end="url(#a-soft)"/>
+          <line x1="206" y1="300" x2="270" y2="300" class="ln-soft" marker-end="url(#a-soft)"/>
+          <text x="200" y="342" class="mono f-faint" font-size="10.5">same audio · both tracks · from word one</text>
+
+          <!-- speaker -->
+          <rect x="276" y="58" width="242" height="96" class="box-mouth"/>
+          <text x="292" y="84" class="mono f-mouth" font-size="11" letter-spacing="0.09em">SPEAKER</text>
+          <text x="292" y="107" class="f-ink" font-size="13.5" font-weight="600">the mouth</text>
+          <text x="292" y="127" class="f-soft" font-size="12">realtime speech model</text>
+          <text x="292" y="144" class="f-soft" font-size="12">prosody · fillers · timing</text>
+
+          <!-- thinker -->
+          <rect x="276" y="252" width="242" height="96" class="box-mind"/>
+          <text x="292" y="278" class="mono f-mind" font-size="11" letter-spacing="0.09em">THINKER</text>
+          <text x="292" y="301" class="f-ink" font-size="13.5" font-weight="600">the subconscious</text>
+          <text x="292" y="321" class="f-soft" font-size="12">reasoning model</text>
+          <text x="292" y="338" class="f-soft" font-size="12">who this person actually is</text>
+
+          <!-- note: thinker up to speaker -->
+          <line x1="398" y1="250" x2="398" y2="158" class="ln-mind" marker-end="url(#a-mind)"/>
+          <text x="410" y="198" class="mono f-mind" font-size="10.5">note</text>
+          <text x="410" y="215" class="f-faint" font-size="11.5">guidance, never a script</text>
+
+          <!-- audio out -->
+          <rect x="592" y="58" width="286" height="96" class="box-ghost"/>
+          <text x="608" y="84" class="mono f-mouth" font-size="11" letter-spacing="0.09em">AUDIO OUT</text>
+          <text x="608" y="108" class="f-ink" font-size="13.5" font-weight="600">what the interviewer hears</text>
+          <text x="608" y="130" class="f-soft" font-size="12">only ever the Speaker's voice</text>
+          <line x1="518" y1="106" x2="586" y2="106" class="ln-mouth" marker-end="url(#a-mouth)"/>
+
+          <!-- ledger -->
+          <rect x="592" y="192" width="286" height="86" class="box-plain"/>
+          <text x="608" y="217" class="mono f-ink" font-size="11" letter-spacing="0.09em">CLAIMS LEDGER</text>
+          <text x="608" y="239" class="f-soft" font-size="12">every claim the persona has made</text>
+          <text x="608" y="258" class="f-soft" font-size="12">one writer · both readers</text>
+
+          <path d="M498 152 L562 198" class="ln-mouth dash" marker-end="url(#a-mouth)"/>
+          <path d="M498 254 L562 258" class="ln-mind dash" marker-end="url(#a-mind)"/>
+          <text x="516" y="306" class="mono f-faint" font-size="10">shared memory</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>The split is by job, not by turn.</b> The Speaker owns prosody and timing
+        and never invents what the persona knows. The Thinker owns identity and
+        never touches the microphone. The ledger is what stops them being two
+        separate minds wearing the same name.
+      </figcaption>
+    </figure>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══ 2. TIMELINE ══════════════════════════════════════════════════════ -->
+  <section>
+    <h2>The sync, in milliseconds</h2>
+    <p>
+      This is the part that actually answers "how do they work in sync". The Thinker
+      is not summoned when the Speaker gets stuck — it has been running since the
+      interviewer's first word, speculatively, on every turn. So when the Speaker
+      does need it, the answer is usually already in flight.
+    </p>
+    <p>
+      Two paths on one time axis. The only difference between them is whether the
+      Speaker was confident enough to answer alone.
+    </p>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 920 470" role="img"
+             aria-label="Two timelines on a shared axis. In the confident path the Speaker answers alone after 540 milliseconds of vendor latency, during which there is silence. In the deferral path a pre-gate fires mid-question at 950 milliseconds, the Speaker plays an in-character stall clip starting at 1450 milliseconds while the Thinker finishes, then speaks the answer at 2150.">
+          <defs>
+            <marker id="t-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" class="head-faint"/>
+            </marker>
+            <marker id="t-mouth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" class="head-mouth"/>
+            </marker>
+            <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="7" height="7" fill="var(--mouth-wash)"/>
+              <line x1="0" y1="0" x2="0" y2="7" stroke="var(--mouth)" stroke-width="1.8" opacity="0.5"/>
+            </pattern>
+          </defs>
+
+          <!-- ruler -->
+          <g class="mono f-faint" font-size="10" text-anchor="middle">
+            <text x="150" y="22">0</text>
+            <text x="292" y="22">500</text>
+            <text x="435" y="22">1000</text>
+            <text x="577" y="22">1500</text>
+            <text x="719" y="22">2000</text>
+            <text x="858" y="22">2500 ms</text>
+          </g>
+          <g class="ln-rule">
+            <line x1="150" y1="30" x2="150" y2="436"/>
+            <line x1="292" y1="30" x2="292" y2="436"/>
+            <line x1="435" y1="30" x2="435" y2="436"/>
+            <line x1="577" y1="30" x2="577" y2="436"/>
+            <line x1="719" y1="30" x2="719" y2="436"/>
+            <line x1="862" y1="30" x2="862" y2="436"/>
+          </g>
+
+          <!-- ── PANEL A ── -->
+          <text x="8" y="60" class="mono f-ink" font-size="11" letter-spacing="0.1em">PATH A — CONFIDENT</text>
+          <g class="mono f-faint" font-size="10" text-anchor="end">
+            <text x="142" y="94">INTERVIEWER</text>
+            <text x="142" y="126">THINKER</text>
+            <text x="142" y="158">SPEAKER</text>
+          </g>
+
+          <rect x="150" y="80" width="398" height="20" class="bar-human"/>
+          <text x="160" y="94" class="f-soft" font-size="11.5">“So — tell me about a project you enjoyed.”</text>
+
+          <rect x="298" y="112" width="279" height="20" class="box-spec"/>
+          <text x="308" y="126" class="f-mind" font-size="11.5">runs anyway · not needed this turn</text>
+
+          <rect x="548" y="144" width="154" height="20" class="box-wait"/>
+          <text x="556" y="158" class="mono f-faint" font-size="9.5">vendor 540ms</text>
+          <rect x="702" y="144" width="188" height="20" class="bar-mouth"/>
+          <text x="712" y="158" class="f-mouth" font-size="11.5">speaks ▸</text>
+
+          <line x1="548" y1="178" x2="702" y2="178" class="ln-faint" marker-start="url(#t-soft)" marker-end="url(#t-soft)"/>
+          <text x="625" y="196" text-anchor="middle" class="mono f-faint" font-size="10">dead air</text>
+
+          <line x1="8" y1="216" x2="912" y2="216" class="ln-rule"/>
+
+          <!-- ── PANEL B ── -->
+          <text x="8" y="246" class="mono f-ink" font-size="11" letter-spacing="0.1em">PATH B — UNSURE, DEFERS</text>
+          <g class="mono f-faint" font-size="10" text-anchor="end">
+            <text x="142" y="278">INTERVIEWER</text>
+            <text x="142" y="330">THINKER</text>
+            <text x="142" y="362">SPEAKER</text>
+          </g>
+
+          <rect x="150" y="264" width="398" height="20" class="bar-human"/>
+          <text x="160" y="278" class="f-soft" font-size="11.5">“How would you handle cache invalidation in Redis?”</text>
+
+          <!-- pre-gate, mid-question -->
+          <line x1="420" y1="286" x2="420" y2="304" class="ln-mind"/>
+          <circle cx="420" cy="305" r="3.4" class="dot-mind"/>
+          <text x="430" y="300" class="mono f-mind" font-size="9.5">PRE-GATE @950ms · skill=Redis · ceiling 3 → DEFER</text>
+
+          <rect x="298" y="316" width="379" height="20" class="bar-mind"/>
+          <text x="308" y="330" class="f-mind" font-size="11.5">what would <tspan font-style="italic">this</tspan> person say? → note lands 1850ms</text>
+
+          <rect x="563" y="348" width="170" height="20" fill="url(#hatch)" stroke="var(--mouth)" stroke-width="1.4"/>
+          <text x="571" y="362" class="f-mouth" font-size="11">“hmm… let me think”</text>
+          <rect x="762" y="348" width="128" height="20" class="bar-mouth"/>
+          <text x="772" y="362" class="f-mouth" font-size="11.5">speaks ▸</text>
+
+          <line x1="733" y1="380" x2="762" y2="380" class="ln-faint" marker-start="url(#t-soft)" marker-end="url(#t-soft)"/>
+          <text x="748" y="398" text-anchor="middle" class="mono f-faint" font-size="9.5">100ms</text>
+
+          <!-- the payoff -->
+          <line x1="563" y1="422" x2="702" y2="422" class="ln-mouth" marker-start="url(#t-mouth)" marker-end="url(#t-mouth)"/>
+          <text x="712" y="426" class="f-mouth" font-size="11.5">audible 490ms <tspan font-style="italic">earlier</tspan> than path A</text>
+        </svg>
+      </div>
+      <figcaption>
+        <b>The stall is not a buffer, it is the persona.</b> Path B makes a sound
+        before path A does — the hesitation is in character for a candidate out of
+        their depth, and it is pre-synthesised at session start, so it costs no
+        model round-trip. The Thinker finishes underneath it. The 100 ms gap before
+        the real answer is accepted silence, not a defect.
+      </figcaption>
+    </figure>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══ 3. WHY ONE BRAIN ═════════════════════════════════════════════════ -->
+  <section>
+    <h2>Why it has to be one brain</h2>
+    <p>
+      Two models that both improvise, with no shared memory, produce a persona that
+      is <em>randomly</em> wrong. A real weak candidate is <em>consistently</em>
+      wrong — they hold the same wrong belief on turn 4 and on turn 19. The ledger
+      is what buys that consistency.
+    </p>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 880 264" role="img"
+             aria-label="Without a shared ledger the persona says Redis is single-threaded on turn 4 and multi-threaded on turn 19, an accidental contradiction. With the ledger, turn 19 reads the earlier claim and stays consistent.">
+          <defs>
+            <marker id="l-mind" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" class="head-mind"/>
+            </marker>
+          </defs>
+
+          <!-- row 1 -->
+          <text x="8" y="24" class="mono f-faint" font-size="10.5" letter-spacing="0.1em">WITHOUT A SHARED LEDGER</text>
+          <line x1="120" y1="76" x2="856" y2="76" class="ln-rule"/>
+          <circle cx="230" cy="76" r="3.6" class="dot-faint"/>
+          <text x="230" y="96" text-anchor="middle" class="mono f-faint" font-size="10">turn 4</text>
+          <circle cx="660" cy="76" r="3.6" class="dot-faint"/>
+          <text x="660" y="96" text-anchor="middle" class="mono f-faint" font-size="10">turn 19</text>
+
+          <rect x="130" y="36" width="200" height="26" class="bar-mouth"/>
+          <text x="140" y="54" class="f-ink" font-size="11.5">“Redis is single-threaded”</text>
+          <rect x="560" y="36" width="200" height="26" class="bar-mouth"/>
+          <text x="570" y="54" class="f-ink" font-size="11.5">“Redis is multi-threaded”</text>
+          <text x="392" y="55" class="f-mouth" font-size="15">✕</text>
+          <text x="412" y="55" class="f-mouth" font-size="11.5" font-style="italic">accidental contradiction</text>
+
+          <line x1="8" y1="130" x2="872" y2="130" class="ln-rule"/>
+
+          <!-- row 2 -->
+          <text x="8" y="160" class="mono f-faint" font-size="10.5" letter-spacing="0.1em">WITH THE LEDGER</text>
+          <line x1="120" y1="212" x2="856" y2="212" class="ln-rule"/>
+          <circle cx="230" cy="212" r="3.6" class="dot-mind"/>
+          <text x="230" y="232" text-anchor="middle" class="mono f-faint" font-size="10">turn 4</text>
+          <circle cx="660" cy="212" r="3.6" class="dot-mind"/>
+          <text x="660" y="232" text-anchor="middle" class="mono f-faint" font-size="10">turn 19</text>
+
+          <rect x="130" y="172" width="200" height="26" class="bar-mouth"/>
+          <text x="140" y="190" class="f-ink" font-size="11.5">“Redis is single-threaded”</text>
+          <rect x="560" y="172" width="212" height="26" class="bar-mouth"/>
+          <text x="570" y="190" class="f-ink" font-size="11.5">“like I said, it's one thread…”</text>
+
+          <line x1="332" y1="185" x2="398" y2="185" class="ln-mind" marker-end="url(#l-mind)"/>
+          <rect x="404" y="172" width="130" height="26" class="bar-mind"/>
+          <text x="414" y="190" class="mono f-mind" font-size="10">claim b3 · held</text>
+          <line x1="536" y1="185" x2="554" y2="185" class="ln-mind" marker-end="url(#l-mind)"/>
+        </svg>
+      </div>
+      <figcaption>
+        <b>This matters more than it looks.</b> "Did the candidate contradict
+        themselves" is a signal the interviewer is being <em>trained to detect</em>.
+        An engine-generated contradiction is indistinguishable from a designed one,
+        so without the ledger the product injects noise into the very feedback it
+        sells.
+      </figcaption>
+    </figure>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══ 4. THE TURN ══════════════════════════════════════════════════════ -->
+  <section>
+    <h2>One turn, start to finish</h2>
+    <ol class="beats">
+      <li>The interviewer starts talking. Audio forks at once — to the Speaker, and
+        to a streaming transcriber whose partial text feeds the Thinker.</li>
+      <li>Midway through the question the <strong>pre-gate</strong> reads that partial
+        text and asks one deterministic question: does this probe a skill whose
+        ceiling is low? No model involved, no latency spent.</li>
+      <li>If it does, the engine tells the Speaker <em>before its turn even begins</em>
+        not to answer this one alone. Getting in early is what keeps the gate off
+        the latency path.</li>
+      <li>The interviewer stops. The Speaker either answers — or plays a stall clip
+        in the persona's own voice and waits.</li>
+      <li>The Thinker's note lands, phrased as guidance rather than a script, so the
+        Speaker's fillers and rhythm stay its own. If it misses its 700 ms deadline,
+        the persona falls back to whatever the contract says it does under pressure.</li>
+      <li>Whatever was said is written to the ledger, and a post-hoc judge reads it
+        seconds later to flag anything that exceeded the persona's ceiling.</li>
+    </ol>
+  </section>
+
+  <p class="pull">
+    The Speaker never leaks an evaluation, because it is never given one. A mouth
+    cannot say what it was never told.
+  </p>
+
+  <hr class="rule">
+
+  <!-- ══ 5. OWNERSHIP ═════════════════════════════════════════════════════ -->
+  <section>
+    <h2>Who decides what</h2>
+    <p>
+      This holds together because almost nothing is left to a model at runtime.
+      Both models are on short leashes, and deterministic code decides when each
+      one is allowed to matter.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Decision</th><th>Owner</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Who the persona is — beliefs, ceilings, tics, stall lines</td><td class="who c">contract · compiled ahead of time</td></tr>
+          <tr><td>Whether to defer on this turn</td><td class="who c">engine · pre-gate</td></tr>
+          <tr><td>When to stall, which clip, when to stop waiting</td><td class="who c">engine · timers</td></tr>
+          <tr><td>What the persona's wrong answer <em>is</em></td><td class="who c">contract · pre-committed</td></tr>
+          <tr><td>How to elaborate that belief in context</td><td class="who t">Thinker</td></tr>
+          <tr><td>How it sounds aloud — prosody, fillers, pacing</td><td class="who m">Speaker</td></tr>
+          <tr><td>Turn boundaries, barge-in, truncation</td><td class="who c">engine · playout tracker</td></tr>
+          <tr><td>Whether a spoken answer breached a ceiling</td><td class="who t">judge · after the fact</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      The Thinker is a <strong>persona oracle, not a knowledge oracle</strong>. Asked
+      what to say, it answers "what would this person say" — never "what is correct".
+      For a candidate capped at level 3 in Redis, a <em>true</em> answer is as much a
+      failure as an unenforced ceiling.
+    </p>
+  </section>
+
+  <footer>Live-session engine · interview-watcher</footer>
+
+</div>

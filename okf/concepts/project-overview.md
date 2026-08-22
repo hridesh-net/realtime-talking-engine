@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /README.md
@@ -22,15 +22,24 @@ The interview **control plane**. Python, FastAPI, SQLite. It owns the *what* of
 an interview; the runtime engine that actually holds the conversation is a
 separate Go/Rust build and lives elsewhere.
 
-Three jobs:
+Four jobs:
 
 1. **Create interviews from a job spec** — title, JD, required skills, location type, experience level, company type. Candidate and interviewer are assigned later, not at creation.
 2. **Generate a deterministic interviewer expectation** — what must be covered, for how long, and how a good interviewer runs the session.
 3. **Enroll virtual candidates** — LLM-cast personas stored in the database that a *human* interviewer practises against. Each persona carries a ground-truth answer key used to grade the interviewer afterwards.
+4. **Run the interview** — a live session against one of those personas, **typed or spoken**, stored as a timestamped transcript. Voice is browser-to-vendor WebRTC; the audio never enters this service. See [Run an interview](/concepts/runbooks/run-an-interview.md).
 
-The third is the product's real point: this is a **training rig for
+The last two are the product's real point: this is a **training rig for
 interviewers**, not an interviewing bot. The persona plays the candidate; the
-human plays the interviewer; the scorecard grades the human.
+human plays the interviewer; the transcript is the evidence the report will be
+built from.
+
+⚠️ **Direction of travel.** BRD v3 flips the assessed subject from the candidate
+to the **hiring manager**, replaces the JD-driven rubric with a fixed one, and
+drops the pass/fail verdict entirely. `docs/PIVOT_PLAN_MANAGER_ASSESSMENT.md`
+is the plan; Phase 1 (the live text session) has landed on the *existing*
+domain model, and Phases 2–5 pivot the domain underneath it. Read the BRD before
+changing anything about what is scored or who is scored.
 
 ## What makes it unusual
 
@@ -53,10 +62,11 @@ it.** The boundary is deliberate: that repo owns the *how* of a live
 conversation, this one owns the *what* of an interview. See
 [the sibling-repo reference](/references/smart-interview-relationship.md).
 
-## Build state (2026-08-21)
+## Build state (2026-08-22)
 
-* **Working**: interview creation, expectation generation and storage, the full 11-archetype virtual candidate catalog, enrollment with re-cast and seeding, engine-contract and scorecard endpoints, the React test UI, the offline check suite, schema export.
-* **Designed, not built**: the Go interview-candidate engine (`docs/GO_ENGINE_CONTRACT.md` specifies its side of the handoff); the post-session grading pipeline that consumes the scorecard; interviewer assignment (`interview_assignments` table exists and is unused).
+* **Working**: interview creation, expectation generation and storage, **the v2.0 seven-archetype persona library** (each stressing one manager competency, with session beats and a stress profile), enrollment with re-cast and seeding, engine-contract and scorecard endpoints, **the live text session** (start, turn, end, stored transcript, browser chat view), **the live voice session** (OpenAI Realtime over WebRTC from the browser, deterministic per-persona voice, transcript ingest), session listing per interview, the React console aligned to the SkillBrew.AI design mockup, the offline check suite, schema export.
+* **Partly built**: the persona library v2 — pivot plan Phase 3. The **catalog half shipped**; the behavioural half (`DisruptionSpec`, `candidate_questions`, `ENGINE_CONTRACT_VERSION` → v1.1) did not. Session beats reach the live persona through the casting prompt, so they are a tendency, not a scripted event.
+* **Designed, not built**: the evaluation layer (deterministic signals, judge pass, analytical report) — pivot plan Phase 4; the manager-assessment domain model (role cards replacing job specs) — Phase 2; the manager cohort (roster, CSV upload, invites) — nowhere in the plan yet, though the design mockup shows it; the Go interview-candidate engine, at Phase 0 skeleton and parked (`docs/GO_ENGINE_CONTRACT.md` specifies its side of the handoff); interviewer assignment (`interview_assignments` table exists and is unused).
 * **Stand-in**: SQLite. The schema ports to PostgreSQL with minimal change, and Postgres is the intended bridge to the runtime engine.
 * **Legacy**: `control_plane/persona.py` — the original BRD §4.3 seeded persona, attached at creation for `training_interviewer` mode. Superseded by [`candidate_agent`](/concepts/subsystems/candidate-agent.md) but still wired in.
 
@@ -65,11 +75,12 @@ conversation, this one owns the *what* of an interview. See
 ```
 llm/                 Provider port + Gemini/OpenAI adapters — the only vendor SDKs
 expectation_agent/   Expectation agent — persona, guardrails, fixed rubric
-candidate_agent/     Virtual candidate agent — archetype catalog, engine contract
+candidate_agent/     Virtual candidate agent — archetype catalog, engine contract, text + voice sessions
 control_plane/       FastAPI service, storage ports, SQLite adapter
 owner_handover/      JSON Schemas + samples, regenerated from the Pydantic models
 ui/                  React + Vite test UI
 tests/               Offline checks (fast) + live scenario scripts
 scripts/             check.sh, export_schemas.py
-docs/                BRD, Go engine contract spec
+engine/              Go live-session engine — Phase 0 skeleton, parked
+docs/                BRDs, pivot plan, Go engine contract and plan
 ```

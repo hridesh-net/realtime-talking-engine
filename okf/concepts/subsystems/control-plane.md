@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /control_plane/api.py
@@ -29,10 +29,10 @@ only package allowed to import `sqlite3`.
 |---|---|
 | `main.py` | `build_app(db_path=None)` factory + `main()` uvicorn runner; `GET /healthz` |
 | `api.py` | [Routes and DI](/concepts/modules/control-plane-api.md) — the `/api/v1` router |
-| `ports.py` | [Three storage protocols + two compositions](/concepts/contracts/storage-ports.md) |
+| `ports.py` | [Four storage protocols + four compositions](/concepts/contracts/storage-ports.md) |
 | `repository.py` | [`InterviewRepository`](/concepts/modules/control-plane-repository.md) — the SQLite adapter |
 | `database.py` | [Schema and connection](/concepts/contracts/database-schema.md) |
-| `schemas.py` | [Request/response models](/concepts/contracts/interview-record.md) |
+| `schemas.py` | [Interview record](/concepts/contracts/interview-record.md) + [session transcript](/concepts/contracts/session-transcript.md) models |
 | `persona.py` | Legacy seeded persona (below) |
 
 ## Startup
@@ -44,14 +44,25 @@ the router. `main()` runs uvicorn against `control_plane.main:build_app` with
 
 ## Dependency injection
 
-Three provider functions — `get_repo()`, `get_expectation_agent()`,
-`get_candidate_agent()` — wired with `Depends(...)`. Override these in tests
-rather than patching modules.
+Four provider functions — `get_repo()`, `get_expectation_agent()`,
+`get_candidate_agent()`, `get_session_agent()` — wired with `Depends(...)`.
+Override these in tests rather than patching modules;
+`tests/test_session.py` does exactly that.
 
 `get_repo()` calls `init_db()` **per request**, opening a fresh SQLite
 connection every time. The source flags it: *"In production this should be a
 connection-pool dependency."* It is the clearest thing to fix before this serves
-real load.
+real load — and it now matters more, because a live session is one request per
+turn rather than one per interview.
+
+## The live session
+
+`control_plane` owns everything about a session that
+[`candidate_agent/session.py`](/concepts/modules/candidate-agent-session.md)
+refuses to: the session record, the transcript, turn indexes, timestamps, and
+when a turn happens. The agent is handed a contract and a list of turns and
+returns a string. See [Session transcript](/concepts/contracts/session-transcript.md)
+and [Run an interview](/concepts/runbooks/run-an-interview.md).
 
 ## Legacy: `persona.py`
 
@@ -72,4 +83,6 @@ table, and `schemas.CandidatePersona`/`PersonaAttribute`.
 
 Interviewer assignment (`interview_assignments` is empty), interview status
 transitions (everything stays `scheduled`), the `start_url` target endpoint,
-auth, and pagination.
+auth, and pagination. On the session side: no report endpoint (Phase 4 of the
+pivot plan), no session list, and no timeout sweep — so `status = "abandoned"`
+is in the schema but never set.

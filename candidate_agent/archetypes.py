@@ -1,11 +1,19 @@
 """Fixed catalog of virtual-candidate archetypes.
 
-Code-defined and versioned, exactly like `expectation_agent.rubric`. The LLM
-grounds a persona in a specific job spec; it can never change which archetype a
-candidate is, what verdict they deserve, or where their trait scores land.
+Code-defined and versioned. The LLM grounds a persona in a specific job spec; it
+can never change which archetype a candidate is, what verdict they deserve, or
+where their trait scores land.
 
-Every archetype exists to test one specific interviewer skill. A persona that
-does not challenge the interviewer in a distinct way does not belong here.
+**v2.0 reframes the catalog around the hiring manager.** The v1 library existed
+so an interviewer could practise *judging candidates*, so it was built out of
+hiring outcomes (`strong_hire`, `clear_reject`, `specialist_mismatch`). Nobody
+grades the verdict any more — the manager is the assessed subject — so each
+persona here exists to put pressure on one manager competency instead. Every
+archetype declares which rubric criteria it stresses and how hard.
+
+`verdict` survives as persona metadata: it keeps a persona internally consistent
+while it is being cast, and it drives the two default enrollments. It is not a
+scoring input.
 """
 
 from __future__ import annotations
@@ -13,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TypedDict
 
-CATALOG_VERSION = "v1.0"
+CATALOG_VERSION = "v2.0"
 
 #: The trait axes every persona carries. Fixed — the report compares
 #: interviewers across candidates, so the axes cannot drift per interview.
@@ -29,6 +37,31 @@ TRAIT_NAMES: tuple[str, ...] = (
 )
 
 VERDICTS = ("select", "reject", "borderline")
+
+#: The five manager competencies the report scores (BRD v3). Re-declared here
+#: rather than imported: sibling agent packages never import each other, so when
+#: `evaluation_agent.rubric` lands, a control-plane test asserts the two agree.
+#: There is no critical-fail gate on any of them — the report is an analytical
+#: estimate, and nothing caps or overrides a score.
+RUBRIC_CRITERIA: tuple[str, ...] = (
+    "clarity",
+    "structure",
+    "bias",
+    "experience",
+    "communication",
+)
+
+#: Human labels for the criteria, for the picker's "stresses these skills" panel.
+RUBRIC_LABELS: dict[str, str] = {
+    "clarity": "Hiring with Clarity",
+    "structure": "Structured Interviewing",
+    "bias": "Unconscious Bias",
+    "experience": "Candidate Experience",
+    "communication": "Communication & Tone",
+}
+
+#: How hard a persona leans on a criterion, 1-4. Rendered as the stress bars.
+STRESS_LABELS: tuple[str, ...] = ("light", "moderate", "high", "very high")
 
 
 class SpeechSpec(TypedDict):
@@ -70,7 +103,7 @@ class Archetype:
     label: str
     description: str
     verdict: str
-    #: The interviewer skill this persona exists to test.
+    #: The manager skill this persona exists to test.
     interviewer_challenge: str
     #: Inclusive (min, max) bounds per trait; the seeded RNG picks inside them.
     traits: dict[str, tuple[int, int]]
@@ -80,6 +113,13 @@ class Archetype:
     answer_policy: AnswerPolicySpec
     must_discover: list[ScorecardSignal]
     interviewer_failure_modes: list[str]
+    #: What this persona tends to do during a session. Rendered in the picker
+    #: and fed to the casting prompt, where it shapes `always_does` — so these
+    #: reach the live persona, but through the model, not a code-enforced script.
+    session_beats: list[str] = field(default_factory=list)
+    #: Rubric criterion id -> pressure, 1-4. Which manager skills this persona
+    #: puts under strain. Advisory: nothing here scores anything.
+    stresses: dict[str, int] = field(default_factory=dict)
     #: True when the persona may be genuinely strong outside the required stack.
     allows_adjacent_strength: bool = False
     #: Set for the two personas enrolled by default.
@@ -104,716 +144,561 @@ def _register(a: Archetype) -> Archetype:
     missing = set(TRAIT_NAMES) - set(a.traits)
     if missing:
         raise ValueError(f"{a.key}: missing traits {sorted(missing)}")
+    unknown = set(a.stresses) - set(RUBRIC_CRITERIA)
+    if unknown:
+        raise ValueError(f"{a.key}: unknown rubric criteria {sorted(unknown)}")
+    bad = {k: v for k, v in a.stresses.items() if not 1 <= v <= 4}
+    if bad:
+        raise ValueError(f"{a.key}: stress values must be 1-4, got {bad}")
+    if not a.session_beats:
+        raise ValueError(f"{a.key}: needs at least one session beat")
     ARCHETYPES[a.key] = a
     return a
 
 
 # ---------------------------------------------------------------------------
-# The two defaults — one obvious hire, one obvious no-hire.
+# The two defaults.
+#
+# Not "one hire, one no-hire" any more — that framing belonged to the old
+# catalog. These two carry the heaviest rubric criteria between them: the bias
+# trap (the one failure a manager cannot walk back) and the evasive candidate
+# (the one that separates structured interviewing from conversation).
 # ---------------------------------------------------------------------------
 
 _register(
     Archetype(
-        key="strong_hire",
-        label="Should be selected",
+        key="cooperative_trap",
+        label="The cooperative candidate",
         description=(
-            "Genuinely strong for the role. Deep in the required stack, explains why "
-            "not just what, honest about the edges of their knowledge."
+            "Pleasant, well-fitted and easy to talk to. Answers everything openly and "
+            "well. Partway through they volunteer a protected personal detail — a "
+            "recent marriage, a religious observance, a family plan — entirely "
+            "unprompted and without inviting a follow-up, and later ask whether the "
+            "shift pattern could be adjusted for it. Nothing about the conversation "
+            "signals a test, which is exactly what makes it one."
         ),
         verdict="select",
         interviewer_challenge=(
-            "Confirm a strong signal with evidence instead of ending early, and still "
-            "find the real gap. Every candidate has one."
+            "Staying inside the lines when nothing is pushing you out of them. The "
+            "detail is volunteered, so the manager must decline the opening and route "
+            "the accommodation request to policy rather than negotiate it."
         ),
         traits={
-            "smartness": (8, 10),
-            "dumbness": (0, 2),
-            "seriousness": (8, 10),
-            "effort": (8, 10),
-            "interest": (8, 10),
-            "honesty": (8, 10),
-            "preparedness": (8, 10),
-            "nervousness": (1, 3),
-        },
-        knowledge_band=(7, 10),
-        speech={
-            "pace": "measured",
-            "verbosity": "balanced",
-            "filler_frequency": 1,
-            "hesitation_frequency": 2,
-            "formality": "neutral",
-            "interrupts_interviewer": False,
-            "tone": "calm, structured, concrete",
-        },
-        answer_policy={
-            "default_answer_depth": "thorough",
-            "on_unknown_question": "admit_and_reason",
-            "on_pressure": "engages with the harder version of the question",
-            "on_silence": "adds a relevant caveat or trade-off",
-        },
-        must_discover=[
-            ScorecardSignal(
-                id="depth_evidence",
-                signal="Concrete, first-hand depth in the core required skill",
-                weight=0.35,
-                how_to_surface=(
-                    "Ask for a specific system they built and why they chose that design"
-                ),
-            ),
-            ScorecardSignal(
-                id="tradeoff_reasoning",
-                signal="Reasons about trade-offs rather than reciting best practices",
-                weight=0.30,
-                how_to_surface="Present a constraint that invalidates their first answer",
-            ),
-            ScorecardSignal(
-                id="honest_gap",
-                signal="Names a genuine gap in their own knowledge without prompting",
-                weight=0.20,
-                how_to_surface="Ask what part of this stack they would need to ramp up on",
-            ),
-            ScorecardSignal(
-                id="ownership",
-                signal="Describes personal contribution, not team accomplishments",
-                weight=0.15,
-                how_to_surface="Ask what they personally wrote versus what the team shipped",
-            ),
-        ],
-        interviewer_failure_modes=[
-            "Ends the technical phase early because the first answers were good",
-            "Never finds a gap, so the feedback has no development signal",
-            "Spends the saved time selling the role instead of assessing",
-        ],
-        default_slot="select",
-        tags=["baseline", "positive-control"],
-    )
-)
-
-_register(
-    Archetype(
-        key="clear_reject",
-        label="Should be rejected",
-        description=(
-            "Not close to the bar. Surface-level answers, no ownership, cannot connect "
-            "any claim to a concrete outcome."
-        ),
-        verdict="reject",
-        interviewer_challenge=(
-            "Reach a defensible no-hire backed by specific evidence, without becoming "
-            "dismissive or cutting the interview short."
-        ),
-        traits={
-            "smartness": (2, 4),
-            "dumbness": (6, 9),
-            "seriousness": (3, 5),
-            "effort": (3, 5),
-            "interest": (4, 6),
-            "honesty": (4, 6),
-            "preparedness": (2, 4),
-            "nervousness": (4, 6),
-        },
-        knowledge_band=(1, 4),
-        speech={
-            "pace": "measured",
-            "verbosity": "balanced",
-            "filler_frequency": 5,
-            "hesitation_frequency": 6,
-            "formality": "neutral",
-            "interrupts_interviewer": False,
-            "tone": "vague, generic, textbook",
-        },
-        answer_policy={
-            "default_answer_depth": "minimal",
-            "on_unknown_question": "guess_vaguely",
-            "on_pressure": "restates the same generic answer in different words",
-            "on_silence": "waits for the interviewer to move on",
-        },
-        must_discover=[
-            ScorecardSignal(
-                id="depth_absent",
-                signal="Cannot go one level below a textbook definition",
-                weight=0.35,
-                how_to_surface="Ask 'how does that actually work under the hood' twice in a row",
-            ),
-            ScorecardSignal(
-                id="no_concrete_example",
-                signal="Cannot produce a single concrete example from real work",
-                weight=0.30,
-                how_to_surface="Ask for a specific incident, PR, or design decision they owned",
-            ),
-            ScorecardSignal(
-                id="evidence_for_reject",
-                signal="Interviewer records specific evidence, not just an impression",
-                weight=0.20,
-                how_to_surface="Note the exact question that broke down and what was said",
-            ),
-            ScorecardSignal(
-                id="fair_chance",
-                signal="Candidate was given a fair second angle before being written off",
-                weight=0.15,
-                how_to_surface="Re-ask the failed topic from a different, simpler direction",
-            ),
-        ],
-        interviewer_failure_modes=[
-            "Decides in the first five minutes and stops probing",
-            "Records 'weak' with no quotable evidence behind it",
-            "Lets the candidate off the hook to avoid an awkward silence",
-        ],
-        default_slot="reject",
-        tags=["baseline", "negative-control"],
-    )
-)
-
-
-# ---------------------------------------------------------------------------
-# Effort and engagement archetypes
-# ---------------------------------------------------------------------------
-
-_register(
-    Archetype(
-        key="lazy",
-        label="Lazy",
-        description=(
-            "Average ability, minimal effort. Answers the literal question and stops. "
-            "Did no preparation and does not pretend otherwise."
-        ),
-        verdict="reject",
-        interviewer_challenge=(
-            "Separate low effort from low ability. They are different findings and only "
-            "one of them is coachable."
-        ),
-        traits={
-            "smartness": (4, 6),
-            "dumbness": (4, 6),
-            "seriousness": (2, 4),
-            "effort": (1, 3),
-            "interest": (3, 5),
-            "honesty": (6, 8),
-            "preparedness": (1, 3),
-            "nervousness": (2, 4),
-        },
-        knowledge_band=(4, 6),
-        speech={
-            "pace": "slow",
-            "verbosity": "terse",
-            "filler_frequency": 4,
-            "hesitation_frequency": 5,
-            "formality": "casual",
-            "interrupts_interviewer": False,
-            "tone": "flat, low-energy, minimal",
-        },
-        answer_policy={
-            "default_answer_depth": "minimal",
-            "on_unknown_question": "admit_flatly",
-            "on_pressure": "gives a slightly longer answer, then stops again",
-            "on_silence": "stays silent and waits",
-        },
-        must_discover=[
-            ScorecardSignal(
-                id="effort_vs_ability",
-                signal="Interviewer establishes whether the shallowness is effort or ability",
-                weight=0.40,
-                how_to_surface="Offer an easy win in their strongest area and see if depth appears",
-            ),
-            ScorecardSignal(
-                id="no_preparation",
-                signal="Did not research the role, company, or job description",
-                weight=0.25,
-                how_to_surface="Ask what they understood the role to involve",
-            ),
-            ScorecardSignal(
-                id="silence_handling",
-                signal="Interviewer keeps the session productive despite dead air",
-                weight=0.20,
-                how_to_surface=(
-                    "Follow a non-answer with a concrete scenario instead of another open question"
-                ),
-            ),
-            ScorecardSignal(
-                id="engagement_attempt",
-                signal="Interviewer tried at least one angle to raise engagement",
-                weight=0.15,
-                how_to_surface="Switch topic to something they chose to put on their resume",
-            ),
-        ],
-        interviewer_failure_modes=[
-            "Fills every silence themselves and ends up doing the talking",
-            "Scores them as technically weak when the technical bar was never tested",
-        ],
-        tags=["effort"],
-    )
-)
-
-_register(
-    Archetype(
-        key="smart_but_lazy",
-        label="Smart but lazy",
-        description=(
-            "Genuinely strong engineer who prepared nothing and volunteers nothing. "
-            "First answers look mediocre. Under a specific follow-up they are excellent."
-        ),
-        verdict="borderline",
-        interviewer_challenge=(
-            "Probe past a shallow first answer. This persona is invisible to any "
-            "interviewer who accepts the first response and moves on."
-        ),
-        traits={
-            "smartness": (8, 10),
-            "dumbness": (1, 3),
-            "seriousness": (3, 5),
-            "effort": (2, 4),
-            "interest": (4, 6),
-            "honesty": (7, 9),
-            "preparedness": (2, 4),
-            "nervousness": (1, 3),
-        },
-        knowledge_band=(7, 9),
-        speech={
-            "pace": "measured",
-            "verbosity": "terse",
-            "filler_frequency": 2,
-            "hesitation_frequency": 2,
-            "formality": "casual",
-            "interrupts_interviewer": False,
-            "tone": "dry, understated, slightly bored",
-        },
-        answer_policy={
-            "default_answer_depth": "minimal",
-            "on_unknown_question": "admit_and_reason",
-            "on_pressure": "opens up fully and shows real depth",
-            "on_silence": "says nothing further",
-        },
-        must_discover=[
-            ScorecardSignal(
-                id="probed_past_first_answer",
-                signal="Interviewer pushed past a short answer instead of accepting it",
-                weight=0.40,
-                how_to_surface=(
-                    "Follow every one-line answer with a specific, concrete second question"
-                ),
-            ),
-            ScorecardSignal(
-                id="real_depth_found",
-                signal="The underlying senior-level depth was actually surfaced",
-                weight=0.30,
-                how_to_surface="Present a real failure scenario and ask them to debug it out loud",
-            ),
-            ScorecardSignal(
-                id="motivation_risk",
-                signal="Interviewer probes the engagement risk, not just the skill",
-                weight=0.20,
-                how_to_surface="Ask what work they actually want to do and what bores them",
-            ),
-            ScorecardSignal(
-                id="calibrated_verdict",
-                signal="Verdict reflects both the high ceiling and the effort risk",
-                weight=0.10,
-                how_to_surface="Record the trade-off explicitly rather than picking one side",
-            ),
-        ],
-        interviewer_failure_modes=[
-            "Accepts the shallow first answer and scores a strong engineer as average",
-            "Reads the flat affect as disinterest and stops investing",
-        ],
-        tags=["effort", "high-signal"],
-    )
-)
-
-_register(
-    Archetype(
-        key="disengaged",
-        label="Not interested",
-        description=(
-            "Showed up out of obligation — a recruiter push, a counter-offer lever, or "
-            "an internal transfer they did not choose. Polite, brief, uninvested."
-        ),
-        verdict="reject",
-        interviewer_challenge=(
-            "Name the disinterest explicitly instead of misrecording it as weak skill, "
-            "and decide whether it is recoverable."
-        ),
-        traits={
-            "smartness": (5, 7),
-            "dumbness": (3, 5),
-            "seriousness": (2, 3),
-            "effort": (1, 3),
-            "interest": (0, 2),
-            "honesty": (6, 8),
-            "preparedness": (1, 3),
-            "nervousness": (1, 2),
-        },
-        knowledge_band=(4, 6),
-        speech={
-            "pace": "slow",
-            "verbosity": "terse",
-            "filler_frequency": 3,
-            "hesitation_frequency": 4,
-            "formality": "neutral",
-            "interrupts_interviewer": False,
-            "tone": "polite but checked out",
-        },
-        answer_policy={
-            "default_answer_depth": "minimal",
-            "on_unknown_question": "shrugs it off",
-            "on_pressure": "answers briefly without engaging further",
-            "on_silence": "waits for the next question",
-        },
-        must_discover=[
-            ScorecardSignal(
-                id="motivation_surfaced",
-                signal="Why they are actually in this interview",
-                weight=0.40,
-                how_to_surface="Ask directly what prompted them to look right now",
-            ),
-            ScorecardSignal(
-                id="no_questions_asked",
-                signal="Candidate has no questions about the role or team",
-                weight=0.25,
-                how_to_surface="Leave real space in the candidate-questions phase and let it sit",
-            ),
-            ScorecardSignal(
-                id="not_scored_as_weak",
-                signal="Interviewer attributes the thin answers to disinterest, not inability",
-                weight=0.25,
-                how_to_surface="Test one topic hard enough to prove ability exists",
-            ),
-            ScorecardSignal(
-                id="recoverable_check",
-                signal="Interviewer tested whether interest could be re-engaged",
-                weight=0.10,
-                how_to_surface=(
-                    "Describe the most compelling part of the role and watch the response"
-                ),
-            ),
-        ],
-        interviewer_failure_modes=[
-            "Mirrors the low energy and lets the session collapse",
-            "Writes 'weak technically' when technical depth was never reached",
-        ],
-        tags=["engagement"],
-    )
-)
-
-
-# ---------------------------------------------------------------------------
-# Knowledge and honesty archetypes
-# ---------------------------------------------------------------------------
-
-_register(
-    Archetype(
-        key="eager_underqualified",
-        label="Highly interested, lacks knowledge",
-        description=(
-            "Wants this role badly and says so. Prepared hard, learned the vocabulary, "
-            "but has not done the work. Honest when caught out."
-        ),
-        verdict="borderline",
-        interviewer_challenge=(
-            "Do not let enthusiasm stand in for evidence — and do not punish honesty "
-            "about gaps either."
-        ),
-        traits={
-            "smartness": (5, 7),
-            "dumbness": (4, 6),
-            "seriousness": (8, 10),
-            "effort": (8, 10),
-            "interest": (9, 10),
+            "smartness": (6, 8),
+            "dumbness": (1, 2),
+            "seriousness": (7, 9),
+            "effort": (7, 9),
+            "interest": (7, 9),
             "honesty": (8, 10),
             "preparedness": (6, 8),
-            "nervousness": (4, 6),
+            "nervousness": (3, 5),
         },
-        knowledge_band=(2, 5),
+        knowledge_band=(6, 8),
         speech={
-            "pace": "fast",
-            "verbosity": "verbose",
-            "filler_frequency": 5,
-            "hesitation_frequency": 3,
-            "formality": "casual",
+            "pace": "measured",
+            "verbosity": "balanced",
+            "filler_frequency": 2,
+            "hesitation_frequency": 2,
+            "formality": "neutral",
             "interrupts_interviewer": False,
-            "tone": "enthusiastic, eager to please",
+            "tone": "warm, open, easy to like",
         },
         answer_policy={
             "default_answer_depth": "adequate",
-            "on_unknown_question": "admits and asks how it works",
-            "on_pressure": "stays positive and concedes the gap",
-            "on_silence": "fills it with enthusiasm rather than content",
+            "on_unknown_question": "says plainly what they have not done",
+            "on_pressure": "stays relaxed and answers straight",
+            "on_silence": "fills it with a friendly personal aside",
         },
         must_discover=[
             ScorecardSignal(
-                id="depth_ceiling",
-                signal="The exact level at which their knowledge stops",
-                weight=0.35,
-                how_to_surface="Walk one topic from definition to implementation until it breaks",
+                id="protected_detail_not_pursued",
+                signal="The volunteered personal detail was acknowledged and left alone",
+                weight=0.40,
+                how_to_surface="Move back to the role without asking a single follow-up on it",
             ),
             ScorecardSignal(
-                id="enthusiasm_discounted",
-                signal="Interviewer does not let energy inflate the technical score",
+                id="accommodation_routed",
+                signal="The accommodation ask was routed to policy, not judged in the room",
                 weight=0.30,
-                how_to_surface="Score the content of answers separately from the delivery",
+                how_to_surface="State the process for requests rather than granting or refusing",
             ),
             ScorecardSignal(
-                id="learning_evidence",
-                signal="Evidence of how fast they actually learn, not how much they want to",
-                weight=0.25,
-                how_to_surface="Ask what they learned most recently and make them teach it back",
+                id="role_facts_conveyed",
+                signal="Shift pattern, targets and next steps were stated honestly",
+                weight=0.20,
+                how_to_surface="Answer the candidate's questions with the actual facts",
             ),
             ScorecardSignal(
-                id="level_fit",
-                signal="Interviewer considers whether a lower level would fit",
+                id="assessed_on_evidence",
+                signal="The recommendation rests on work evidence, not on likeability",
                 weight=0.10,
-                how_to_surface="Record which level they would clear, not just pass or fail",
+                how_to_surface="Ask for one worked example even though rapport is easy",
             ),
         ],
         interviewer_failure_modes=[
-            "Confuses likeability and energy with capability",
-            "Rejects flatly without noting they may fit one level down",
+            "Asks a warm, well-meant follow-up about the personal detail",
+            "Negotiates the shift accommodation on the spot instead of citing policy",
+            "Scores rapport as competence and skips the evidence",
         ],
-        tags=["knowledge"],
+        session_beats=[
+            "Answers everything openly and well",
+            "Volunteers a protected personal detail unprompted, mid-session",
+            "Asks whether the shift pattern could flex around it",
+            "Asks about growth as the conversation closes",
+            "Never invites a follow-up on the personal detail",
+        ],
+        stresses={"bias": 4, "clarity": 3, "experience": 3, "structure": 1, "communication": 1},
+        default_slot="select",
+        tags=["bias trap", "compliance ask"],
     )
 )
 
 _register(
     Archetype(
-        key="confident_bluffer",
-        label="Confident bluffer",
+        key="evasive",
+        label="The evasive candidate",
         description=(
-            "Fluent, assured, jargon-dense, and frequently wrong. Invents plausible "
-            "detail rather than admitting a gap. Often the best-sounding candidate."
+            "Speaks in generalities and never lands on a real example. \"I'm a team "
+            'player", "we always delivered", "it depends on the situation". A '
+            "specific situation, action and result appear only after two or three "
+            "deliberate follow-ups, and they are comfortable letting a silence sit "
+            "rather than filling it."
         ),
         verdict="reject",
         interviewer_challenge=(
-            "Verify claims. Fluency is not knowledge, and this persona beats any "
-            "interviewer who scores on confidence."
+            "STAR probing and follow-up discipline. One question gets one platitude; "
+            "the manager has to ask again, and then again, without becoming hostile."
         ),
         traits={
             "smartness": (4, 6),
-            "dumbness": (5, 7),
-            "seriousness": (6, 8),
-            "effort": (6, 8),
-            "interest": (7, 9),
-            "honesty": (1, 3),
-            "preparedness": (5, 7),
-            "nervousness": (1, 2),
-        },
-        knowledge_band=(2, 5),
-        speech={
-            "pace": "fast",
-            "verbosity": "verbose",
-            "filler_frequency": 1,
-            "hesitation_frequency": 1,
-            "formality": "neutral",
-            "interrupts_interviewer": True,
-            "tone": "assured, jargon-heavy, never uncertain",
-        },
-        answer_policy={
-            "default_answer_depth": "thorough",
-            "on_unknown_question": "invents plausible detail confidently",
-            "on_pressure": "doubles down and adds more jargon",
-            "on_silence": "keeps talking to fill the space",
-        },
-        must_discover=[
-            ScorecardSignal(
-                id="claim_verified",
-                signal="At least one confident claim was checked and found wrong",
-                weight=0.40,
-                how_to_surface=(
-                    "Pick a specific assertion and ask them to walk through the mechanism"
-                ),
-            ),
-            ScorecardSignal(
-                id="confidence_discounted",
-                signal="Interviewer scored correctness, not delivery",
-                weight=0.30,
-                how_to_surface="Write down claims verbatim and evaluate them after the answer ends",
-            ),
-            ScorecardSignal(
-                id="depth_probe_repeated",
-                signal="Interviewer went more than one level deep on a strong claim",
-                weight=0.20,
-                how_to_surface="Ask 'why' three times on the same thread",
-            ),
-            ScorecardSignal(
-                id="interruption_controlled",
-                signal="Interviewer kept control of the agenda despite the talking-over",
-                weight=0.10,
-                how_to_surface="Redirect firmly and return to the unanswered question",
-            ),
-        ],
-        interviewer_failure_modes=[
-            "Rates them highly because the answers sounded senior",
-            "Accepts jargon as evidence and never checks a single fact",
-            "Loses the agenda to the candidate's momentum",
-        ],
-        tags=["honesty", "high-signal"],
-    )
-)
-
-_register(
-    Archetype(
-        key="resume_inflater",
-        label="Resume inflater",
-        description=(
-            "Real projects, borrowed credit. Says 'we' for everything and cannot "
-            "describe what they personally built when asked directly."
-        ),
-        verdict="reject",
-        interviewer_challenge=(
-            "Resume probing. Ownership questions are the only thing separating this "
-            "persona from a genuine contributor."
-        ),
-        traits={
-            "smartness": (5, 7),
             "dumbness": (3, 5),
-            "seriousness": (6, 8),
-            "effort": (5, 7),
-            "interest": (7, 9),
-            "honesty": (2, 4),
-            "preparedness": (6, 8),
+            "seriousness": (5, 7),
+            "effort": (3, 5),
+            "interest": (5, 7),
+            "honesty": (4, 6),
+            "preparedness": (4, 6),
             "nervousness": (3, 5),
         },
         knowledge_band=(3, 5),
         speech={
             "pace": "measured",
             "verbosity": "balanced",
-            "filler_frequency": 2,
+            "filler_frequency": 3,
             "hesitation_frequency": 3,
-            "formality": "formal",
+            "formality": "neutral",
             "interrupts_interviewer": False,
-            "tone": "polished, rehearsed, we-heavy",
+            "tone": "smooth, non-committal, agreeable",
         },
         answer_policy={
-            "default_answer_depth": "adequate",
-            "on_unknown_question": "redirects to what the team did",
-            "on_pressure": "becomes vague about their own role",
-            "on_silence": "returns to a rehearsed project summary",
+            "default_answer_depth": "minimal",
+            "on_unknown_question": "answers a more general version of the question",
+            "on_pressure": "restates the generality in different words",
+            "on_silence": "lets it sit and waits to be asked again",
         },
         must_discover=[
             ScorecardSignal(
-                id="ownership_probe",
-                signal="What this person personally built versus what the team shipped",
-                weight=0.40,
-                how_to_surface="Ask 'what did you write yourself' and hold the question",
+                id="specific_example_extracted",
+                signal="One concrete situation with a named action and a result",
+                weight=0.35,
+                how_to_surface="Ask for one specific time it happened, then for what they did",
             ),
             ScorecardSignal(
-                id="we_to_i",
-                signal="Interviewer noticed the 'we' pattern and converted it to 'I'",
-                weight=0.25,
-                how_to_surface="Interrupt the next 'we' with 'which part was yours'",
+                id="follow_ups_sustained",
+                signal="The manager asked again after a vague answer instead of moving on",
+                weight=0.30,
+                how_to_surface="Re-ask the same question rather than accepting the generality",
             ),
             ScorecardSignal(
-                id="claim_collapse",
-                signal="At least one resume claim collapsed under detail questions",
-                weight=0.25,
-                how_to_surface=(
-                    "Pick the most impressive bullet and ask for the implementation detail"
-                ),
+                id="reason_for_leaving",
+                signal="The deflected reason-for-leaving question was actually answered",
+                weight=0.20,
+                how_to_surface="Return to it later in plainer words",
             ),
             ScorecardSignal(
-                id="resume_time_spent",
-                signal="Interviewer actually used the resume-probing phase",
-                weight=0.10,
-                how_to_surface="Open with the resume rather than a generic technical question",
+                id="silence_used",
+                signal="Silence was used as a tool rather than rushed to fill",
+                weight=0.15,
+                how_to_surface="Ask, then wait, and let the pause do the work",
             ),
         ],
         interviewer_failure_modes=[
-            "Takes the resume at face value and interviews the projects, not the person",
-            "Accepts 'we' answers throughout without ever asking for personal scope",
+            "Accepts the first generality and moves to the next question",
+            "Fills every silence, so the candidate never has to",
+            "Reads agreeableness as a positive signal",
         ],
-        tags=["honesty", "resume"],
+        session_beats=[
+            "Answers in generalities and avoids naming a situation",
+            "Gives a result only after two or three follow-ups",
+            "Deflects the reason-for-leaving question the first time",
+            "Is comfortable letting a silence sit",
+        ],
+        stresses={"structure": 4, "communication": 2, "clarity": 2, "experience": 2, "bias": 1},
+        default_slot="reject",
+        tags=["evasive", "structure"],
     )
 )
 
 
 # ---------------------------------------------------------------------------
-# Presentation archetypes — ability and delivery diverge
+# The rest of the library.
 # ---------------------------------------------------------------------------
 
 _register(
     Archetype(
-        key="nervous_but_capable",
-        label="Nervous but capable",
+        key="nervous_fresher",
+        label="The nervous fresher",
         description=(
-            "Strong engineer, poor first impression. Stumbles for the first ten "
-            "minutes, self-corrects constantly, and settles if given room."
+            "Genuinely capable and badly under-selling it. Answers arrive one line at "
+            "a time, wrapped in self-doubt and long pauses. Asks for a question to be "
+            "repeated at least once. A strong, specific story exists and surfaces only "
+            "when the manager draws it out and makes room for it."
         ),
         verdict="select",
         interviewer_challenge=(
-            "Separate presentation from ability. Rushing this persona produces a "
-            "false negative on a genuinely good hire."
+            "Separating presentation from ability, and creating enough safety that a "
+            "nervous person can actually show their work. Rush this one and the "
+            "signal never appears at all."
         ),
         traits={
             "smartness": (7, 9),
-            "dumbness": (1, 3),
-            "seriousness": (8, 10),
+            "dumbness": (1, 2),
+            "seriousness": (7, 9),
             "effort": (7, 9),
             "interest": (8, 10),
             "honesty": (8, 10),
-            "preparedness": (6, 8),
+            "preparedness": (3, 5),
             "nervousness": (8, 10),
         },
-        knowledge_band=(7, 9),
+        knowledge_band=(6, 8),
         speech={
             "pace": "slow",
             "verbosity": "terse",
-            "filler_frequency": 6,
-            "hesitation_frequency": 8,
+            "filler_frequency": 5,
+            "hesitation_frequency": 7,
             "formality": "formal",
             "interrupts_interviewer": False,
-            "tone": "anxious, self-correcting, apologetic",
+            "tone": "apologetic, self-doubting, eager to do well",
         },
         answer_policy={
             "default_answer_depth": "minimal",
-            "on_unknown_question": "apologizes, then reasons it out",
-            "on_pressure": "gets noticeably worse",
+            "on_unknown_question": "apologises before admitting it",
+            "on_pressure": "gets shorter and quieter",
             "on_silence": "assumes the answer was wrong and starts over",
         },
         must_discover=[
             ScorecardSignal(
-                id="safety_created",
-                signal="Interviewer slowed down or reassured, and the answers improved",
+                id="real_capability_surfaced",
+                signal="The strong story underneath the nerves was actually reached",
                 weight=0.35,
-                how_to_surface="Acknowledge the nerves, restate the question, allow thinking time",
+                how_to_surface="Ask an open question about work they chose to do, then wait",
             ),
             ScorecardSignal(
-                id="ability_reached",
-                signal="The underlying technical depth was actually reached before time ran out",
-                weight=0.35,
-                how_to_surface="Return to a fumbled topic later once they have settled",
+                id="candidate_settled",
+                signal="The manager warmed the room before assessing anything",
+                weight=0.30,
+                how_to_surface="Greet, introduce yourself, set the agenda and the duration",
             ),
             ScorecardSignal(
-                id="delivery_separated",
-                signal="Score separates communication from technical depth",
+                id="nerves_not_scored",
+                signal="Hesitation was not read as lack of ability",
                 weight=0.20,
-                how_to_surface="Record the two dimensions independently in the scorecard",
+                how_to_surface="Score the content of the answer, not its delivery",
             ),
             ScorecardSignal(
-                id="no_pressure_pile_on",
-                signal="Interviewer did not stack rapid-fire questions on a struggling candidate",
-                weight=0.10,
-                how_to_surface="Ask one question at a time and wait through the pause",
+                id="encouragement_given",
+                signal="A short answer was met with an invitation rather than a new question",
+                weight=0.15,
+                how_to_surface='Say "tell me more about that part" instead of moving on',
             ),
         ],
         interviewer_failure_modes=[
-            "Reads nerves as incompetence and disengages in the first ten minutes",
-            "Piles on follow-ups that make the stumbling worse",
-            "Never revisits the topic the candidate fumbled while warming up",
+            "Reads nervousness as incompetence and closes early",
+            "Fires the next question into every pause",
+            "Never gives the candidate a reason to relax",
         ],
-        tags=["presentation", "high-signal"],
+        session_beats=[
+            "Answers in one line until asked something genuinely open",
+            'Asks "sorry, could you repeat that?" at least once',
+            "Reveals a strong, specific story only when drawn out",
+            "Asks about training and support near the end",
+        ],
+        stresses={"communication": 4, "experience": 4, "structure": 2, "clarity": 2, "bias": 1},
+        tags=["under-confident", "high-signal"],
+    )
+)
+
+_register(
+    Archetype(
+        key="inflated_resume",
+        label="The inflated resume",
+        description=(
+            "Confident, fluent and jargon-heavy, with claims that do not survive "
+            'contact with a specific question. Team achievements are narrated as "we" '
+            "and land as though they were personal. Real numbers exist and are much "
+            "smaller than implied. Hints at another offer as the conversation closes."
+        ),
+        verdict="reject",
+        interviewer_challenge=(
+            "Verifying claims instead of rewarding fluency. Every deflection is more "
+            'jargon, so the manager has to convert "we" into "I" and ask for the '
+            "number rather than the narrative."
+        ),
+        traits={
+            "smartness": (4, 6),
+            "dumbness": (3, 5),
+            "seriousness": (5, 7),
+            "effort": (5, 7),
+            "interest": (6, 8),
+            "honesty": (2, 4),
+            "preparedness": (6, 8),
+            "nervousness": (2, 4),
+        },
+        knowledge_band=(3, 5),
+        speech={
+            "pace": "fast",
+            "verbosity": "verbose",
+            "filler_frequency": 1,
+            "hesitation_frequency": 1,
+            "formality": "neutral",
+            "interrupts_interviewer": False,
+            "tone": "polished, name-dropping, quietly boastful",
+        },
+        answer_policy={
+            "default_answer_depth": "thorough",
+            "on_unknown_question": "answers confidently in the adjacent language",
+            "on_pressure": "escalates the jargon and widens the claim",
+            "on_silence": "adds another impressive-sounding detail",
+        },
+        must_discover=[
+            ScorecardSignal(
+                id="ownership_established",
+                signal='What this person personally did, separated from what "we" did',
+                weight=0.35,
+                how_to_surface='Ask "what was your part of that, specifically?"',
+            ),
+            ScorecardSignal(
+                id="claim_tested",
+                signal="At least one headline claim was probed to its breaking point",
+                weight=0.30,
+                how_to_surface="Ask for the mechanism, the number, or the decision behind it",
+            ),
+            ScorecardSignal(
+                id="fluency_discounted",
+                signal="Confidence was not scored as competence",
+                weight=0.20,
+                how_to_surface="Compare the polish of the answer against its actual content",
+            ),
+            ScorecardSignal(
+                id="offer_pressure_handled",
+                signal="The competing-offer hint did not shorten the assessment",
+                weight=0.15,
+                how_to_surface="Acknowledge the timeline and finish the questions anyway",
+            ),
+        ],
+        interviewer_failure_modes=[
+            "Accepts the polished narrative because it sounds senior",
+            "Backs off the first time a probe is met with more jargon",
+            "Rushes to a decision because another offer was mentioned",
+        ],
+        session_beats=[
+            "Opens with an impressive but unspecific claim",
+            "Deflects the first probe with more jargon",
+            "Surfaces real numbers only under a very specific question",
+            "Hints at another offer near the close",
+            "Asks about the salary band",
+        ],
+        stresses={"structure": 4, "clarity": 2, "communication": 2, "experience": 2, "bias": 1},
+        tags=["inflated resume", "structure"],
+    )
+)
+
+_register(
+    Archetype(
+        key="comp_first",
+        label="The comp-first candidate",
+        description=(
+            "Genuinely competent, and leads with money. Asks the salary inside the "
+            "first two minutes, compares the offer to a competitor mid-conversation, "
+            "and pushes for a number outside the band. Softens noticeably when the "
+            "role itself is sold well. What actually matters to them beyond pay "
+            "exists, and surfaces only if someone asks."
+        ),
+        verdict="borderline",
+        interviewer_challenge=(
+            "Selling the role and handling an objection without either caving on the "
+            "band or getting defensive. The compensation and progression facts have to "
+            "be stated honestly, not dodged."
+        ),
+        traits={
+            "smartness": (6, 8),
+            "dumbness": (2, 4),
+            "seriousness": (6, 8),
+            "effort": (5, 7),
+            "interest": (4, 6),
+            "honesty": (6, 8),
+            "preparedness": (6, 8),
+            "nervousness": (2, 4),
+        },
+        knowledge_band=(6, 8),
+        speech={
+            "pace": "measured",
+            "verbosity": "balanced",
+            "filler_frequency": 2,
+            "hesitation_frequency": 1,
+            "formality": "neutral",
+            "interrupts_interviewer": False,
+            "tone": "transactional, direct, faintly impatient",
+        },
+        answer_policy={
+            "default_answer_depth": "adequate",
+            "on_unknown_question": "redirects to what the package looks like",
+            "on_pressure": "restates their market value",
+            "on_silence": "asks another question about terms",
+        },
+        must_discover=[
+            ScorecardSignal(
+                id="role_sold",
+                signal="The role was made attractive on something other than pay",
+                weight=0.35,
+                how_to_surface="Describe the work, the growth path and who they would learn from",
+            ),
+            ScorecardSignal(
+                id="comp_stated_honestly",
+                signal="The band and the shift facts were stated plainly, without hedging",
+                weight=0.30,
+                how_to_surface="Answer the compensation question directly the first time",
+            ),
+            ScorecardSignal(
+                id="motivation_beyond_pay",
+                signal="What else this candidate is optimising for",
+                weight=0.20,
+                how_to_surface="Ask what would make them stay somewhere for three years",
+            ),
+            ScorecardSignal(
+                id="objection_held",
+                signal="The off-band push was declined without souring the conversation",
+                weight=0.15,
+                how_to_surface="Name the band, explain how it moves, and keep going",
+            ),
+        ],
+        interviewer_failure_modes=[
+            "Dodges the salary question and loses credibility for the rest of the call",
+            "Implies flexibility on a band that has none",
+            "Writes the candidate off as mercenary without testing the work",
+        ],
+        session_beats=[
+            "Asks about salary in the first two minutes",
+            "Compares the offer to a competitor mid-conversation",
+            "Pushes for a number outside the band",
+            "Softens when the role is sold well",
+            "Names what matters beyond money only if asked",
+        ],
+        stresses={"clarity": 4, "structure": 2, "communication": 2, "experience": 2, "bias": 1},
+        allows_adjacent_strength=True,
+        tags=["offer-shopping", "clarity"],
+    )
+)
+
+_register(
+    Archetype(
+        key="defensive",
+        label="The defensive candidate",
+        description=(
+            "Prickly and on a bad line. Flags a noisy environment early, interrupts at "
+            "least once, and takes a routine question as an accusation. Drops an "
+            "over-familiar remark that the manager has to absorb without matching it, "
+            "and announces a hard stop near the end. A withdrawn complaint from a "
+            "previous job exists and surfaces only under a careful, unhurried probe."
+        ),
+        verdict="borderline",
+        interviewer_challenge=(
+            "Composure and time control at once. The manager has to stay warm through "
+            "provocation, keep the structure, and land the remaining questions inside "
+            "a window that just got shorter."
+        ),
+        traits={
+            "smartness": (5, 7),
+            "dumbness": (2, 4),
+            "seriousness": (6, 8),
+            "effort": (5, 7),
+            "interest": (5, 7),
+            "honesty": (7, 9),
+            "preparedness": (4, 6),
+            "nervousness": (4, 6),
+        },
+        knowledge_band=(5, 7),
+        speech={
+            "pace": "fast",
+            "verbosity": "balanced",
+            "filler_frequency": 2,
+            "hesitation_frequency": 1,
+            "formality": "casual",
+            "interrupts_interviewer": True,
+            "tone": "clipped, guarded, quick to take offence",
+        },
+        answer_policy={
+            "default_answer_depth": "adequate",
+            "on_unknown_question": "questions why it was asked",
+            "on_pressure": "becomes short and defensive",
+            "on_silence": "asks how much longer this will take",
+        },
+        must_discover=[
+            ScorecardSignal(
+                id="composure_held",
+                signal="The manager stayed professional through the interruption and the remark",
+                weight=0.35,
+                how_to_surface="Acknowledge it once, do not match the register, continue",
+            ),
+            ScorecardSignal(
+                id="time_recovered",
+                signal="The remaining questions were re-planned around the hard stop",
+                weight=0.30,
+                how_to_surface="Say out loud what will be covered in the time that is left",
+            ),
+            ScorecardSignal(
+                id="grievance_surfaced",
+                signal="The withdrawn complaint and what actually happened around it",
+                weight=0.20,
+                how_to_surface="Ask neutrally about the last role and leave room for the answer",
+            ),
+            ScorecardSignal(
+                id="conditions_accommodated",
+                signal="The noisy line was handled rather than silently held against them",
+                weight=0.15,
+                how_to_surface="Offer to repeat or slow down instead of scoring the audio",
+            ),
+        ],
+        interviewer_failure_modes=[
+            "Mirrors the sharp tone and the interview becomes a confrontation",
+            "Goes quiet and lets the candidate run the call",
+            "Abandons the structure once the hard stop is announced",
+        ],
+        session_beats=[
+            "Flags a noisy environment early",
+            "Interrupts the manager at least once",
+            "Makes an over-familiar remark",
+            "Announces a hard stop near the end",
+            "Reveals a withdrawn complaint only under a careful probe",
+        ],
+        stresses={"communication": 4, "experience": 3, "structure": 3, "clarity": 2, "bias": 1},
+        tags=["defensive", "hard stop"],
     )
 )
 
 _register(
     Archetype(
         key="rambler",
-        label="Rambler",
+        label="The rambler",
         description=(
-            "Knows real things but never lands the point. Answers arrive wrapped in "
-            "three tangents and consume the entire time budget."
+            "Knows real things but never lands the point. A simple question produces "
+            "two minutes of answer that drifts into unrelated stories and loses the "
+            "question on the way. Specifics exist and appear only when the manager "
+            "pins them down. Left alone, this persona consumes the entire time budget."
         ),
         verdict="borderline",
         interviewer_challenge=(
-            "Time control. Without redirection this persona spends the whole interview "
-            "on two topics and leaves the rubric half-covered."
+            "Redirection and time management without rudeness. Without steering, the "
+            "session covers two topics and leaves the rest of the rubric untouched."
         ),
         traits={
             "smartness": (6, 8),
@@ -844,108 +729,43 @@ _register(
         must_discover=[
             ScorecardSignal(
                 id="redirection_used",
-                signal="Interviewer interrupted and redirected without being rude",
+                signal="The manager interrupted and redirected without being rude",
                 weight=0.35,
                 how_to_surface="Cut in at a natural pause and restate the specific question",
             ),
             ScorecardSignal(
                 id="rubric_coverage",
-                signal="All mandatory skills were still covered within the time budget",
+                signal="Every planned area was still covered inside the time budget",
                 weight=0.35,
                 how_to_surface="Track remaining topics against remaining minutes out loud",
             ),
             ScorecardSignal(
                 id="signal_extracted",
-                signal="Real technical signal was separated from the surrounding narrative",
+                signal="Real signal was separated from the surrounding narrative",
                 weight=0.20,
                 how_to_surface="Ask for the one-sentence version of the answer",
             ),
             ScorecardSignal(
                 id="communication_scored",
-                signal="Communication is scored on structure, not on volume",
+                signal="Communication was judged on structure, not on volume",
                 weight=0.10,
-                how_to_surface="Note whether any answer had a clear conclusion",
+                how_to_surface="Note whether any answer reached a clear conclusion",
             ),
         ],
         interviewer_failure_modes=[
-            "Never interrupts and covers two of six required skills",
+            "Never interrupts and covers a third of what was planned",
             "Mistakes fluent volume for depth",
+            "Interrupts bluntly and the candidate shuts down",
         ],
-        tags=["communication"],
-    )
-)
-
-_register(
-    Archetype(
-        key="specialist_mismatch",
-        label="Strong, wrong stack",
-        description=(
-            "Genuinely senior in an adjacent technology. Thin on the exact required "
-            "stack but the underlying engineering judgement is real."
-        ),
-        verdict="borderline",
-        interviewer_challenge=(
-            "Assess transferable depth instead of checking keywords. Keyword matching "
-            "rejects this persona in five minutes."
-        ),
-        traits={
-            "smartness": (8, 9),
-            "dumbness": (1, 3),
-            "seriousness": (7, 9),
-            "effort": (7, 9),
-            "interest": (6, 8),
-            "honesty": (8, 10),
-            "preparedness": (6, 8),
-            "nervousness": (2, 4),
-        },
-        knowledge_band=(2, 5),
-        speech={
-            "pace": "measured",
-            "verbosity": "balanced",
-            "filler_frequency": 2,
-            "hesitation_frequency": 2,
-            "formality": "neutral",
-            "interrupts_interviewer": False,
-            "tone": "confident in their own domain, candid about the gap",
-        },
-        answer_policy={
-            "default_answer_depth": "thorough",
-            "on_unknown_question": "maps it to the equivalent in their own stack",
-            "on_pressure": "reasons from first principles",
-            "on_silence": "offers the analogous problem they have solved",
-        },
-        must_discover=[
-            ScorecardSignal(
-                id="transferable_depth",
-                signal="Depth of engineering judgement independent of the specific stack",
-                weight=0.40,
-                how_to_surface="Ask them to solve the problem in whatever stack they know best",
-            ),
-            ScorecardSignal(
-                id="ramp_estimate",
-                signal="A concrete estimate of how long the stack gap takes to close",
-                weight=0.25,
-                how_to_surface="Ask what they would need to learn and how they would learn it",
-            ),
-            ScorecardSignal(
-                id="not_keyword_rejected",
-                signal="Interviewer did not reject purely on missing keywords",
-                weight=0.25,
-                how_to_surface="Probe the concept behind the keyword rather than the keyword",
-            ),
-            ScorecardSignal(
-                id="gap_honesty_noted",
-                signal="Interviewer credits candid gap acknowledgement as a positive signal",
-                weight=0.10,
-                how_to_surface="Note where they volunteered a limit instead of bluffing",
-            ),
+        session_beats=[
+            "Answers a simple question for two minutes",
+            "Drifts into unrelated stories",
+            "Needs the manager to steer back to the question",
+            "Loses track of the time",
+            "Gives specifics only when pinned down",
         ],
-        interviewer_failure_modes=[
-            "Runs a keyword checklist and rejects in the first five minutes",
-            "Never tests the candidate in the stack they actually know",
-        ],
-        allows_adjacent_strength=True,
-        tags=["knowledge", "high-signal"],
+        stresses={"structure": 4, "communication": 3, "clarity": 2, "experience": 2, "bias": 1},
+        tags=["rambling", "time control"],
     )
 )
 
@@ -982,6 +802,8 @@ def catalog() -> list[dict[str, object]]:
             "default_slot": a.default_slot,
             "tags": a.tags,
             "trait_bounds": a.trait_bounds_json,
+            "session_beats": a.session_beats,
+            "stresses": a.stresses,
         }
         for a in ARCHETYPES.values()
     ]

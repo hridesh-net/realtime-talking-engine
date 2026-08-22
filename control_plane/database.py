@@ -80,6 +80,37 @@ CREATE TABLE IF NOT EXISTS virtual_candidates (
 CREATE INDEX IF NOT EXISTS idx_candidates_interview ON virtual_candidates(interview_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_verdict ON virtual_candidates(verdict);
 
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    interview_id TEXT NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+    candidate_id TEXT NOT NULL REFERENCES virtual_candidates(candidate_id) ON DELETE CASCADE,
+    persona_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'live'
+        CHECK (status IN ('live', 'completed', 'abandoned')),
+    modality TEXT NOT NULL DEFAULT 'text' CHECK (modality IN ('text', 'voice')),
+    planned_minutes INTEGER NOT NULL,
+    opening_line TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- The transcript. (session_id, idx) is the primary key rather than a surrogate
+-- id: turn order is the conversation, and a duplicate index is a bug worth a
+-- constraint violation instead of a silently reordered replay.
+CREATE TABLE IF NOT EXISTS session_turns (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    speaker TEXT NOT NULL CHECK (speaker IN ('manager', 'candidate')),
+    text TEXT NOT NULL,
+    at TEXT NOT NULL,
+    elapsed_ms INTEGER NOT NULL,
+    PRIMARY KEY (session_id, idx)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_interview ON sessions(interview_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
 CREATE TABLE IF NOT EXISTS interview_expectations (
     id TEXT PRIMARY KEY,
     interview_id TEXT NOT NULL UNIQUE REFERENCES interviews(id) ON DELETE CASCADE,

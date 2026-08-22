@@ -54,10 +54,31 @@ def test_exactly_two_defaults_one_of_each_verdict():
 
 def test_catalog_covers_the_requested_archetype_space():
     keys = set(catalog.ARCHETYPES)
-    for expected in ("lazy", "smart_but_lazy", "disengaged", "eager_underqualified"):
+    for expected in ("cooperative_trap", "evasive", "nervous_fresher", "rambler"):
         assert expected in keys
     verdicts = {a.verdict for a in ALL}
     assert verdicts == {"select", "reject", "borderline"}
+
+
+@pytest.mark.parametrize("a", ALL, ids=lambda a: a.key)
+def test_every_persona_stresses_a_real_criterion(a):
+    """The picker's stress bars are only meaningful against the fixed rubric."""
+    assert a.stresses, f"{a.key} declares no rubric pressure"
+    assert set(a.stresses) <= set(catalog.RUBRIC_CRITERIA)
+    assert all(1 <= v <= 4 for v in a.stresses.values())
+
+
+@pytest.mark.parametrize("a", ALL, ids=lambda a: a.key)
+def test_every_persona_declares_session_beats(a):
+    """Beats are shown in the UI as behaviour, so an empty list would be a lie."""
+    assert a.session_beats
+    assert all(b.strip() for b in a.session_beats)
+
+
+def test_the_catalog_covers_every_rubric_criterion():
+    """No manager competency is left without a persona that pressures it."""
+    covered = {c for a in ALL for c, v in a.stresses.items() if v >= 3}
+    assert covered == set(catalog.RUBRIC_CRITERIA)
 
 
 def test_catalog_payload_is_serializable():
@@ -81,13 +102,13 @@ def test_traits_land_inside_archetype_bounds(a):
 
 
 def test_same_seed_reproduces_the_same_person():
-    a = catalog.get("smart_but_lazy")
-    assert derive_traits(a, "int-1:smart_but_lazy") == derive_traits(a, "int-1:smart_but_lazy")
+    a = catalog.get("comp_first")
+    assert derive_traits(a, "int-1:comp_first") == derive_traits(a, "int-1:comp_first")
 
 
 def test_different_interviews_produce_different_people():
-    a = catalog.get("strong_hire")
-    seen = {tuple(sorted(derive_traits(a, f"int-{i}:strong_hire").items())) for i in range(40)}
+    a = catalog.get("nervous_fresher")
+    seen = {tuple(sorted(derive_traits(a, f"int-{i}:nervous_fresher").items())) for i in range(40)}
     assert len(seen) > 1, "trait derivation is not varying across interviews"
 
 
@@ -130,7 +151,7 @@ def test_model_cannot_exceed_the_knowledge_band(a):
 
 
 def test_missing_and_renamed_skills_are_restored():
-    a = catalog.get("clear_reject")
+    a = catalog.get("evasive")
     draft = {
         "knowledge_map": [
             {
@@ -160,12 +181,10 @@ def test_adjacent_strength_survives_only_where_allowed():
             }
         ]
     }
-    mismatch = VirtualCandidateAgent._build_knowledge_map(
-        draft, catalog.get("specialist_mismatch"), SKILLS
-    )
+    mismatch = VirtualCandidateAgent._build_knowledge_map(draft, catalog.get("comp_first"), SKILLS)
     assert any(e.skill == "Elixir" and e.level == 10 for e in mismatch)
 
-    strict = VirtualCandidateAgent._build_knowledge_map(draft, catalog.get("lazy"), SKILLS)
+    strict = VirtualCandidateAgent._build_knowledge_map(draft, catalog.get("evasive"), SKILLS)
     assert all(e.skill in SKILLS for e in strict)
 
 
@@ -185,7 +204,7 @@ def test_scorecard_keeps_catalog_ids_and_weights(a):
 
 
 def test_scorecard_uses_model_wording_when_ids_match():
-    a = catalog.get("strong_hire")
+    a = catalog.get("cooperative_trap")
     target = a.must_discover[0].id
     draft = {
         "must_discover": [

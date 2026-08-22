@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from candidate_agent import archetypes as archetype_catalog
 from candidate_agent.agent import VirtualCandidateAgent
 from candidate_agent.schema import EngineContract, InterviewerScorecard, VirtualCandidate
+from candidate_agent.session import CANDIDATE, MANAGER, CandidateSessionAgent
+from candidate_agent.voice import build_realtime_session
 from control_plane.database import init_db
 from control_plane.ports import (
     CandidateStore,
@@ -14,15 +16,28 @@ from control_plane.ports import (
     ExpectationStore,
     ExpectationWorkflowStore,
     InterviewStore,
+    SessionStore,
+    SessionWorkflowStore,
+    TurnWorkflowStore,
 )
 from control_plane.repository import InterviewRepository
 from control_plane.schemas import (
     CandidateEnrollRequest,
     InterviewCreateRequest,
     InterviewResponse,
+    RealtimeCredentialResponse,
+    SessionCreateRequest,
+    SessionResponse,
+    SessionSummary,
+    TranscriptAppendRequest,
+    Turn,
+    TurnRequest,
+    VoiceCapabilityResponse,
 )
 from expectation_agent.agent import InterviewExpectationAgent
 from expectation_agent.schema import InterviewExpectation
+from llm.base import ModelError, RealtimeBroker
+from llm.factory import build_realtime_broker, realtime_providers_available
 
 
 def get_repo() -> InterviewRepository:
@@ -118,10 +133,20 @@ def get_candidate_agent() -> VirtualCandidateAgent:
 
 @router.get("/candidate-archetypes")
 def list_archetypes() -> dict[str, object]:
-    """The fixed persona catalog the enrollment UI offers."""
+    """The fixed persona catalog the enrollment UI offers.
+
+    Ships the rubric vocabulary alongside it so the picker can label a persona's
+    stress bars without keeping its own copy of the criteria — a UI-side copy
+    would drift the moment the rubric is retuned.
+    """
     return {
         "catalog_version": archetype_catalog.CATALOG_VERSION,
         "defaults": archetype_catalog.default_keys(),
+        "rubric_criteria": [
+            {"id": c, "label": archetype_catalog.RUBRIC_LABELS[c]}
+            for c in archetype_catalog.RUBRIC_CRITERIA
+        ],
+        "stress_labels": list(archetype_catalog.STRESS_LABELS),
         "archetypes": archetype_catalog.catalog(),
     }
 
@@ -199,6 +224,19 @@ def list_candidates(
     return repo.list_candidates(interview_id)
 
 
+@router.get("/interviews/{interview_id}/sessions", response_model=list[SessionSummary])
+def list_sessions(
+    interview_id: str, repo: SessionStore = Depends(get_repo)
+) -> list[SessionSummary]:
+    """Every session held against one interview, newest first.
+
+    Returns an empty list rather than 404 for an unknown interview: this is a
+    list endpoint, and the caller asking "what has been run here" is answered by
+    "nothing" just as well as by an error.
+    """
+    return repo.list_sessions(interview_id)
+
+
 @router.get("/candidates/{candidate_id}", response_model=VirtualCandidate)
 def get_candidate(candidate_id: str, repo: CandidateStore = Depends(get_repo)) -> VirtualCandidate:
     """Fetch one persona."""
@@ -235,3 +273,243 @@ def delete_candidate(candidate_id: str, repo: CandidateStore = Depends(get_repo)
     """Remove a persona from an interview."""
     if not repo.delete_candidate(candidate_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="candidate not found")
+
+
+# ---------------------------------------------------------------------------
+# Live text sessions
+#
+# The interviewer-training loop: a human manager types, a cast persona answers,
+# and every turn is stamped server-side. This is the same session the Go voice
+# engine will run later — same contract in, same transcript out — which is why
+# the transcript carries `modality` from the first line.
+# ---------------------------------------------------------------------------
+
+
+def get_session_agent() -> CandidateSessionAgent:
+    """Build the candidate session agent from environment configuration."""
+    return CandidateSessionAgent()
+
+
+@router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
+async def start_session(
+    req: SessionCreateRequest,
+    repo: SessionWorkflowStore = Depends(get_repo),
+    agent: VirtualCandidateAgent = Depends(get_candidate_agent),
+) -> SessionResponse:
+    """Open a session against one persona, casting it first if it is not enrolled."""
+    interview = repo.get(req.interview_id)
+    if not interview:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+    if req.archetype not in archetype_catalog.ARCHETYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"unknown archetype: {req.archetype}",
+        )
+
+    candidate = repo.get_candidate_by_archetype(req.interview_id, req.archetype)
+    if candidate is None:
+        candidate = await agent.generate(
+            interview_id=req.interview_id,
+            archetype_key=req.archetype,
+            job_title=interview.job_title,
+            jd=interview.jd,
+            skills_required=interview.skills_required,
+            experience_level=interview.experience_level,
+            company_type=interview.company_type,
+            job_location_type=interview.job_location_type,
+            duration_minutes=interview.config.duration_minutes,
+            interview_type="mixed",
+            expectation=None,
+            avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
+        )
+        repo.save_candidate(candidate, model_used=agent.model)
+
+    return repo.create_session(
+        interview_id=req.interview_id,
+        candidate_id=candidate.candidate_id,
+        persona_key=candidate.archetype,
+        planned_minutes=req.planned_minutes,
+        opening_line=candidate.engine_contract.opening_line,
+        modality=req.modality,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/turns", response_model=Turn, status_code=status.HTTP_201_CREATED
+)
+async def take_turn(
+    session_id: str,
+    req: TurnRequest,
+    repo: TurnWorkflowStore = Depends(get_repo),
+    agent: CandidateSessionAgent = Depends(get_session_agent),
+) -> Turn:
+    """Record what the manager said and return the persona's reply.
+
+    Both turns are persisted before the reply is returned, so a client that
+    disconnects mid-call still leaves an honest transcript behind.
+    """
+    session = repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    if session.status != "live":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"session is {session.status}, not live",
+        )
+    candidate = repo.get_candidate(session.candidate_id)
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="the persona for this session has been deleted",
+        )
+
+    manager_turn = repo.append_turn(session_id, MANAGER, req.text)
+    transcript = [
+        *(t.model_dump() for t in session.turns),
+        manager_turn.model_dump(),
+    ]
+    reply = await agent.reply(candidate.engine_contract, transcript)
+    return repo.append_turn(session_id, CANDIDATE, reply)
+
+
+@router.post("/sessions/{session_id}/end", response_model=SessionResponse)
+def end_session(session_id: str, repo: SessionStore = Depends(get_repo)) -> SessionResponse:
+    """Close a session. Ending it abruptly is itself a signal the report reads."""
+    session = repo.end_session(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    return session
+
+
+@router.get("/sessions/{session_id}", response_model=SessionResponse)
+def get_session(session_id: str, repo: SessionStore = Depends(get_repo)) -> SessionResponse:
+    """Fetch a session with its full timestamped transcript."""
+    session = repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    return session
+
+
+# ---------------------------------------------------------------------------
+# Voice sessions
+#
+# The audio never touches this service. The browser holds a WebRTC session with
+# the realtime vendor directly, because routing 24 kHz PCM through Python would
+# add hundreds of milliseconds to a budget measured in hundreds of milliseconds.
+# What stays here is everything that must not be client-controlled: the compiled
+# persona instructions, the voice, the turn-detection policy, and the transcript.
+# ---------------------------------------------------------------------------
+
+#: How long a minted credential stays redeemable. Long enough to cover a slow
+#: page load and a microphone permission prompt, short enough that a leaked one
+#: is worthless by the time it is found.
+REALTIME_TTL_SECONDS = 600
+
+
+def get_realtime_broker() -> RealtimeBroker:
+    """Build the realtime-voice broker from environment configuration."""
+    return build_realtime_broker()
+
+
+@router.get("/voice-capability", response_model=VoiceCapabilityResponse)
+def voice_capability() -> VoiceCapabilityResponse:
+    """Whether this deployment can run voice sessions.
+
+    The UI calls this before offering a Voice button. Absence of a realtime
+    provider is a configuration answer, not an error — so this returns 200 with
+    ``available: false`` rather than failing.
+    """
+    providers = realtime_providers_available()
+    return VoiceCapabilityResponse(
+        available=bool(providers),
+        providers=providers,
+        detail=(
+            f"voice ready via {', '.join(providers)}"
+            if providers
+            else "no realtime-capable provider configured; set OPENAI_API_KEY"
+        ),
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/realtime",
+    response_model=RealtimeCredentialResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def mint_realtime_credential(
+    session_id: str,
+    repo: TurnWorkflowStore = Depends(get_repo),
+    broker: RealtimeBroker = Depends(get_realtime_broker),
+) -> RealtimeCredentialResponse:
+    """Mint the browser's credential for a voice session.
+
+    The persona instructions are compiled here and sealed into the credential
+    vendor-side. The browser receives a secret and a URL — never the prompt, the
+    knowledge ceilings, or the scorecard.
+    """
+    session = repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    if session.status != "live":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"session is {session.status}, not live",
+        )
+    candidate = repo.get_candidate(session.candidate_id)
+    if not candidate:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="the persona for this session has been deleted",
+        )
+
+    config = build_realtime_session(candidate.engine_contract, voices=broker.voices)
+    try:
+        credential = await broker.mint(session=config, ttl_seconds=REALTIME_TTL_SECONDS)
+    except ModelError as exc:
+        # A mint failure is the vendor's answer, not a bug in this service —
+        # surface it as a gateway error so the UI can say so plainly.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    audio = config.get("audio")
+    voice = ""
+    if isinstance(audio, dict):
+        output = audio.get("output")
+        if isinstance(output, dict):
+            voice = str(output.get("voice", ""))
+
+    return RealtimeCredentialResponse(
+        session_id=session_id,
+        client_secret=credential.value,
+        expires_at=credential.expires_at,
+        model=credential.model,
+        call_url=credential.call_url,
+        voice=voice,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/transcript",
+    response_model=Turn,
+    status_code=status.HTTP_201_CREATED,
+)
+def append_transcript_turn(
+    session_id: str,
+    req: TranscriptAppendRequest,
+    repo: SessionStore = Depends(get_repo),
+) -> Turn:
+    """Record a turn that was spoken elsewhere, without generating a reply.
+
+    The voice counterpart to ``POST /turns``. The timestamp is still stamped
+    here rather than taken from the client: the browser knows when it *received*
+    a transcript, which is not the same thing and is not comparable between two
+    managers on two networks.
+    """
+    session = repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    if session.status != "live":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"session is {session.status}, not live",
+        )
+    return repo.append_turn(session_id, req.speaker, req.text)

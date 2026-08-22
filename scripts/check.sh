@@ -39,6 +39,8 @@ run "python format (ruff format)"   $PY -m ruff format --check .
 run "python types (mypy)"           $PY -m mypy
 run "SOLID + layering"              $PY -m pytest tests/test_architecture.py -q
 run "persona rubric (offline)"      $PY -m pytest tests/test_candidate_rubric.py -q
+run "live session (offline)"        $PY -m pytest tests/test_session.py -q
+run "voice session (offline)"       $PY -m pytest tests/test_voice.py -q
 
 # -------------------------------------------------------------------- go ----
 # The live-session engine is a Go module rooted at engine/, so every gate runs

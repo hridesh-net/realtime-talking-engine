@@ -9,7 +9,7 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5/okf-curator
-    at: "2026-08-21T19:17:54Z"
+    at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
   - resource: /README.md
@@ -48,6 +48,7 @@ service binds `0.0.0.0` while the UI proxy targets `127.0.0.1`.
 | Var | Used when |
 |---|---|
 | `GEMINI_API_KEY` | provider is `gemini` (the default pick) |
+| `OPENAI_API_KEY` | **required for voice mode**, whatever the text provider is |
 | `OPENAI_API_KEY` | provider is `openai` |
 
 With no `*_PROVIDER` set, the factory takes the first provider whose key is
@@ -56,14 +57,33 @@ present, checking Gemini first.
 ## Provider and model selection
 
 Resolution per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/`LLM_MODEL`
-→ provider default. Roles: `EXPECTATION`, `CANDIDATE`.
+→ provider default.
+
+| Role prefix | Workload | Call shape |
+|---|---|---|
+| `EXPECTATION` | the interviewer expectation document | one structured call per interview |
+| `CANDIDATE` | casting a persona | one structured call per persona |
+| `SESSION` | playing the persona in a live interview | one **chat** call per turn |
+| `JUDGE` | scoring a finished transcript | reserved — no consumer yet |
+| `VOICE` | the live **spoken** session | mints a browser credential; realtime-capable providers only |
 
 | Var | Default |
 |---|---|
-| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` | — (auto-detect) |
-| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` | — |
+| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` | — (auto-detect) |
+| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` | — |
 | `LLM_PROVIDER` / `LLM_MODEL` | — |
 | provider default model | `gemini-2.5-flash` / `gpt-4o-mini` |
+
+`SESSION` is the one worth tuning: it is the only role called on every turn, so
+it dominates both cost and the pace of a practice interview.
+
+⚠️ **`VOICE` does not fall back to `LLM_PROVIDER`.** Realtime speech-to-speech is
+OpenAI-only today, so this role resolves against the realtime-capable providers
+alone — a `LLM_PROVIDER=gemini` deployment still gets voice from OpenAI if
+`OPENAI_API_KEY` is set, and gets no Voice button if it is not. `VOICE_MODEL`
+must be a realtime speech model (`gpt-realtime-2`, `gpt-realtime-2.1-mini`),
+never a text model id; pointing it at one fails at mint time.
+`GET /api/v1/voice-capability` reports what the deployment can actually do.
 
 Model IDs are config, never hardcoded at a call site.
 
@@ -84,5 +104,5 @@ environment already being set.
 ## Secrets hygiene
 
 `.gitignore` covers `.env`, `.env.*` (keeping `.env.example`), `*.db`, and
-`node_modules/`. ⚠️ It **also** ignores `owner_handover/` and `docs/`, which is a
-bug — see [Owner handover](/concepts/subsystems/owner-handover.md).
+`node_modules/`. The `owner_handover/` and `docs/` rules that used to hide the
+deliverables were removed on 2026-08-22.
