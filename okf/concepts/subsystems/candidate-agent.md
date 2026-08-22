@@ -159,4 +159,13 @@ unknown-preset and out-of-vocabulary rejection, the v2.0 `session_beats`/
 guard). `tests/test_control_plane_candidates_api.py` covers the
 `custom_personas` enrollment path end-to-end (`TestClient` + fake model +
 throwaway SQLite).
+`tests/test_custom_persona_integration.py` goes one level deeper than either:
+it drives the full `agent.generate()` pipeline for a composed persona against
+an *adversarial* fake model that deliberately violates every re-imposition
+rule (inflates a skill past its ceiling, drops a required one, invents an
+extra one, uses out-of-enum stance/truthfulness, invents scorecard ids) —
+proving a composed archetype holds the same guarantees a hand-written one
+does, not a relaxed subset. Also covers all four bias traps, all three
+compliance-trap types landing distinctly in the compiled prompt, taxonomy
+values reaching the prompt verbatim, and a 25-seed trait-bounds sweep.
 Live: `tests/test_candidate_agent.py`, six archetypes plus a determinism check.
