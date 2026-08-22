@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /README.md
@@ -65,12 +67,13 @@ Resolution per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/`LLM_MO
 | `CANDIDATE` | casting a persona | one structured call per persona |
 | `SESSION` | playing the persona in a live interview | one **chat** call per turn |
 | `JUDGE` | scoring a finished transcript | reserved — no consumer yet |
+| `ROLE_FACTS` | drafting the role-fact checklist | one structured call per wizard auto-fill |
 | `VOICE` | the live **spoken** session | mints a browser credential; realtime-capable providers only |
 
 | Var | Default |
 |---|---|
-| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` | — (auto-detect) |
-| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` | — |
+| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` / `ROLE_FACTS_PROVIDER` | — (auto-detect) |
+| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` / `ROLE_FACTS_MODEL` | — |
 | `LLM_PROVIDER` / `LLM_MODEL` | — |
 | provider default model | `gemini-2.5-flash` / `gpt-4o-mini` |
 

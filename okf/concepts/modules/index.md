@@ -6,8 +6,9 @@ do and what breaks if I change it" without opening it.
 
 Data shapes live in [Contracts](/concepts/contracts/index.md) instead —
 `llm/base.py`, `control_plane/ports.py`, `control_plane/database.py`,
-`control_plane/schemas.py`, `expectation_agent/schema.py`, and
-`candidate_agent/schema.py` are documented there.
+`control_plane/schemas.py`, `expectation_agent/schema.py`,
+`evaluation_agent/schema.py`, and `candidate_agent/schema.py` are documented
+there.
 
 ## llm
 * [llm/factory.py](/concepts/modules/llm-factory.md) - provider and model resolution.
@@ -15,6 +16,10 @@ Data shapes live in [Contracts](/concepts/contracts/index.md) instead —
 ## expectation_agent
 * [expectation_agent/rubric.py](/concepts/modules/expectation-agent-rubric.md) - the deterministic tables.
 * [expectation_agent/agent.py](/concepts/modules/expectation-agent-agent.md) - pre-compute, call, overwrite.
+
+## evaluation_agent
+* [evaluation_agent/rubric.py](/concepts/modules/evaluation-agent-rubric.md) - the fixed manager rubric and its override.
+* [evaluation_agent/role_facts.py](/concepts/modules/evaluation-agent-role-facts.md) - drafts the role-fact checklist wording.
 
 ## candidate_agent
 * [candidate_agent/archetypes.py](/concepts/modules/candidate-agent-archetypes.md) - the fixed catalog.

@@ -22,20 +22,20 @@ sources:
 Ports and adapters, four packages, dependencies pointing one way.
 
 ```
-        ┌──────────────────────────────────────────────┐
-        │ control_plane/   FastAPI routes, storage      │
-        │   api.py → ports.py ← repository.py (SQLite)  │
-        └───────┬───────────────────────┬───────────────┘
-                │ imports               │ imports
-        ┌───────▼──────────┐   ┌────────▼─────────┐
-        │ expectation_     │   │ candidate_agent/ │
-        │ agent/           │   │                  │
-        └───────┬──────────┘   └────────┬─────────┘
-                │ imports               │ imports
-        ┌───────▼───────────────────────▼───────────────┐
-        │ llm/ Structured + Chat + Realtime + adapters   │
-        │         ← the ONLY place a vendor SDK appears  │
-        └───────────────────────────────────────────────┘
+        ┌────────────────────────────────────────────────────────┐
+        │ control_plane/   FastAPI routes, storage                │
+        │   api.py → ports.py ← repository.py (SQLite)            │
+        └───┬──────────────┬───────────────────┬─────────────────┘
+            │ imports      │ imports           │ imports
+        ┌───▼──────────┐ ┌─▼────────────────┐ ┌▼─────────────────┐
+        │ expectation_ │ │ candidate_agent/ │ │ evaluation_agent/│
+        │ agent/       │ │                  │ │                  │
+        └───┬──────────┘ └─┬────────────────┘ └┬─────────────────┘
+            │ imports      │ imports           │ imports
+        ┌───▼──────────────▼───────────────────▼─────────────────┐
+        │ llm/ Structured + Chat + Realtime + adapters            │
+        │          ← the ONLY place a vendor SDK appears          │
+        └────────────────────────────────────────────────────────┘
 ```
 
 `ALLOWED_IMPORTS` in `tests/test_architecture.py` is the machine-readable form:
@@ -44,11 +44,16 @@ Ports and adapters, four packages, dependencies pointing one way.
 {"llm": set(),
  "expectation_agent": {"llm"},
  "candidate_agent": {"llm"},
- "control_plane": {"llm", "expectation_agent", "candidate_agent"}}
+ "evaluation_agent": {"llm"},
+ "control_plane": {"llm", "expectation_agent", "candidate_agent", "evaluation_agent"}}
 ```
 
-The two agents are **siblings, not peers in a chain** — neither imports the
-other. `control_plane` composes them.
+The three agents are **siblings, not peers in a chain** — none imports another.
+`control_plane` composes them. This is why `candidate_agent.RUBRIC_CRITERIA`
+re-declares the rubric criterion ids instead of importing them from
+`evaluation_agent`: the archetypes need the vocabulary, and a sibling import to
+get it would be the first crack in the rule. A control-plane test asserts the
+two lists agree.
 
 ## The rules, and where each is enforced
 

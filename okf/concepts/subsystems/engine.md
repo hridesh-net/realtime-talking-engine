@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5
     at: "2026-08-21T21:40:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: draft
 sources:
   - resource: /docs/ENGINE_IMPLEMENTATION_PLAN.md
@@ -28,7 +30,13 @@ interview is, the engine performs it. Design and task breakdown live in
 consumes is specified in [the engine contract](/docs/GO_ENGINE_CONTRACT.md).
 
 **Status: under construction.** Phase 0 (skeleton, ports, contract types,
-config, fakes, layering test, session manager) is the only part that exists.
+config, fakes, layering test, session manager) is the only part that exists as
+working code. The rest of the planned tree — `audio`, `gate`, `judge`, `ledger`,
+`obs`, `record`, `stall`, `store/s3`, `transcriptlog`, `transport/{webrtc,wsfallback}`,
+`vendor/{openairt,openaitx,gemini,geminitts,localasr,thinkerllm}`,
+`controlplane` — is present as `doc.go`-only placeholder packages, each a
+one-line declaration of what will live there, so the layering test already walks
+the final shape.
 
 ## The inversion that shapes everything
 
@@ -91,10 +99,13 @@ vendors / transports / stores  →  ports  ←  session core
 **minor**, because minor bumps are additive and therefore accepted — meaning a
 newer contract can reach an older engine and have its new fields silently
 dropped by the decoder. Features gated on a later minor call `RequireMinor` so a
-version skew fails loudly. This matters most for the planned v1.1 fields
-(precompiled beliefs, stall phrases, pre-gate lexicon, unlock spec): running
-those on a v1.0 code path would fall back to runtime-invented persona beliefs —
-exactly the non-determinism v1.1 exists to remove.
+version skew fails loudly. v1.1 is already taken — by the M1 language line, an
+additive prompt change the engine needed no edit for (its own `contract_test.go`
+covers the case). The behavioural fields the persona library v2 still wants
+(precompiled beliefs, stall phrases, pre-gate lexicon, unlock spec) would now be
+a **v1.2**: running those on an older code path would fall back to
+runtime-invented persona beliefs — exactly the non-determinism they exist to
+remove.
 
 ## Checks
 

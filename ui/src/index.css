@@ -511,6 +511,33 @@ a {
   color: var(--ink-4);
 }
 
+.combo {
+  position: relative;
+}
+
+.combo .menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  z-index: 5;
+  overflow: hidden;
+}
+
+.combo .menu div {
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+.combo .menu div:hover {
+  background: var(--blue-50);
+  color: var(--blue);
+}
+
 .seg {
   display: flex;
   gap: 8px;

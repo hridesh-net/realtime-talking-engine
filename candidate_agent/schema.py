@@ -19,7 +19,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 PERSONA_VERSION = "v1.0"
-ENGINE_CONTRACT_VERSION = "v1.0"
+ENGINE_CONTRACT_VERSION = "v1.1"
 
 
 # ---------------------------------------------------------------------------

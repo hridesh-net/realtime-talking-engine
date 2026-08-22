@@ -42,6 +42,13 @@ Generate Go structs from the schema, or hand-write them to match it.
 **`contract_version`** — pin it. Reject a contract whose major version the
 engine does not implement rather than running a persona you cannot honour.
 
+**Now `v1.1`** (2026-08-22). The minor bump adds a language line at the top of
+`system_prompt`'s `HOW YOU TALK` section and a `language` key to
+`voice_directives`. The engine needs no change — it parses by major version and
+retains the minor, which `contract_test.go` already covers — but a v1.1 persona
+may speak Hinglish or Hindi, so anything the engine does with the transcript
+must not assume English.
+
 **`system_prompt`** — inject verbatim as the realtime model's system
 instruction. It is compiled deterministically in Python from the persona
 (`candidate_agent/engine_contract.py`); the same persona always produces the
@@ -62,6 +69,7 @@ every session starts in character.
 | `may_interrupt` | Whether the persona may barge in on the interviewer |
 | `self_correction_rate` | 0–1, derived from nervousness — mid-sentence restarts |
 | `verbal_tics`, `sample_phrases` | Voice anchors for the realtime model |
+| `language` | **v1.1.** `english_indian` \| `hinglish` \| `hindi`. Set the STT language hint from it — but send **no** hint for `hinglish`: no transcription model accepts a language *set* (verified against the live vendor API, 2026-08-22), and pinning either half mangles the other. |
 
 **`turn_policy`** — turn-taking limits. `target_sentences_per_answer` always
 sits inside `[min_sentences, max_sentences]`; enforce the bounds and treat the

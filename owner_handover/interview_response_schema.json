@@ -37,6 +37,28 @@
       "title": "CandidatePersona",
       "type": "object"
     },
+    "ClarityFact": {
+      "description": "One fact about the role the manager is expected to convey.\n\nThe report counts how many were actually said \u2014 the spec's \"4 of 5 role\nfacts conveyed\". A fact with an empty ``statement`` is not on this\ninterview's checklist and is neither counted nor scored against.",
+      "properties": {
+        "key": {
+          "description": "One of: targets, shifts, location, comp_band, growth_path, next_steps.",
+          "title": "Key",
+          "type": "string"
+        },
+        "statement": {
+          "default": "",
+          "description": "The fact in this interview's terms. Empty means 'not applicable here'.",
+          "maxLength": 300,
+          "title": "Statement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "ClarityFact",
+      "type": "object"
+    },
     "InterviewConfigInput": {
       "description": "Runtime configuration overrides.",
       "properties": {
@@ -57,11 +79,6 @@
           "default": "STANDARD",
           "pattern": "^(STANDARD|DEEP)$",
           "title": "Interview Mode",
-          "type": "string"
-        },
-        "language": {
-          "default": "en",
-          "title": "Language",
           "type": "string"
         }
       },
@@ -129,6 +146,50 @@
     "mode": {
       "title": "Mode",
       "type": "string"
+    },
+    "location": {
+      "default": "",
+      "title": "Location",
+      "type": "string"
+    },
+    "department": {
+      "default": "",
+      "title": "Department",
+      "type": "string"
+    },
+    "manager_level": {
+      "default": "",
+      "title": "Manager Level",
+      "type": "string"
+    },
+    "language": {
+      "default": "english_indian",
+      "title": "Language",
+      "type": "string"
+    },
+    "proctoring": {
+      "default": "off",
+      "title": "Proctoring",
+      "type": "string"
+    },
+    "candidate_notes": {
+      "default": "",
+      "title": "Candidate Notes",
+      "type": "string"
+    },
+    "clarity_facts": {
+      "items": {
+        "$ref": "#/$defs/ClarityFact"
+      },
+      "title": "Clarity Facts",
+      "type": "array"
+    },
+    "report_sections": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "title": "Report Sections",
+      "type": "object"
     },
     "status": {
       "title": "Status",

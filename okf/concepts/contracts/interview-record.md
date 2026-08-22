@@ -24,7 +24,6 @@ class InterviewConfigInput(BaseModel):
     duration_minutes: int = 60          # gt=0, le=180
     question_mode: str = "AI"           # AI | HYBRID | MANUAL
     interview_mode: str = "STANDARD"    # STANDARD | DEEP
-    language: str = "en"
 
 class InterviewCreateRequest(BaseModel):
     job_title: str
@@ -34,22 +33,52 @@ class InterviewCreateRequest(BaseModel):
     experience_level: str               # junior | mid | senior
     company_type: str                   # startup | mnc
     mode: str = "live_interview"        # live_interview | training_interviewer
+    # --- the training-wizard specification's configuration ---
+    location: str = ""                  # where the role is based
+    department: str = ""                # free text; the UI suggests, never constrains
+    manager_level: str = ""             # e.g. "Frontline manager"
+    language: str = "english_indian"    # english_indian | hinglish | hindi
+    proctoring: str = "off"             # off | identity | full — recorded, never enforced
+    candidate_notes: str = ""           # max_length=2000, layered on the archetype
+    clarity_facts: list[ClarityFact] = []          # the role-fact checklist
+    report_sections: dict[str, bool] = REPORT_SECTIONS   # 12 keys, 10 on by default
     config: InterviewConfigInput = ...
     scheduled_at: datetime | None = None
     metadata: dict[str, Any] = {}
 
-class InterviewResponse(BaseModel):
+class InterviewResponse(InterviewCreateRequest-ish):
     id: str                             # uuid4
-    job_title, jd, skills_required, job_location_type,
-    experience_level, company_type, mode: ...
-    status: str                         # scheduled (only value written today)
-    config: InterviewConfigInput
+    status: str                         # scheduled | in_progress | completed | failed | cancelled
     ai_persona: CandidatePersona | None = None    # legacy, training mode only
-    scheduled_at: datetime | None
     created_at: datetime
     start_url: str                      # f"/api/v1/interviews/{id}/start"
-    metadata: dict[str, Any]
 ```
+
+`ClarityFact` lives in [`evaluation_agent.schema`](/concepts/subsystems/evaluation-agent.md),
+not here — the agent that produces it owns the model, and `control_plane` may
+import downward. `REPORT_SECTIONS` is in `control_plane.schemas` because it
+describes what the *console* shows, not what the evaluator computes.
+
+## The three fields that do more than they look like
+
+**`language`** is not a label. It reaches the casting prompt (so `opening_line`
+and `sample_phrases` are written in it), the compiled `system_prompt`'s
+`HOW YOU TALK` section, and the realtime transcription hint. Verified live: a
+`hinglish` interview produces *"Main bahut excited hoon is opportunity ke liye."*
+See [engine contract](/concepts/contracts/engine-contract.md).
+
+**`candidate_notes`** is free text an operator types, which makes it the one
+place in casting where someone could try to talk a persona out of its own
+ceiling. The casting prompt subordinates it explicitly — *"It adds detail; it
+does not replace anything"* — and the knowledge clamp in
+`VirtualCandidateAgent._build_knowledge_map` enforces the band regardless of
+what the note said. `test_operator_notes_cannot_override_the_archetype` covers
+both halves.
+
+**`proctoring` is recorded and never enforced.** No camera is accessed at any
+setting. The field exists so the screen matches the specification and so the
+setting is captured, but identity capture is deliberately deferred until data
+retention is decided. Do not wire a camera to it without that decision.
 
 Every enum-ish field is a Pydantic `pattern`, and the same values are re-asserted
 as SQLite `CHECK` constraints — see [Database schema](/concepts/contracts/database-schema.md).

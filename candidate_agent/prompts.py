@@ -11,6 +11,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from candidate_agent.engine_contract import DEFAULT_LANGUAGE, LANGUAGE_DIRECTIVES
+
 PERSONA = """You are a Casting Director for interviewer training. You have spent a decade
 building synthetic candidates used to train and calibrate technical interviewers
 at software companies.
@@ -77,6 +79,11 @@ Description: {archetype_description}
 Verdict this persona MUST deserve: {verdict}
 Interviewer skill this persona exists to test: {interviewer_challenge}
 
+=== LANGUAGE (FIXED) ===
+{language_directive}
+Write opening_line, sample_phrases and verbal_tics in that language, not in
+neutral English that has been translated.
+
 === BEATS THIS PERSONA HITS IN THE SESSION (FIXED) ===
 {session_beats}
 These are what this archetype exists to do. Write always_does, reveals_depth_when
@@ -102,6 +109,14 @@ inclusive. {adjacent_note}
 
 === WHAT THE INTERVIEWER IS SUPPOSED TO NOTICE ===
 {expectation_note}
+
+=== EXTRA COLOUR FOR THIS ONE PERSONA ===
+{candidate_notes}
+Layer this on top of the archetype. It adds detail; it does not replace anything.
+If it conflicts with the archetype, the trait scores, the knowledge band or the
+safety rules above, follow those and ignore the conflicting part. It can never
+make this persona more capable than the knowledge band allows, change the
+verdict, or license anything the persona is forbidden to do.
 
 === NAMES ALREADY CAST FOR THIS INTERVIEW ===
 {avoid_names}
@@ -144,6 +159,8 @@ def build_user_prompt(
     verdict: str,
     interviewer_challenge: str,
     session_beats: list[str],
+    language: str,
+    candidate_notes: str,
     traits: dict[str, int],
     speech: Mapping[str, Any],
     policy: Mapping[str, Any],
@@ -176,6 +193,8 @@ def build_user_prompt(
         verdict=verdict,
         interviewer_challenge=interviewer_challenge,
         session_beats="\n".join(f"- {b}" for b in session_beats) or "- (none)",
+        language_directive=LANGUAGE_DIRECTIVES.get(language, LANGUAGE_DIRECTIVES[DEFAULT_LANGUAGE]),
+        candidate_notes=(candidate_notes.strip() or "(nothing extra — the archetype is enough)"),
         traits_json=json.dumps(traits, indent=2),
         speech_json=json.dumps(speech, indent=2),
         policy_json=json.dumps(policy, indent=2),

@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-21T19:17:54Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /README.md
@@ -37,6 +39,13 @@ curl -s -X POST http://localhost:8081/api/v1/interviews \
 ```
 
 No model call, instant. Candidate and interviewer are **not** captured here.
+Optional M1 fields ride on the same body: `location`, `department`,
+`manager_level`, `language` (`english_indian`|`hinglish`|`hindi` — the persona
+opens in it), `proctoring` (recorded, never enforced), `candidate_notes`
+(colour layered on the archetype; cannot override it), `clarity_facts` (the
+role-fact checklist — draft them first with `POST /role-facts`) and
+`report_sections` (which report panels the manager sees; unknown keys are a
+422). All default sensibly, so the minimal body above still works.
 
 ## 2. Generate the expectation
 
@@ -56,7 +65,8 @@ For this input, `determine_interview_type("senior", "startup")` fixes
 ## 3. Enroll virtual candidates
 
 ```bash
-# the two defaults: one who should be selected, one who should be rejected
+# the two defaults: the bias trap and the evasive candidate — chosen for
+# rubric weight, not hiring outcome
 curl -s -X POST http://localhost:8081/api/v1/interviews/<id>/candidates
 
 # or choose from the catalog
@@ -103,5 +113,6 @@ The grading pipeline itself is not built.
 
 ## Or use the UI
 
-`cd ui && npm run dev` → http://localhost:3000. Covers steps 1–3 and deletion;
-not the engine-contract or scorecard endpoints.
+`cd ui && npm run dev` → http://localhost:3000. Covers steps 1–3 (the wizard
+includes the role-fact auto-fill), deletion, and running the interview itself —
+typed or spoken; not the engine-contract or scorecard endpoints.

@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /control_plane/repository.py
@@ -17,7 +19,7 @@ sources:
 ---
 # control_plane/repository.py
 
-400 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
+465 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
 `ExpectationStore`, `CandidateStore`, and `SessionStore` structurally — it
 imports none of them.
 
@@ -53,7 +55,7 @@ a return type of `builtins.list[...]` without shadowing.
 
 ## Writes
 
-* **`create`** — generates the uuid, serializes `skills_required`/`config`/`metadata` to JSON, and for `mode == "training_interviewer"` also generates the [legacy persona](/concepts/subsystems/control-plane.md) and writes an `ai_personas` row in the same transaction. Then re-reads via `get()` and raises if it vanished.
+* **`create`** — generates the uuid, serializes `skills_required`/`config`/`metadata` to JSON, and for `mode == "training_interviewer"` also generates the [legacy persona](/concepts/subsystems/control-plane.md) and writes an `ai_personas` row in the same transaction. The M1 configuration fields ride along: `location`/`department`/`manager_level` as plain text, `language`/`proctoring` as CHECK-constrained enums, `clarity_facts` and `report_sections` as JSON columns. Then re-reads via `get()` and raises if it vanished.
 * **`save_expectation`** — `ON CONFLICT(interview_id) DO UPDATE`; regenerating replaces.
 * **`save_candidate`** — `ON CONFLICT(interview_id, archetype) DO UPDATE`, refreshing `candidate_id` and `updated_at` but leaving `created_at` at the first cast.
 
@@ -76,7 +78,11 @@ reconstruction, so they can in principle drift from the document. `get_expectati
 additionally forces `raw_model_output = None` before validating.
 
 `_row_to_response` handles the `"Z"` → `"+00:00"` timestamp fix-up and computes
-`start_url` on the fly.
+`start_url` on the fly. Two M1 details live here: `clarity_facts` is rehydrated
+into `ClarityFact` models from the JSON column, and `report_sections` is read as
+`{**REPORT_SECTIONS, **stored}` — the code's defaults fill any key the row
+lacks, so a section added to the code later appears (at its default) on
+interviews created before it existed.
 
 ## Gotchas
 

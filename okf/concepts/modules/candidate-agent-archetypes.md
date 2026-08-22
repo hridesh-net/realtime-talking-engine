@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T18:40:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /candidate_agent/archetypes.py
@@ -34,9 +36,11 @@ TRAIT_NAMES = ("smartness", "dumbness", "seriousness", "effort",
                "interest", "honesty", "preparedness", "nervousness")
 VERDICTS = ("select", "reject", "borderline")
 
-# The five BRD v3 manager competencies. Re-declared here rather than imported:
-# sibling agent packages never import each other.
-RUBRIC_CRITERIA = ("clarity", "structure", "bias", "experience", "communication")
+# The four manager competencies, from the training-wizard spec. Owned by
+# `evaluation_agent.rubric` (DEFAULT_RUBRIC) and re-declared here: sibling agent
+# packages never import each other, so `test_rubric_vocabulary_agrees_across_the_two_agents`
+# (in the control-plane tests, which sit above both) asserts they never drift.
+RUBRIC_CRITERIA = ("clarity", "structure", "fairness", "communication")
 RUBRIC_LABELS: dict[str, str]        # id -> "Hiring with Clarity", ...
 STRESS_LABELS = ("light", "moderate", "high", "very high")
 
@@ -88,18 +92,18 @@ So a malformed archetype breaks the import, not a request.
 
 | key | label | verdict | band | stresses hardest | adjacent | default |
 |---|---|---|---|---|---|---|
-| `cooperative_trap` | The cooperative candidate | select | 6–8 | bias 4 | | select |
+| `cooperative_trap` | The cooperative candidate | select | 6–8 | fairness 4 | | select |
 | `evasive` | The evasive candidate | reject | 3–5 | structure 4 | | reject |
-| `nervous_fresher` | The nervous fresher | select | 6–8 | communication 4, experience 4 | | |
+| `nervous_fresher` | The nervous fresher | select | 6–8 | communication 4 | | |
 | `inflated_resume` | The inflated resume | reject | 3–5 | structure 4 | | |
 | `comp_first` | The comp-first candidate | borderline | 6–8 | clarity 4 | ✓ | |
 | `defensive` | The defensive candidate | borderline | 5–7 | communication 4 | | |
 | `rambler` | The rambler | borderline | 6–8 | structure 4 | | |
 
 Every archetype carries exactly **4** `must_discover` signals. 2 select, 2
-reject, 3 borderline. A test asserts every rubric criterion is stressed at
-level ≥3 by at least one persona — no manager competency is left without a
-persona that exercises it.
+reject, 3 borderline. `test_the_catalog_covers_every_rubric_criterion` asserts
+every rubric criterion is stressed at level ≥3 by at least one persona — no
+manager competency is left without a persona that exercises it.
 
 `comp_first` is the only one with `allows_adjacent_strength`: they are genuinely
 competent, so the agent lets extra skills through unclamped for it alone.
@@ -122,9 +126,11 @@ for exactly this reason.
 ## `stresses` is advisory
 
 It records which manager competency a persona pressures and how hard, and feeds
-the picker's stress bars. **It scores nothing** — there is no evaluation layer
-yet, and by explicit product decision there is no critical-fail gate on any
-criterion, including bias. Do not reintroduce one.
+the picker's stress bars. **It scores nothing** — the rubric itself now lives in
+[`evaluation_agent.rubric`](/concepts/modules/evaluation-agent-rubric.md), but
+nothing yet scores a session against it, and by explicit product decision there
+is no critical-fail gate on any criterion, fairness included. Do not reintroduce
+one — `test_the_rubric_has_no_critical_fail_gate` guards the decision.
 
 ## Adding an archetype
 

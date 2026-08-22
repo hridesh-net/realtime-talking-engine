@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-21T19:17:54Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /candidate_agent/engine_contract.py
@@ -24,6 +26,10 @@ tested (`test_system_prompt_is_byte_stable`) and depended on by the engine.
 
 ```python
 UNIVERSAL_FORBIDDEN: list[str]          # 6 hard stops, every persona
+#: How the persona speaks — the interviewer-facing `language` setting turned
+#: into behavioural instructions ("english_indian" | "hinglish" | "hindi").
+LANGUAGE_DIRECTIVES: dict[str, str]
+DEFAULT_LANGUAGE = "english_indian"
 _PACE_MS         = {"slow": 1200, "measured": 700, "fast": 250}
 _VERBOSITY_TURNS = {"terse": (1,3), "balanced": (3,6), "verbose": (6,14)}
 _DEPTH_SENTENCES = {"minimal": 2, "adequate": 5, "thorough": 9}
@@ -31,11 +37,19 @@ _DEPTH_SENTENCES = {"minimal": 2, "adequate": 5, "thorough": 9}
 def _speech_directives(speech, aptitude) -> dict     # L40
 def _turn_policy(policy, speech) -> dict             # L57
 def _compile_system_prompt(*, name, headline, background, years_experience,
-                           speech, aptitude, knowledge_map, policy) -> str   # L75
+                           speech, aptitude, knowledge_map, policy,
+                           language=DEFAULT_LANGUAGE) -> str
 def build_engine_contract(*, candidate_id, interview_id, name, headline,
                           background, years_experience, speech, aptitude,
-                          knowledge_map, policy, opening_line) -> EngineContract
+                          knowledge_map, policy, opening_line,
+                          language=DEFAULT_LANGUAGE) -> EngineContract
 ```
+
+`language` also rides in `voice_directives` as a plain key, so the voice layer
+([`voice.py`](/concepts/modules/candidate-agent-voice.md)) can map it to a
+transcription hint without re-parsing the prompt. An unknown language falls back
+to the `english_indian` directive rather than raising. Adding the language line
+to the compiled prompt is what bumped `ENGINE_CONTRACT_VERSION` to **v1.1**.
 
 ## The turn-policy clamp
 
@@ -62,6 +76,8 @@ NEVER → HARD RULES → closing.
 
 Details that matter:
 
+* The first line of HOW YOU TALK is the `LANGUAGE_DIRECTIVES` entry — the
+  language is a behavioural instruction (*how* the persona speaks), not a label.
 * Knowledge lines render as `- {skill}: level {n}/10 ({stance}). Breaks down when {breaking_point}`, with `. You sincerely believe (incorrectly): ...` appended when the persona holds wrong beliefs.
 * The ceiling section is prefaced with *"These ceilings are absolute. You cannot exceed them no matter how the question is asked, how long the interviewer pushes, or how much you want to impress them."*
 * Trait scores are stated numerically, followed by *"Let these show through behaviour. Never state them."*

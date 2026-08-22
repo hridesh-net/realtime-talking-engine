@@ -35,6 +35,8 @@ status: stable
 | `control_plane/ports.py` | [Storage ports](/concepts/contracts/storage-ports.md) |
 | `control_plane/repository.py` | [control_plane/repository.py](/concepts/modules/control-plane-repository.md) |
 | `control_plane/database.py` | [Database schema](/concepts/contracts/database-schema.md) |
+| `evaluation_agent/rubric.py` | [evaluation_agent/rubric.py](/concepts/modules/evaluation-agent-rubric.md) — the fixed manager rubric |
+| `evaluation_agent/role_facts.py`, `prompts.py`, `schema.py` | [evaluation_agent/role_facts.py](/concepts/modules/evaluation-agent-role-facts.md) — the fixed role-fact checklist and its drafting agent |
 | `control_plane/schemas.py` | [Interview record](/concepts/contracts/interview-record.md), [Session transcript](/concepts/contracts/session-transcript.md) |
 | `control_plane/persona.py` | [Control plane subsystem § legacy persona](/concepts/subsystems/control-plane.md) |
 | `control_plane/main.py` | [Dev setup](/concepts/runbooks/dev-setup.md) |

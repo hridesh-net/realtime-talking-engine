@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-21T19:17:54Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /pyproject.toml
@@ -38,7 +40,8 @@ Line length **100**, target **py311**, `ui/` excluded.
 
 ## Types
 
-mypy over `control_plane`, `expectation_agent`, `candidate_agent`, `llm` with
+mypy over `control_plane`, `expectation_agent`, `candidate_agent`,
+`evaluation_agent`, `llm` with
 `disallow_untyped_defs`, `disallow_incomplete_defs`, `check_untyped_defs`,
 `no_implicit_optional`, `warn_unreachable`, `warn_unused_ignores`, plus the
 pydantic plugin. Only `google.*`, `openai.*`, `dotenv.*` are allowed missing

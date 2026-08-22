@@ -11,7 +11,9 @@ from datetime import UTC, datetime
 from candidate_agent.schema import VirtualCandidate
 from control_plane.persona import generate_persona
 from control_plane.schemas import (
+    REPORT_SECTIONS,
     CandidatePersona,
+    ClarityFact,
     InterviewConfigInput,
     InterviewCreateRequest,
     InterviewResponse,
@@ -66,8 +68,11 @@ class InterviewRepository:
                 INSERT INTO interviews (
                     id, job_title, jd, skills_required,
                     job_location_type, experience_level, company_type,
-                    mode, status, ai_persona, config, scheduled_at, metadata, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?, ?)
+                    mode, location, department, manager_level, language, proctoring,
+                    candidate_notes, clarity_facts, report_sections,
+                    status, ai_persona, config, scheduled_at, metadata, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          'scheduled', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     interview_id,
@@ -78,6 +83,14 @@ class InterviewRepository:
                     req.experience_level,
                     req.company_type,
                     req.mode,
+                    req.location,
+                    req.department,
+                    req.manager_level,
+                    req.language,
+                    req.proctoring,
+                    req.candidate_notes,
+                    json.dumps([f.model_dump() for f in req.clarity_facts]),
+                    json.dumps(req.report_sections),
                     ai_persona_json,
                     config_json,
                     (req.scheduled_at.isoformat() if req.scheduled_at else None),
@@ -147,6 +160,14 @@ class InterviewRepository:
             experience_level=row["experience_level"],
             company_type=row["company_type"],
             mode=row["mode"],
+            location=row["location"],
+            department=row["department"],
+            manager_level=row["manager_level"],
+            language=row["language"],
+            proctoring=row["proctoring"],
+            candidate_notes=row["candidate_notes"],
+            clarity_facts=[ClarityFact(**f) for f in json.loads(row["clarity_facts"])],
+            report_sections={**REPORT_SECTIONS, **json.loads(row["report_sections"])},
             status=row["status"],
             config=config,
             ai_persona=ai_persona,

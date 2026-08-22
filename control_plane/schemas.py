@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from evaluation_agent.schema import CLARITY_FACT_KEYS, ClarityFact
 
 
 class InterviewConfigInput(BaseModel):
@@ -14,7 +16,44 @@ class InterviewConfigInput(BaseModel):
     duration_minutes: int = Field(60, gt=0, le=180)
     question_mode: str = Field("AI", pattern="^(AI|HYBRID|MANUAL)$")
     interview_mode: str = Field("STANDARD", pattern="^(STANDARD|DEEP)$")
-    language: str = "en"
+
+
+LANGUAGES = ("english_indian", "hinglish", "hindi")
+
+__all__ = ["CLARITY_FACT_KEYS", "ClarityFact"]  # re-exported for handlers and the schema export
+
+#: The report sections a manager may be shown, and whether they are on by
+#: default. Order is the order they render in. The two `False` entries are the
+#: spec's own defaults: pace and fillers are advisory, and English proficiency
+#: is off because it is not a competency this product assesses.
+REPORT_SECTIONS: dict[str, bool] = {
+    "readiness_index": True,
+    "welcome_greeting": True,
+    "role_explanation": True,
+    "category_scorecard": True,
+    "strengths_gaps": True,
+    "key_moments": True,
+    "question_analysis": True,
+    "bias_check": True,
+    "transcript": True,
+    "next_practice": True,
+    "advisory_pace_fillers": False,
+    "manager_english": False,
+}
+
+
+class RoleFactsRequest(BaseModel):
+    """POST /api/v1/role-facts body.
+
+    Drafts the role-fact checklist from a job description so the wizard can
+    offer the spec's "paste a JD to auto-fill" affordance. Deliberately not part
+    of interview creation: the operator sees the drafts and corrects them before
+    anything is stored, and creating an interview stays a fast, model-free call.
+    """
+
+    job_title: str = Field(..., min_length=1)
+    jd: str = Field(..., min_length=1)
+    location: str = ""
 
 
 class InterviewCreateRequest(BaseModel):
@@ -31,9 +70,46 @@ class InterviewCreateRequest(BaseModel):
     experience_level: str = Field(..., pattern="^(junior|mid|senior)$")
     company_type: str = Field(..., pattern="^(startup|mnc)$")
     mode: str = Field("live_interview", pattern="^(live_interview|training_interviewer)$")
+    location: str = Field("", description="Where the role is based, e.g. Jaipur.")
+    department: str = Field("", description="Free text; the UI suggests, it does not constrain.")
+    manager_level: str = Field("", description='e.g. "Frontline manager".')
+    language: str = Field(
+        "english_indian",
+        pattern="^(english_indian|hinglish|hindi)$",
+        description="The language the persona opens the interview in.",
+    )
+    proctoring: str = Field(
+        "off",
+        pattern="^(off|identity|full)$",
+        description="Recorded on the interview. No camera is accessed at any setting.",
+    )
+    candidate_notes: str = Field(
+        "",
+        max_length=2000,
+        description=(
+            "Extra colour layered on top of the chosen archetype. Cannot override the "
+            "archetype, the knowledge ceiling, or the universal safety rules."
+        ),
+    )
+    clarity_facts: list[ClarityFact] = Field(
+        default_factory=list,
+        description="Left empty, these are extracted from the job description at creation.",
+    )
+    report_sections: dict[str, bool] = Field(
+        default_factory=lambda: dict(REPORT_SECTIONS),
+        description="Which report sections the manager sees. Unknown keys are rejected.",
+    )
     config: InterviewConfigInput = Field(default_factory=InterviewConfigInput)
     scheduled_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("report_sections")
+    @classmethod
+    def _known_sections_only(cls, v: dict[str, bool]) -> dict[str, bool]:
+        unknown = sorted(set(v) - set(REPORT_SECTIONS))
+        if unknown:
+            raise ValueError(f"unknown report sections: {', '.join(unknown)}")
+        return {**REPORT_SECTIONS, **v}
 
 
 class PersonaAttribute(BaseModel):
@@ -65,6 +141,14 @@ class InterviewResponse(BaseModel):
     experience_level: str
     company_type: str
     mode: str
+    location: str = ""
+    department: str = ""
+    manager_level: str = ""
+    language: str = "english_indian"
+    proctoring: str = "off"
+    candidate_notes: str = ""
+    clarity_facts: list[ClarityFact] = Field(default_factory=list)
+    report_sections: dict[str, bool] = Field(default_factory=lambda: dict(REPORT_SECTIONS))
     status: str
     config: InterviewConfigInput
     ai_persona: CandidatePersona | None = None

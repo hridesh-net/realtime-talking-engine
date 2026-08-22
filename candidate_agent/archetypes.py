@@ -38,26 +38,26 @@ TRAIT_NAMES: tuple[str, ...] = (
 
 VERDICTS = ("select", "reject", "borderline")
 
-#: The five manager competencies the report scores (BRD v3). Re-declared here
-#: rather than imported: sibling agent packages never import each other, so when
-#: `evaluation_agent.rubric` lands, a control-plane test asserts the two agree.
-#: There is no critical-fail gate on any of them — the report is an analytical
-#: estimate, and nothing caps or overrides a score.
+#: The manager competencies the report scores. **Re-declared here rather than
+#: imported**: sibling agent packages never import each other, and the
+#: archetypes need the vocabulary to declare what they stress.
+#: `evaluation_agent.rubric` is the owner; `test_rubric_vocabulary_agrees`
+#: in the control-plane tests asserts these two lists never drift apart.
+#: No criterion is a critical-fail gate — the report is an analytical estimate,
+#: and nothing here caps or overrides a score.
 RUBRIC_CRITERIA: tuple[str, ...] = (
     "clarity",
     "structure",
-    "bias",
-    "experience",
+    "fairness",
     "communication",
 )
 
-#: Human labels for the criteria, for the picker's "stresses these skills" panel.
+#: Human labels, for the picker's "stresses these skills" panel.
 RUBRIC_LABELS: dict[str, str] = {
     "clarity": "Hiring with Clarity",
     "structure": "Structured Interviewing",
-    "bias": "Unconscious Bias",
-    "experience": "Candidate Experience",
-    "communication": "Communication & Tone",
+    "fairness": "Fair & Inclusive",
+    "communication": "Communication & Presence",
 }
 
 #: How hard a persona leans on a criterion, 1-4. Rendered as the stress bars.
@@ -247,7 +247,7 @@ _register(
             "Asks about growth as the conversation closes",
             "Never invites a follow-up on the personal detail",
         ],
-        stresses={"bias": 4, "clarity": 3, "experience": 3, "structure": 1, "communication": 1},
+        stresses={"fairness": 4, "clarity": 3, "communication": 2, "structure": 1},
         default_slot="select",
         tags=["bias trap", "compliance ask"],
     )
@@ -332,7 +332,7 @@ _register(
             "Deflects the reason-for-leaving question the first time",
             "Is comfortable letting a silence sit",
         ],
-        stresses={"structure": 4, "communication": 2, "clarity": 2, "experience": 2, "bias": 1},
+        stresses={"structure": 4, "communication": 2, "clarity": 2, "fairness": 1},
         default_slot="reject",
         tags=["evasive", "structure"],
     )
@@ -422,7 +422,7 @@ _register(
             "Reveals a strong, specific story only when drawn out",
             "Asks about training and support near the end",
         ],
-        stresses={"communication": 4, "experience": 4, "structure": 2, "clarity": 2, "bias": 1},
+        stresses={"communication": 4, "structure": 2, "clarity": 2, "fairness": 1},
         tags=["under-confident", "high-signal"],
     )
 )
@@ -507,7 +507,7 @@ _register(
             "Hints at another offer near the close",
             "Asks about the salary band",
         ],
-        stresses={"structure": 4, "clarity": 2, "communication": 2, "experience": 2, "bias": 1},
+        stresses={"structure": 4, "clarity": 2, "communication": 2, "fairness": 1},
         tags=["inflated resume", "structure"],
     )
 )
@@ -593,7 +593,7 @@ _register(
             "Softens when the role is sold well",
             "Names what matters beyond money only if asked",
         ],
-        stresses={"clarity": 4, "structure": 2, "communication": 2, "experience": 2, "bias": 1},
+        stresses={"clarity": 4, "structure": 2, "communication": 2, "fairness": 1},
         allows_adjacent_strength=True,
         tags=["offer-shopping", "clarity"],
     )
@@ -680,7 +680,7 @@ _register(
             "Announces a hard stop near the end",
             "Reveals a withdrawn complaint only under a careful probe",
         ],
-        stresses={"communication": 4, "experience": 3, "structure": 3, "clarity": 2, "bias": 1},
+        stresses={"communication": 4, "structure": 3, "clarity": 2, "fairness": 1},
         tags=["defensive", "hard stop"],
     )
 )
@@ -764,7 +764,7 @@ _register(
             "Loses track of the time",
             "Gives specifics only when pinned down",
         ],
-        stresses={"structure": 4, "communication": 3, "clarity": 2, "experience": 2, "bias": 1},
+        stresses={"structure": 4, "communication": 3, "clarity": 2, "fairness": 1},
         tags=["rambling", "time control"],
     )
 )

@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T18:20:00Z"
+  - by: kimi-code/okf-curator
+    at: "2026-08-22T21:10:00Z"
 status: stable
 sources:
   - resource: /candidate_agent/voice.py
@@ -22,6 +24,9 @@ sources:
 _SPEED     = {"slow": 0.85, "measured": 1.0, "fast": 1.15}
 _EAGERNESS = {"slow": "low", "measured": "medium", "fast": "high"}
 TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
+#: ISO-639-1 hint for the transcriber, per interview language.
+#: "hinglish" maps to None ON PURPOSE — see below.
+_TRANSCRIBE_LANGUAGE = {"english_indian": "en", "hindi": "hi", "hinglish": None}
 
 def pick_voice(candidate_id: str, voices: Sequence[str]) -> str
 def build_realtime_session(contract: EngineContract, *,
@@ -69,6 +74,17 @@ stays quiet.
 
 `test_the_human_can_always_interrupt_and_is_always_transcribed` parametrizes over
 persona shapes to hold both.
+
+## The transcription language hint — and the Hinglish hole
+
+The contract's `voice_directives.language` (v1.1) becomes the transcriber's
+`language` hint via `_TRANSCRIBE_LANGUAGE`. **Hinglish sends no hint at all, on
+purpose.** The vendor's `languages` (plural) parameter is rejected by
+`gpt-4o-mini-transcribe`, `gpt-4o-transcribe` and `whisper-1` alike — verified
+against the live API on 2026-08-22 — so a code-mixed session can only be pinned
+to one language or to none, and pinning either half systematically mangles the
+other. Auto-detection is the least-wrong option until a transcriber accepts a
+language set. When one does, this map is the place to change.
 
 ## The eagerness / speed split
 
