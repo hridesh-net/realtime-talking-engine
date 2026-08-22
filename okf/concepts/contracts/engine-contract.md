@@ -92,18 +92,34 @@ exaggerated unless specifically probed; never end the interview.
 
 Compiled deterministically by `_compile_system_prompt` into fixed sections:
 identity/headline → BACKGROUND → HOW YOU TALK → WHO YOU ARE UNDER THE SURFACE →
-WHAT YOU ACTUALLY KNOW → HOW YOU ANSWER → ALWAYS → NEVER → HARD RULES →
-**REALISM & COMPLIANCE LAYER** (only when the persona carries a
+WHAT YOU ACTUALLY KNOW → HOW YOU ANSWER → ALWAYS → NEVER → **the realism layer**
+(only when the persona carries a
 [`HumanTraitProfile`](/concepts/contracts/virtual-candidate.md), rendered by
-`_realism_section`; empty string, and therefore no section, when absent) → a
-closing instruction that *a convincing bad candidate is the point*.
+`_realism_section`; empty string, and therefore no section, when absent) →
+HARD RULES → a closing instruction that *a convincing bad candidate is the
+point*.
 
-The realism section spells out affect, verbal style, language/accent,
-comprehension quirks, integrity red flags, motivation/negotiation stance, the
-in-character compliance traps to exhibit unprompted (never labelled as traps to
-the persona), the session environment (camera, network, lateness, hard stop),
-and the profile fields — all rendered from code-owned values, same as every
-other section.
+**HARD RULES come last, and the realism layer before them.** The realism layer
+carries the only operator-supplied free text in the prompt (`function`,
+`region`), so it must never be the model's most recent instruction; and its
+environment lines used to contradict the hard rules outright — an
+`ENVIRONMENT: hard stop at minute 20` sitting under *"never end the interview
+yourself"*. The hard-stop directive now states both halves explicitly.
+
+The realism layer renders as: HOW YOU COME ACROSS (affect, verbal style,
+motivation, negotiation stance) → HOW YOU SPEAK AND LISTEN (vocabulary ceiling,
+accent, code-switching, comprehension) → WHAT DOES NOT ADD UP ABOUT YOU
+(integrity red flags) → THINGS YOU DO WITHOUT BEING ASKED (compliance traps,
+never labelled as traps to the persona) → YOUR SITUATION RIGHT NOW (camera,
+lateness, connection, hard stop) → WHO YOU ARE ON PAPER (the profile labels,
+quoted).
+
+Every line is an **instruction the model can act on**, produced by a directive
+table keyed on the taxonomy value — never the token itself, and never a bare
+number. `accent_strength=0.5` becomes *"You have a strong regional accent. Once
+or twice the interviewer has to ask you to repeat a word."* A model cannot act
+on `0.5`. `tests/test_architecture.py` asserts every value the schema accepts
+has a directive, and that no directive merely restates its own key.
 
 **Same persona in, byte-identical prompt out** — true both with and without a
 `human_traits` layer; `_realism_section(None)` returns `""`, so a persona cast

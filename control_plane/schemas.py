@@ -77,16 +77,21 @@ class InterviewResponse(BaseModel):
 class CustomPersonaSpec(BaseModel):
     """One dynamically composed persona.
 
-    Every field's legal values come from ``GET /api/v1/trait-dimensions`` — it
-    mirrors ``candidate_agent.trait_dimensions.compose_archetype`` (the first
-    six fields: skill/verdict mechanics) plus
-    ``compose_human_traits`` (the rest: the §3.2 realism/compliance taxonomy).
+    Mirrors ``candidate_agent.trait_dimensions.compose_custom_persona``. Every
+    field except ``label``, ``function`` and ``region`` takes its legal values
+    from ``GET /api/v1/trait-dimensions``; those three are free text, and are
+    length- and character-constrained here and by
+    ``candidate_agent.schema.PROFILE_TEXT_PATTERN`` because they reach the
+    compiled system prompt verbatim.
+
     Composing is validated exactly like a hand-written archetype — an unknown
     preset or an out-of-vocabulary value fails the request with a 422 rather
-    than casting something malformed.
+    than casting something malformed. The result is validated but never
+    registered: a composed persona belongs to the interview it was cast for.
     """
 
-    label: str
+    #: One line. Reaches the casting prompt, so no newlines and no essay.
+    label: str = Field(..., pattern=r"^[^\r\n]{1,80}$")
     verdict: str = Field(..., pattern="^(select|reject|borderline)$")
     competence: str
     conscientiousness: str

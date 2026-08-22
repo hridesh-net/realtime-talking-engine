@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from candidate_agent import archetypes as archetype_catalog
+from candidate_agent import engine_contract as ec
 from candidate_agent.agent import VirtualCandidateAgent
 from control_plane.api import get_candidate_agent
 from control_plane.main import build_app
@@ -132,10 +133,15 @@ def test_enroll_custom_persona_end_to_end(client, interview_id):
     assert candidate["verdict"] == "borderline"
     assert candidate["human_traits"] is not None
     assert candidate["human_traits"]["affect"] == "defensive"
-    assert "REALISM & COMPLIANCE LAYER" in candidate["engine_contract"]["system_prompt"]
+    assert "HOW YOU COME ACROSS" in candidate["engine_contract"]["system_prompt"]
     # The compliance trap must actually reach the compiled prompt, not just the schema.
     prompt = candidate["engine_contract"]["system_prompt"]
-    assert "protected personal information (marital_status)" in prompt
+    assert (
+        ec.COMPLIANCE_TRAP_DIRECTIVES["volunteers_protected_info"].format(
+            protected_info_type="marital_status"
+        )
+        in prompt
+    )
 
 
 def test_resubmitting_the_same_spec_reuses_the_candidate(client, interview_id):
@@ -199,3 +205,52 @@ def test_no_body_still_enrolls_the_two_defaults(client, interview_id):
     assert res.status_code == 201
     keys = {c["archetype"] for c in res.json()}
     assert keys == set(archetype_catalog.default_keys())
+
+
+def test_a_custom_persona_survives_a_process_restart(tmp_path):
+    """Regression: composed personas used to die on the next deploy.
+
+    The archetype lived only in the process-wide `ARCHETYPES` dict, and
+    `POST /sessions` checked that dict before looking in the database — so an
+    enrolled persona stayed visible in the candidate list while every attempt
+    to start a session against it returned 422 "unknown archetype".
+    """
+    db = str(tmp_path / "restart.db")
+
+    def fresh_client():
+        app = build_app(db)
+        app.dependency_overrides[get_candidate_agent] = lambda: VirtualCandidateAgent(
+            model=FakeModel("fake-1", 0.35)
+        )
+        return TestClient(app)
+
+    first = fresh_client()
+    interview_id = first.post("/api/v1/interviews", json=JOB).json()["id"]
+    enrolled = first.post(
+        f"/api/v1/interviews/{interview_id}/candidates",
+        json={"custom_personas": [VALID_CUSTOM_PERSONA]},
+    )
+    assert enrolled.status_code == 201
+    key = enrolled.json()[0]["archetype"]
+    assert key.startswith("dyn-")
+
+    # Composing must not have grown the catalog, in this process or any other.
+    assert key not in archetype_catalog.ARCHETYPES
+    assert key not in {
+        a["key"] for a in first.get("/api/v1/candidate-archetypes").json()["archetypes"]
+    }
+
+    # A second process: same database, empty in-memory catalog.
+    second = fresh_client()
+    assert [
+        c["archetype"] for c in second.get(f"/api/v1/interviews/{interview_id}/candidates").json()
+    ] == [key]
+
+    started = second.post("/api/v1/sessions", json={"interview_id": interview_id, "archetype": key})
+    assert started.status_code == 201, started.text
+
+    # A key that was never enrolled is still rejected.
+    missing = second.post(
+        "/api/v1/sessions", json={"interview_id": interview_id, "archetype": "dyn-000000000000"}
+    )
+    assert missing.status_code == 422

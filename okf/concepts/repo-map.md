@@ -64,7 +64,7 @@ status: stable
 | Change | Read first |
 |---|---|
 | Add a candidate archetype | [archetypes.py](/concepts/modules/candidate-agent-archetypes.md) — and note the OCP test proves no agent edit is needed |
-| Compose a persona from presets instead of hand-writing an archetype | [trait_dimensions.py](/concepts/subsystems/candidate-agent.md) — `compose_archetype`/`register_dynamic` for the skill/verdict axis, `compose_human_traits` for the §3.2 realism/compliance taxonomy |
+| Compose a persona from presets instead of hand-writing an archetype | [trait_dimensions.py](/concepts/subsystems/candidate-agent.md) — `compose_archetype` for the skill/verdict axis, `compose_human_traits` for the realism/compliance taxonomy, `compose_custom_persona` for both at once |
 | Add an LLM provider | [llm/factory.py](/concepts/modules/llm-factory.md), [StructuredModel](/concepts/contracts/structured-model.md) |
 | Change what the persona prompt says | [engine_contract.py](/concepts/modules/candidate-agent-engine-contract.md) — **bump `ENGINE_CONTRACT_VERSION`** |
 | Change phase durations, criteria, or flags | [rubric.py](/concepts/modules/expectation-agent-rubric.md) |

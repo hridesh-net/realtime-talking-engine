@@ -1092,7 +1092,7 @@ details.raw pre {
   }
 }
 
-/* --- custom persona composer (§3.2 taxonomy) --- */
+/* --- custom persona composer (realism taxonomy) --- */
 
 .composer-layout {
   display: grid;
@@ -1135,6 +1135,15 @@ details.raw pre {
 .composer-preview {
   position: sticky;
   top: 16px;
+}
+
+/* The behaviour a taxonomy value actually produces. Shown, not hidden in a
+   tooltip: "tangential" and "rambling" are indistinguishable as labels. */
+.field-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-3);
 }
 
 .chip-row {

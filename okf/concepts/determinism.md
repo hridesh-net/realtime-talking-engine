@@ -46,7 +46,15 @@ Two independent requirements force it:
 | Answer policy defaults (depth, on-unknown, on-pressure, on-silence) | `reveals_depth_when`, `always_does`, `never_does` |
 | The compiled engine contract and system prompt | `opening_line` |
 | Resume-claim truthfulness enum validation | The claims themselves |
-| Every §3.2 taxonomy value (`HumanTraitProfile`, when present) — affect, verbal style, language/comprehension numbers, motivation, negotiation stance, compliance traps, environment, profile | Nothing — the model never sees or authors `human_traits`; it is composed by `trait_dimensions.compose_human_traits` from fixed presets before the call and injected into the compiled prompt after |
+| Every realism-taxonomy value (`HumanTraitProfile`, when present) — affect, verbal style, language/comprehension, motivation, negotiation stance, compliance traps, environment, profile — **and the behavioural directive each one compiles to** | Nothing — the model never sees or authors `human_traits`; it is composed by `trait_dimensions.compose_human_traits` from fixed presets before the call and injected into the compiled prompt after |
+
+A taxonomy value is only code-owned if the *behaviour* is. Emitting
+`affect: flirtatious_inappropriate` into the prompt looks deterministic — the
+same persona compiles the same bytes — but it hands the model an underscore-
+joined token and lets it decide what that means, which is authoring persona
+behaviour by another route. Every value therefore renders through a directive
+table in `candidate_agent/engine_contract.py`, and a test asserts no directive
+restates its own key.
 
 Enforcement is not by prompt alone — the agent **re-imposes** the code side after
 the call:

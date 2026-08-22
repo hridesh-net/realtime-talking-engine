@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from candidate_agent import archetypes as archetype_catalog
 from candidate_agent import trait_dimensions
 from candidate_agent.agent import VirtualCandidateAgent
+from candidate_agent.archetypes import Archetype
 from candidate_agent.schema import (
     EngineContract,
     HumanTraitProfile,
@@ -172,56 +170,18 @@ def list_trait_dimensions() -> dict[str, object]:
     return trait_dimensions.dimension_catalog()
 
 
-def _dynamic_archetype_key(spec: CustomPersonaSpec) -> str:
-    """Deterministic key for a composed archetype — same spec, same key."""
-    digest = hashlib.sha256(json.dumps(spec.model_dump(), sort_keys=True).encode()).hexdigest()
-    return f"dyn-{digest[:12]}"
+def _compose_custom_persona(spec: CustomPersonaSpec) -> trait_dimensions.CustomPersona:
+    """Compose one custom persona, turning a bad spec into a 422.
 
-
-def _register_custom_persona(spec: CustomPersonaSpec) -> tuple[str, HumanTraitProfile]:
-    """Compose and register one custom persona's archetype + human traits.
-
-    Raises `HTTPException(422)` on an unknown preset or out-of-vocabulary
-    value instead of letting a malformed spec reach `agent.generate`.
+    Composition itself lives in `candidate_agent.trait_dimensions`; this only
+    translates its failures into the transport's vocabulary.
     """
-    key = _dynamic_archetype_key(spec)
     try:
-        if key not in archetype_catalog.ARCHETYPES:
-            trait_dimensions.register_dynamic(
-                key=key,
-                label=spec.label,
-                verdict=spec.verdict,
-                competence=spec.competence,
-                conscientiousness=spec.conscientiousness,
-                communication=spec.communication,
-                emotional_stance=spec.emotional_stance,
-                honesty=spec.honesty,
-                bias_trap=spec.bias_trap,
-            )
-        human_traits = trait_dimensions.compose_human_traits(
-            affect=spec.affect,
-            verbal_style=spec.verbal_style,
-            language=spec.language,
-            comprehension=spec.comprehension,
-            motivation=spec.motivation,
-            negotiation_stance=spec.negotiation_stance,
-            environment=spec.environment,
-            seniority=spec.seniority,
-            function=spec.function,
-            region=spec.region,
-            gender_presentation=spec.gender_presentation,
-            age_band=spec.age_band,
-            notice_period=spec.notice_period,
-            compliance_traps=spec.compliance_traps,
-            protected_info_type=spec.protected_info_type,
-            integrity_red_flags=spec.integrity_red_flags,
-            offers_in_hand=spec.offers_in_hand,
-        )
+        return trait_dimensions.compose_custom_persona(**spec.model_dump())
     except (trait_dimensions.UnknownPresetError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
-    return key, human_traits
 
 
 @router.post(
@@ -256,12 +216,18 @@ async def enroll_candidates(
             detail=f"unknown archetypes: {', '.join(unknown)}",
         )
 
-    # Fixed-catalog keys carry no human_traits; custom specs compose both a
-    # one-off archetype (registered under a content-addressed key, so casting
-    # the same spec twice reuses it) and a human-trait profile.
-    casts: list[tuple[str, HumanTraitProfile | None]] = [(k, None) for k in keys]
+    # Fixed-catalog keys resolve through the catalog and carry no human_traits.
+    # A custom spec composes both layers here and carries its own archetype: it
+    # is validated exactly like a catalog entry but never registered, so it
+    # cannot leak into another interview's picker or grow the catalog without
+    # bound. Its key is content-addressed, so re-submitting the same spec
+    # resolves to the persona already enrolled.
+    casts: list[tuple[str, Archetype | None, HumanTraitProfile | None]] = [
+        (k, None, None) for k in keys
+    ]
     for spec in req.custom_personas or []:
-        casts.append(_register_custom_persona(spec))
+        composed = _compose_custom_persona(spec)
+        casts.append((composed.key, composed.archetype, composed.human_traits))
 
     # The expectation grounds personas in the flags the interviewer is watching
     # for. Optional — enrollment must not require it.
@@ -271,7 +237,7 @@ async def enroll_candidates(
     # Independent generations converge on the same names, which makes a training
     # set confusing. Feed each cast the names already taken.
     taken: list[str] = [c.name for c in repo.list_candidates(interview_id)]
-    for key, human_traits in casts:
+    for key, archetype, human_traits in casts:
         existing = repo.get_candidate_by_archetype(interview_id, key)
         if existing and not req.regenerate:
             results.append(existing)
@@ -293,6 +259,7 @@ async def enroll_candidates(
                 seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
                 avoid_names=taken,
                 human_traits=human_traits,
+                archetype=archetype,
             )
         except ModelError as exc:
             # A casting failure is the provider's answer, not a bug in this
@@ -390,14 +357,21 @@ async def start_session(
     interview = repo.get(req.interview_id)
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
-    if req.archetype not in archetype_catalog.ARCHETYPES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"unknown archetype: {req.archetype}",
-        )
-
+    # Look in the database before the catalog. An already-enrolled persona is
+    # fully described by its stored record, and a custom-composed one is only
+    # ever in the database — its archetype was validated at enrollment and
+    # deliberately not registered, so requiring a catalog entry here would make
+    # every composed persona unusable the moment the process restarted.
     candidate = repo.get_candidate_by_archetype(req.interview_id, req.archetype)
     if candidate is None:
+        if req.archetype not in archetype_catalog.ARCHETYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"unknown archetype: {req.archetype}. Custom personas must be enrolled "
+                    "through POST /interviews/{id}/candidates before a session can start."
+                ),
+            )
         try:
             candidate = await agent.generate(
                 interview_id=req.interview_id,

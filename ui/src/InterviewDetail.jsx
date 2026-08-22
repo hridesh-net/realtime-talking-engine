@@ -390,7 +390,7 @@ function HumanTraits({ traits }) {
   ]
   return (
     <details className="human-traits" open>
-      <summary>Human traits (§3.2 taxonomy)</summary>
+      <summary>Human traits (realism taxonomy)</summary>
       <div className="row">
         <span className="pill">{traits.affect}</span> <span className="pill">{traits.verbal_style}</span>{' '}
         <span className="pill">{traits.motivation}</span> <span className="pill">{traits.negotiation_stance}</span>

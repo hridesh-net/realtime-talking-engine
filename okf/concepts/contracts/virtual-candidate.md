@@ -46,7 +46,7 @@ class VirtualCandidate(BaseModel):
     answer_policy: AnswerPolicy
     interviewer_scorecard: InterviewerScorecard
     engine_contract: EngineContract
-    human_traits: HumanTraitProfile | None = None   # §3.2 taxonomy layer, optional
+    human_traits: HumanTraitProfile | None = None   # realism taxonomy layer, optional
 
     fingerprint: str             # integrity — moves on every re-cast
     seed_fingerprint: str        # reproducibility — stable across re-casts
@@ -107,7 +107,7 @@ Everything else is computed. See [the determinism split](/concepts/determinism.m
 * Scorecard items iterate the archetype, so invented ids vanish and weights are always the catalog's.
 * Falsy model output falls back to archetype text rather than empty strings.
 
-## `HumanTraitProfile` — the §3.2 taxonomy layer (`PERSONA_VERSION` "v1.1")
+## `HumanTraitProfile` — the realism taxonomy layer (`PERSONA_VERSION` "v1.1")
 
 Optional, `None` on every persona cast before this layer existed. Orthogonal
 to everything above: the archetype decides whether the candidate can do the
@@ -125,7 +125,7 @@ authored or seen by the model. Ten dimensions, matching the taxonomy exactly:
 * `environment: EnvironmentProfile` — camera_behavior, network_drops_at_minute, background_noise, joins_late_minutes, mobile_or_driving, hard_stop_minute.
 * `seniority`, `function`, `region`, `gender_presentation`, `age_band`, `notice_period`, `offers_in_hand` — profile/identity fields, free text except `offers_in_hand` (int).
 
-When present, it renders as a "REALISM & COMPLIANCE LAYER" section appended to
+When present, it renders as the realism layer inside
 the compiled system prompt — see
 [EngineContract](/concepts/contracts/engine-contract.md). When absent, the
 compiled prompt is byte-identical to a persona cast before this field existed.

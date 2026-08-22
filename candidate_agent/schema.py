@@ -90,8 +90,16 @@ class AnswerPolicy(BaseModel):
     never_does: list[str] = Field(default_factory=list)
 
 
+#: Free-text profile fields reach the compiled system prompt verbatim, so they
+#: are constrained to a single short line of ordinary characters. The closed
+#: vocabularies elsewhere in this model come from the directive tables in
+#: `candidate_agent.engine_contract`; a test asserts the two stay in step.
+#: (Re-declared rather than imported — `engine_contract` imports this module.)
+PROFILE_TEXT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 &'./-]{0,39}$"
+
+
 class EnvironmentProfile(BaseModel):
-    """Session-logistics realism — the 'Environment' row of the §3.2 taxonomy."""
+    """Session-logistics realism — the 'Environment' row of the realism taxonomy."""
 
     camera_behavior: str = Field(..., pattern="^(on|off|toggling)$")
     network_drops_at_minute: int | None = Field(default=None, ge=0)
@@ -102,7 +110,7 @@ class EnvironmentProfile(BaseModel):
 
 
 class HumanTraitProfile(BaseModel):
-    """The generic human-candidate trait dimensions (BRD §3.2 taxonomy).
+    """The generic human-candidate trait dimensions (the realism taxonomy).
 
     Orthogonal to the archetype's skill/verdict mechanics — this is the
     realism, communication, and compliance-training layer. Entirely
@@ -174,12 +182,17 @@ class HumanTraitProfile(BaseModel):
 
     environment: EnvironmentProfile
 
-    seniority: str
-    function: str
-    region: str
-    gender_presentation: str
-    age_band: str
-    notice_period: str
+    seniority: str = Field(..., pattern="^(fresher|junior|mid|senior|lead|manager)$")
+    gender_presentation: str = Field(..., pattern="^(woman|man|non_binary|unspecified)$")
+    age_band: str = Field(..., pattern=r"^(18-24|25-34|35-44|45-54|55\+)$")
+    notice_period: str = Field(..., pattern="^(immediate|15_days|30_days|60_days|90_days)$")
+    #: Genuinely open — an org has more regions and functions than a closed list
+    #: can hold. Constrained instead: no newlines, no control characters, and
+    #: short enough that nothing sentence-shaped fits. Both are rendered quoted
+    #: and *above* the hard rules in the compiled prompt, so a value that does
+    #: get creative still cannot displace them.
+    function: str = Field(..., pattern=PROFILE_TEXT_PATTERN)
+    region: str = Field(..., pattern=PROFILE_TEXT_PATTERN)
     offers_in_hand: int = Field(default=0, ge=0)
 
 
@@ -246,7 +259,7 @@ class VirtualCandidate(BaseModel):
     answer_policy: AnswerPolicy
     interviewer_scorecard: InterviewerScorecard
     engine_contract: EngineContract
-    #: Optional §3.2 taxonomy layer — realism, communication, and compliance
+    #: Optional realism-taxonomy layer — realism, communication, and compliance
     #: training dimensions, orthogonal to the archetype's skill/verdict axis.
     human_traits: HumanTraitProfile | None = None
 

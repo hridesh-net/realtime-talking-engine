@@ -3,11 +3,13 @@
 Pure composition — no model calls. Verifies that composing from presets is
 held to the same guarantees as a hand-written archetype (trait coverage,
 legal verdict, must_discover weights summing to 1.0), that unknown presets
-fail loudly, and that the §3.2 taxonomy vocabulary is enforced by
+fail loudly, and that the realism-taxonomy vocabulary is enforced by
 HumanTraitProfile's own validation.
 """
 
 from __future__ import annotations
+
+import dataclasses
 
 import pydantic
 import pytest
@@ -59,11 +61,18 @@ def test_compose_archetype_without_bias_trap_falls_back_to_generic_signal():
     "verdict",
     ["select", "reject", "borderline"],
 )
-def test_register_dynamic_registers_into_the_shared_catalog(verdict):
-    key = f"test-register-{verdict}"
-    td.register_dynamic(
+def test_composing_never_touches_the_shared_catalog(verdict):
+    """A composed persona belongs to one interview, not to the catalog.
+
+    Registering it would leak it into every other interview's picker, grow the
+    process-wide dict without bound, and — since that dict is memory and the
+    candidate row is not — strand the persona on the next restart.
+    """
+    before = dict(catalog.ARCHETYPES)
+    key = f"test-compose-{verdict}"
+    a = td.compose_archetype(
         key=key,
-        label="Registered",
+        label="Composed",
         verdict=verdict,
         competence="solid",
         conscientiousness="diligent",
@@ -71,8 +80,103 @@ def test_register_dynamic_registers_into_the_shared_catalog(verdict):
         emotional_stance="composed",
         honesty="transparent",
     )
-    assert key in catalog.ARCHETYPES
-    assert catalog.get(key).verdict == verdict
+    assert a.verdict == verdict
+    assert key not in catalog.ARCHETYPES
+    assert before == catalog.ARCHETYPES
+    assert key not in {entry["key"] for entry in catalog.catalog()}
+
+
+def test_composed_archetypes_clear_the_catalog_validator_itself():
+    """`compose_archetype` runs the catalog's own validator, not a looser one."""
+    a = td.compose_archetype(
+        key="test-validated",
+        label="Composed",
+        verdict="borderline",
+        competence="weak",
+        conscientiousness="low_effort",
+        communication="guarded",
+        emotional_stance="nervous",
+        honesty="bluffing",
+        bias_trap="career_gap",
+    )
+    assert catalog.validate_archetype(a) is a
+
+
+def test_stresses_are_derived_from_the_chosen_presets_not_constant():
+    """The stress bars and "next practice" only mean something if they vary."""
+    hard = td.compose_archetype(
+        key="a",
+        label="x",
+        verdict="borderline",
+        competence="weak",
+        conscientiousness="low_effort",
+        communication="guarded",
+        emotional_stance="nervous",
+        honesty="bluffing",
+        bias_trap="career_gap",
+    )
+    easy = td.compose_archetype(
+        key="b",
+        label="x",
+        verdict="borderline",
+        competence="expert",
+        conscientiousness="diligent",
+        communication="direct",
+        emotional_stance="composed",
+        honesty="transparent",
+    )
+    assert hard.stresses != easy.stresses
+    assert hard.stresses["bias"] == 4
+    assert easy.stresses["bias"] == 1
+    assert hard.stresses["communication"] > easy.stresses["communication"]
+    for stresses in (hard.stresses, easy.stresses):
+        assert set(stresses) == set(catalog.RUBRIC_CRITERIA)
+        assert all(1 <= v <= 4 for v in stresses.values())
+
+
+def test_a_preset_table_typo_is_caught_rather_than_composed_silently():
+    """Before this, a misspelt preset key composed a persona that spoke wrong.
+
+    Two guards stand in the way now: `compose_archetype` reads every speech
+    field by name, so a renamed key raises here; and `validate_archetype`
+    checks the shape of the result, so a hand-built one cannot slip past either
+    — TypedDict keys are erased at runtime and check nothing on their own.
+    """
+    original = dict(td.COMMUNICATION["direct"]["speech"])
+    try:
+        td.COMMUNICATION["direct"]["speech"]["tonee"] = td.COMMUNICATION["direct"]["speech"].pop(
+            "tone"
+        )
+        with pytest.raises(KeyError):
+            td.compose_archetype(
+                key="typo",
+                label="x",
+                verdict="select",
+                competence="solid",
+                conscientiousness="adequate",
+                communication="direct",
+                emotional_stance="composed",
+                honesty="transparent",
+            )
+    finally:
+        td.COMMUNICATION["direct"]["speech"] = original  # type: ignore[typeddict-item]
+
+
+def test_validate_archetype_rejects_a_malformed_speech_shape():
+    good = td.compose_archetype(
+        key="shape",
+        label="x",
+        verdict="select",
+        competence="solid",
+        conscientiousness="adequate",
+        communication="direct",
+        emotional_stance="composed",
+        honesty="transparent",
+    )
+    broken_speech = dict(good.speech)
+    broken_speech["tonee"] = broken_speech.pop("tone")
+    with pytest.raises(ValueError, match="speech keys"):
+        catalog.validate_archetype(dataclasses.replace(good, speech=broken_speech))
 
 
 @pytest.mark.parametrize(

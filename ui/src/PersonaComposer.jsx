@@ -2,11 +2,20 @@ import { useEffect, useState } from 'react'
 import { listTraitDimensions } from './api'
 
 /**
- * Compose a brand-new persona from the BRD §3.2 trait taxonomy instead of
- * picking a fixed archetype. Every dropdown/checkbox option comes from
- * GET /trait-dimensions, never hardcoded here — the taxonomy's vocabulary is
- * validated server-side (candidate_agent/trait_dimensions.py), so a stale
- * client-side copy can never drift into something the server rejects.
+ * Compose a brand-new persona from the candidate-realism taxonomy instead of
+ * picking a fixed archetype. Every option comes from GET /trait-dimensions,
+ * never hardcoded here — the vocabulary is validated server-side
+ * (candidate_agent/trait_dimensions.py), so a stale client-side copy can never
+ * drift into something the server rejects.
+ *
+ * Two exceptions, and they are deliberate: `function` and `region` are free
+ * text, because no fixed list survives contact with a real org chart. Both
+ * reach the compiled system prompt, so both are length-capped here and pattern-
+ * checked server-side by PROFILE_TEXT_PATTERN. Everything else is a closed set.
+ *
+ * Where the server ships a value -> behaviour map, the behaviour is shown. A
+ * dropdown reading "tangential" or "jargon_flooder" gives whoever is composing
+ * a persona no way to tell those apart; the sentence does.
  */
 
 // The radar chart plots the *actually selected* preset for this persona, not
@@ -75,6 +84,13 @@ const EMPTY_PERSONA = {
   protected_info_type: '',
   integrity_red_flags: [],
   offers_in_hand: 0,
+}
+
+// A preset table's value is either the hint string itself (the directive
+// tables, communication, bias_trap) or {text, score} (the scored dimensions).
+const hintText = (options, key) => {
+  const value = options?.[key]
+  return typeof value === 'object' ? value?.text : value
 }
 
 function RadarChart({ axes, size = 220 }) {
@@ -158,13 +174,17 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
           communication: Object.keys(d.communication)[0],
           emotional_stance: Object.keys(d.emotional_stance)[0],
           honesty: Object.keys(d.honesty)[0],
-          affect: d.affect[0],
-          verbal_style: d.verbal_style[0],
+          affect: Object.keys(d.affect)[0],
+          verbal_style: Object.keys(d.verbal_style)[0],
           language: Object.keys(d.language)[0],
           comprehension: Object.keys(d.comprehension)[0],
-          motivation: d.motivation[0],
-          negotiation_stance: d.negotiation_stance[0],
+          motivation: Object.keys(d.motivation)[0],
+          negotiation_stance: Object.keys(d.negotiation_stance)[0],
           environment: Object.keys(d.environment)[0],
+          seniority: d.seniority[0],
+          gender_presentation: d.gender_presentation[0],
+          age_band: d.age_band[0],
+          notice_period: d.notice_period[0],
         }))
       })
       .catch((e) => setError(e.message))
@@ -226,16 +246,31 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
                 {v}
               </option>
             ))
-          : Object.entries(options).map(([k, v]) => (
-              <option
-                key={k}
-                value={k}
-                title={withHint ? (typeof v === 'object' ? v.text : v) : undefined}
-              >
+          : Object.keys(options).map((k) => (
+              <option key={k} value={k}>
                 {k}
               </option>
             ))}
       </select>
+      {withHint && !Array.isArray(options) && hintText(options, form[key]) && (
+        <p className="field-hint">{hintText(options, form[key])}</p>
+      )}
+    </div>
+  )
+
+  // The exact instruction the persona will receive for a checkbox value.
+  const chipRow = (key, options) => (
+    <div className="chip-row">
+      {Object.entries(options).map(([v, directive]) => (
+        <label key={v} className="chip-checkbox" title={directive.replace("{protected_info_type}", "the type selected below")}>
+          <input
+            type="checkbox"
+            checked={form[key].includes(v)}
+            onChange={() => toggle(key, v)}
+          />
+          {v}
+        </label>
+      ))}
     </div>
   )
 
@@ -249,6 +284,7 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
             <input
               value={form.label}
               onChange={set('label')}
+              maxLength={80}
               placeholder="e.g. Guarded network technician, career gap"
             />
           </div>
@@ -288,8 +324,8 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
           </div>
 
           <div className="field-row">
-            {selectField('Affect / disposition', 'affect', dims.affect)}
-            {selectField('Verbal style', 'verbal_style', dims.verbal_style)}
+            {selectField('Affect / disposition', 'affect', dims.affect, true)}
+            {selectField('Verbal style', 'verbal_style', dims.verbal_style, true)}
           </div>
 
           <div className="field-row">
@@ -298,24 +334,13 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
           </div>
 
           <div className="field-row">
-            {selectField('Motivation', 'motivation', dims.motivation)}
-            {selectField('Negotiation stance', 'negotiation_stance', dims.negotiation_stance)}
+            {selectField('Motivation', 'motivation', dims.motivation, true)}
+            {selectField('Negotiation stance', 'negotiation_stance', dims.negotiation_stance, true)}
           </div>
 
           <div className="field">
             <label>Compliance traps</label>
-            <div className="chip-row">
-              {dims.compliance_traps.map((v) => (
-                <label key={v} className="chip-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={form.compliance_traps.includes(v)}
-                    onChange={() => toggle('compliance_traps', v)}
-                  />
-                  {v}
-                </label>
-              ))}
-            </div>
+            {chipRow('compliance_traps', dims.compliance_traps)}
           </div>
 
           {form.compliance_traps.includes('volunteers_protected_info') && (
@@ -334,51 +359,38 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
 
           <div className="field">
             <label>Integrity red flags</label>
-            <div className="chip-row">
-              {dims.integrity_red_flags.map((v) => (
-                <label key={v} className="chip-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={form.integrity_red_flags.includes(v)}
-                    onChange={() => toggle('integrity_red_flags', v)}
-                  />
-                  {v}
-                </label>
-              ))}
-            </div>
+            {chipRow('integrity_red_flags', dims.integrity_red_flags)}
           </div>
 
           {selectField('Environment', 'environment', Object.keys(dims.environment))}
 
           <div className="field-row">
-            <div className="field">
-              <label>Seniority</label>
-              <input value={form.seniority} onChange={set('seniority')} />
-            </div>
+            {selectField('Seniority', 'seniority', dims.seniority)}
             <div className="field">
               <label>Function</label>
-              <input value={form.function} onChange={set('function')} placeholder="network, sales, ..." />
+              <input
+                value={form.function}
+                onChange={set('function')}
+                maxLength={40}
+                placeholder="network, sales, ..."
+              />
             </div>
           </div>
           <div className="field-row">
             <div className="field">
               <label>Region</label>
-              <input value={form.region} onChange={set('region')} />
+              <input
+                value={form.region}
+                onChange={set('region')}
+                maxLength={40}
+                placeholder="UP, Karnataka, ..."
+              />
             </div>
-            <div className="field">
-              <label>Gender presentation</label>
-              <input value={form.gender_presentation} onChange={set('gender_presentation')} />
-            </div>
+            {selectField('Gender presentation', 'gender_presentation', dims.gender_presentation)}
           </div>
           <div className="field-row">
-            <div className="field">
-              <label>Age band</label>
-              <input value={form.age_band} onChange={set('age_band')} placeholder="25-34" />
-            </div>
-            <div className="field">
-              <label>Notice period</label>
-              <input value={form.notice_period} onChange={set('notice_period')} />
-            </div>
+            {selectField('Age band', 'age_band', dims.age_band)}
+            {selectField('Notice period', 'notice_period', dims.notice_period)}
           </div>
           <div className="field">
             <label>Offers in hand</label>

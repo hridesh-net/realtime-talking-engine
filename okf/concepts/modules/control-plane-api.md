@@ -38,19 +38,24 @@ Handlers, in order: `create_interview`, `get_interview`, `list_interviews`,
 `take_turn`, `end_session`, `get_session`, `voice_capability`,
 `mint_realtime_credential`, `append_transcript_turn`.
 
-Two module-level helpers back `enroll_candidates`'s `custom_personas` path:
+One module-level helper backs `enroll_candidates`'s `custom_personas` path:
 
 ```python
-def _dynamic_archetype_key(spec: CustomPersonaSpec) -> str      # sha256(spec)[:12], "dyn-" prefixed
-def _register_custom_persona(spec) -> tuple[str, HumanTraitProfile | None]
+def _compose_custom_persona(spec: CustomPersonaSpec) -> trait_dimensions.CustomPersona
 ```
 
-`_register_custom_persona` composes a spec via
-`trait_dimensions.compose_archetype`/`register_dynamic` and
-`compose_human_traits`, catching `UnknownPresetError` and `ValueError`
-(pydantic's `ValidationError` is a `ValueError` subclass) and re-raising as
-`HTTPException(422)` — a malformed custom persona never reaches
-`agent.generate`, and therefore never costs a model call.
+It is deliberately thin. Content-addressing the spec and composing both trait
+layers is domain work and lives in `candidate_agent.trait_dimensions`; this
+handler only translates `UnknownPresetError` and `ValueError` (pydantic's
+`ValidationError` is a `ValueError` subclass) into `HTTPException(422)` — a
+malformed custom persona never reaches `agent.generate`, and therefore never
+costs a model call.
+
+`start_session` looks the persona up in the **database before the catalog**. A
+composed archetype is never registered, so a catalog-first check made every
+custom persona unusable the moment the process restarted — the candidate row
+survived, the archetype did not, and the session returned 422. The catalog is
+consulted only when nothing is enrolled and the persona has to be cast.
 
 ## Dependency injection
 

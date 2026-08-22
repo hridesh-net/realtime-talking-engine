@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from candidate_agent import engine_contract as ec
 from candidate_agent.schema import (
     AnswerPolicy,
     AptitudeProfile,
@@ -383,18 +384,21 @@ def _seed_custom_persona(repo: InterviewRepository) -> tuple[str, str]:
     )
 
     key = "dyn-test-session-key"
-    if key not in archetype_catalog.ARCHETYPES:
-        td.register_dynamic(
-            key=key,
-            label="Custom session-test persona",
-            verdict="borderline",
-            competence="developing",
-            conscientiousness="adequate",
-            communication="guarded",
-            emotional_stance="defensive",
-            honesty="embellishing",
-            bias_trap="career_gap",
-        )
+    td.compose_archetype(
+        key=key,
+        label="Custom session-test persona",
+        verdict="borderline",
+        competence="developing",
+        conscientiousness="adequate",
+        communication="guarded",
+        emotional_stance="defensive",
+        honesty="embellishing",
+        bias_trap="career_gap",
+    )
+    # Composing does not register: the session has to work off the stored
+    # candidate alone, which is the whole point of the lookup order in
+    # `start_session`.
+    assert key not in archetype_catalog.ARCHETYPES
     human_traits = td.compose_human_traits(
         affect="defensive",
         verbal_style="monosyllabic",
@@ -561,8 +565,13 @@ def test_session_round_trip_with_a_custom_composed_persona(client, repo):
     assert turn.json()["speaker"] == "candidate"
 
     assert captured.system is not None
-    assert "REALISM & COMPLIANCE LAYER" in captured.system
-    assert "protected personal information (marital_status)" in captured.system
+    assert "HOW YOU COME ACROSS" in captured.system
+    assert (
+        ec.COMPLIANCE_TRAP_DIRECTIVES["volunteers_protected_info"].format(
+            protected_info_type="marital_status"
+        )
+        in captured.system
+    )
 
 
 def test_unknown_interview_and_archetype_are_rejected(client, repo):

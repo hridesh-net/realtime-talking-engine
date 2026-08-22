@@ -135,7 +135,18 @@ class Archetype:
 ARCHETYPES: dict[str, Archetype] = {}
 
 
-def _register(a: Archetype) -> Archetype:
+def validate_archetype(a: Archetype) -> Archetype:
+    """Assert one archetype is well formed, whether or not it is ever registered.
+
+    Public because archetypes are no longer only hand-written: personas composed
+    at request time (`trait_dimensions.compose_archetype`) must clear exactly the
+    same bar as the ones written into this file, and reaching into a private
+    `_register` from another module to get that is not an extension point.
+
+    Registration is a separate step on purpose — a composed persona belongs to
+    one interview, so it is validated but never added to the process-wide
+    catalog.
+    """
     total = round(sum(s.weight for s in a.must_discover), 4)
     if total != 1.0:
         raise ValueError(f"{a.key}: must_discover weights sum to {total}, expected 1.0")
@@ -152,6 +163,26 @@ def _register(a: Archetype) -> Archetype:
         raise ValueError(f"{a.key}: stress values must be 1-4, got {bad}")
     if not a.session_beats:
         raise ValueError(f"{a.key}: needs at least one session beat")
+    # TypedDict keys are erased at runtime, so a preset table that misspells
+    # "tone" as "tonee" type-checks *and* composes silently, and the mistake
+    # only surfaces as a persona that speaks wrong. Check the shape here.
+    for field_name, spec, expected in (
+        ("speech", dict(a.speech), set(SpeechSpec.__annotations__)),
+        ("answer_policy", dict(a.answer_policy), set(AnswerPolicySpec.__annotations__)),
+    ):
+        if set(spec) != expected:
+            raise ValueError(
+                f"{a.key}: {field_name} keys {sorted(set(spec) ^ expected)} "
+                f"do not match {sorted(expected)}"
+            )
+    return a
+
+
+def _register(a: Archetype) -> Archetype:
+    """Validate and add to the process-wide catalog. Module import time only."""
+    validate_archetype(a)
+    if a.key in ARCHETYPES:
+        raise ValueError(f"{a.key}: already registered — keys must be unique")
     ARCHETYPES[a.key] = a
     return a
 

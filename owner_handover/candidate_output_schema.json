@@ -189,7 +189,7 @@
       "type": "object"
     },
     "EnvironmentProfile": {
-      "description": "Session-logistics realism \u2014 the 'Environment' row of the \u00a73.2 taxonomy.",
+      "description": "Session-logistics realism \u2014 the 'Environment' row of the realism taxonomy.",
       "properties": {
         "camera_behavior": {
           "pattern": "^(on|off|toggling)$",
@@ -246,7 +246,7 @@
       "type": "object"
     },
     "HumanTraitProfile": {
-      "description": "The generic human-candidate trait dimensions (BRD \u00a73.2 taxonomy).\n\nOrthogonal to the archetype's skill/verdict mechanics \u2014 this is the\nrealism, communication, and compliance-training layer. Entirely\ncode-derived from fixed dimension presets, same as trait scores; the model\nnever authors or sees these values.",
+      "description": "The generic human-candidate trait dimensions (the realism taxonomy).\n\nOrthogonal to the archetype's skill/verdict mechanics \u2014 this is the\nrealism, communication, and compliance-training layer. Entirely\ncode-derived from fixed dimension presets, same as trait scores; the model\nnever authors or sees these values.",
       "properties": {
         "affect": {
           "pattern": "^(hostile|defensive|anxious|apathetic|over_eager|arrogant|cooperative|flirtatious_inappropriate|grieving_distressed)$",
@@ -347,27 +347,33 @@
           "$ref": "#/$defs/EnvironmentProfile"
         },
         "seniority": {
+          "pattern": "^(fresher|junior|mid|senior|lead|manager)$",
           "title": "Seniority",
           "type": "string"
         },
-        "function": {
-          "title": "Function",
-          "type": "string"
-        },
-        "region": {
-          "title": "Region",
-          "type": "string"
-        },
         "gender_presentation": {
+          "pattern": "^(woman|man|non_binary|unspecified)$",
           "title": "Gender Presentation",
           "type": "string"
         },
         "age_band": {
+          "pattern": "^(18-24|25-34|35-44|45-54|55\\+)$",
           "title": "Age Band",
           "type": "string"
         },
         "notice_period": {
+          "pattern": "^(immediate|15_days|30_days|60_days|90_days)$",
           "title": "Notice Period",
+          "type": "string"
+        },
+        "function": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 &'./-]{0,39}$",
+          "title": "Function",
+          "type": "string"
+        },
+        "region": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 &'./-]{0,39}$",
+          "title": "Region",
           "type": "string"
         },
         "offers_in_hand": {
@@ -393,11 +399,11 @@
         "negotiation_stance",
         "environment",
         "seniority",
-        "function",
-        "region",
         "gender_presentation",
         "age_band",
-        "notice_period"
+        "notice_period",
+        "function",
+        "region"
       ],
       "title": "HumanTraitProfile",
       "type": "object"

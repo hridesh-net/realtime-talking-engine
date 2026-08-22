@@ -124,26 +124,42 @@ and neither lets the model choose a value:
 * **`compose_archetype(...)`** builds an `Archetype` from five generic presets
   (`COMPETENCE`, `CONSCIENTIOUSNESS`, `COMMUNICATION`, `EMOTIONAL_STANCE`,
   `HONESTY`, optionally `BIAS_TRAP`) instead of writing the dataclass by hand,
-  deriving `session_beats` and `stresses` from those same five inputs so it
-  satisfies exactly what `_register` requires — v2.0's non-empty-beats and
-  valid-criteria rules included. `register_dynamic(...)` composes and calls
-  the same `_register` the hand-written catalog uses.
-* **`compose_human_traits(...)`** builds a `HumanTraitProfile` — the BRD §3.2
+  deriving `session_beats` and `stresses` from those same inputs so it satisfies
+  exactly what `archetypes.validate_archetype` requires — v2.0's
+  non-empty-beats and valid-criteria rules included. Each preset declares the
+  rubric pressure it contributes; the composed `stresses` are the clamped sum,
+  so they vary with the composition rather than being a constant.
+
+  **Composed archetypes are validated, never registered.** A persona composed
+  for one interview is not a catalog entry: adding it to the process-wide
+  `ARCHETYPES` dict would leak it into every other interview's picker, grow that
+  dict without bound, and strand the persona on the next restart, since the dict
+  is memory and the candidate row is not. `compose_custom_persona(...)` returns
+  the archetype and the caller passes it to `agent.generate(archetype=...)`.
+* **`compose_human_traits(...)`** builds a `HumanTraitProfile` — the realism
   taxonomy layer (affect, verbal style, language & literacy, comprehension,
   integrity red flags, motivation, negotiation stance, compliance traps,
   environment, profile). Orthogonal to the archetype and to `stresses`/
   `session_beats`: this decides how realistically a persona comes across,
   including compliance-training traps like volunteering protected information.
-  See [VirtualCandidate § human_traits](/concepts/contracts/virtual-candidate.md)
-  and [EngineContract § REALISM & COMPLIANCE LAYER](/concepts/contracts/engine-contract.md).
+  Every value in it renders into the prompt through a **directive table** in
+  `engine_contract` (`AFFECT_DIRECTIVES`, `VERBAL_STYLE_DIRECTIVES`, …), never
+  as the raw vocabulary token: `affect="jargon_flooder"` is an index into
+  behaviour, not English, and emitting it verbatim would hand the persona's
+  design to the model. See
+  [VirtualCandidate § human_traits](/concepts/contracts/virtual-candidate.md)
+  and [EngineContract § the realism layer](/concepts/contracts/engine-contract.md).
 
 `dimension_catalog()` serializes every preset table and closed vocabulary for
 a UI to render pickers from — it backs `GET /api/v1/trait-dimensions`
 ([REST API](/concepts/contracts/rest-api.md)). The control plane exposes both
-composers as `custom_personas` on the enrollment endpoint: a spec composes into
-a content-addressed archetype key (`dyn-<hash of the spec>`, idempotent on
-resubmission) and a `HumanTraitProfile`, then casts through the normal
-`agent.generate(...)` path. The UI's "Compose" tab
+composers as `custom_personas` on the enrollment endpoint, through the single
+`compose_custom_persona(...)` entry point: a spec composes into a
+content-addressed archetype key (`dyn-<hash of the spec>`, idempotent on
+resubmission), an unregistered `Archetype` and a `HumanTraitProfile`, then casts
+through the normal `agent.generate(...)` path. Because the archetype is never
+registered, `POST /sessions` resolves an enrolled persona from the **database
+first** and only falls back to the catalog. The UI's "Compose" tab
 (`ui/src/PersonaComposer.jsx`, inside `InterviewDetail.jsx`) is the human-facing
 side of this.
 
