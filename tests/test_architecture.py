@@ -568,3 +568,36 @@ def test_every_test_file_is_wired_into_the_gate() -> None:
         f"not run by scripts/check.sh: {missing}. Add a `run` line for each — "
         "under the --live block if it calls a model."
     )
+
+
+def test_protected_info_type_reaches_the_prompt_as_english() -> None:
+    """The one taxonomy value interpolated *into* a directive, not keyed by it.
+
+    `marital_status` is a vocabulary key. Rendering it verbatim puts an
+    underscore-joined token in the persona's instructions — the same defect the
+    directive tables exist to prevent, in the one place a table lookup does not
+    reach.
+    """
+    from candidate_agent import trait_dimensions as td
+    from candidate_agent.engine_contract import _realism_section
+
+    traits = td.compose_human_traits(
+        affect="cooperative",
+        verbal_style="rambling",
+        language="native_fluent",
+        comprehension="sharp_listener",
+        motivation="passion_hire",
+        negotiation_stance="anchors_high",
+        environment="clean_professional_setup",
+        seniority="mid",
+        function="sales",
+        region="Jaipur",
+        gender_presentation="woman",
+        age_band="25-34",
+        notice_period="30_days",
+        compliance_traps=["volunteers_protected_info"],
+        protected_info_type="marital_status",
+    )
+    rendered = _realism_section(traits)
+    assert "marital status" in rendered
+    assert "marital_status" not in rendered

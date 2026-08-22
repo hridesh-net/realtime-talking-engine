@@ -137,8 +137,9 @@ def test_enroll_custom_persona_end_to_end(client, interview_id):
     # The compliance trap must actually reach the compiled prompt, not just the schema.
     prompt = candidate["engine_contract"]["system_prompt"]
     assert (
+        # The persona is told "marital status", not the vocabulary key.
         ec.COMPLIANCE_TRAP_DIRECTIVES["volunteers_protected_info"].format(
-            protected_info_type="marital_status"
+            protected_info_type="marital status"
         )
         in prompt
     )
