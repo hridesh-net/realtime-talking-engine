@@ -378,7 +378,12 @@ def _realism_section(traits: HumanTraitProfile | None) -> str:
         language.append("More than once you ask the interviewer to put a question another way.")
 
     compliance = [
-        COMPLIANCE_TRAP_DIRECTIVES[t].format(protected_info_type=traits.protected_info_type)
+        # `marital_status` is a vocabulary key, not English. The same rule the
+        # directive tables exist for applies to the one value interpolated
+        # into them.
+        COMPLIANCE_TRAP_DIRECTIVES[t].format(
+            protected_info_type=(traits.protected_info_type or "").replace("_", " ")
+        )
         for t in traits.compliance_traps
     ]
 

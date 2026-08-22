@@ -567,8 +567,9 @@ def test_session_round_trip_with_a_custom_composed_persona(client, repo):
     assert captured.system is not None
     assert "HOW YOU COME ACROSS" in captured.system
     assert (
+        # The persona is told "marital status", not the vocabulary key.
         ec.COMPLIANCE_TRAP_DIRECTIVES["volunteers_protected_info"].format(
-            protected_info_type="marital_status"
+            protected_info_type="marital status"
         )
         in captured.system
     )
