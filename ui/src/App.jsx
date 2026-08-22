@@ -110,6 +110,32 @@ export default function App() {
     }
   }
 
+  const createFromWizardCustom = async (payload, customSpec, action) => {
+    setError(null)
+    setBusy(action)
+    try {
+      const created = await createInterview(payload)
+      setInterviews(await listInterviews())
+      // Compose-and-cast through the enrollment endpoint first, so the
+      // resulting persona carries human_traits — start_session only accepts
+      // an already-registered archetype key and never authors human_traits
+      // itself.
+      const [candidate] = await enrollCandidates(created.id, {
+        custom_personas: [customSpec],
+      })
+      if (action === 'open') {
+        await loadInterview(created)
+      } else {
+        setSelected(created)
+        await openSession(created.id, candidate.archetype, action)
+      }
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const enroll = async (keys) => {
     setError(null)
     setBusy(`enroll:${keys[0]}`)
@@ -214,6 +240,7 @@ export default function App() {
           {...shared}
           onCancel={() => setScreen('list')}
           onSubmit={createFromWizard}
+          onSubmitCustom={createFromWizardCustom}
         />
       )}
 

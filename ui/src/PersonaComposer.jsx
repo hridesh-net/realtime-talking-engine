@@ -94,7 +94,7 @@ function RadarChart({ axes, size = 200 }) {
   )
 }
 
-export default function PersonaComposer({ busy, onCast }) {
+export default function PersonaComposer({ busy, onCast, singleMode = false, onChange }) {
   const [dims, setDims] = useState(null)
   const [form, setForm] = useState(EMPTY_PERSONA)
   const [batch, setBatch] = useState([])
@@ -122,6 +122,13 @@ export default function PersonaComposer({ busy, onCast }) {
       })
       .catch((e) => setError(e.message))
   }, [])
+
+  // Single mode has no batch/cast of its own — the caller (e.g. the wizard)
+  // owns submission and just needs the live composed spec.
+  useEffect(() => {
+    if (singleMode) onChange?.(form)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [singleMode, form])
 
   if (!dims) return <div className="loading">Loading trait taxonomy…</div>
 
@@ -319,9 +326,11 @@ export default function PersonaComposer({ busy, onCast }) {
             <input type="number" min="0" value={form.offers_in_hand} onChange={set('offers_in_hand')} />
           </div>
 
-          <button className="btn" onClick={addToBatch}>
-            Add to batch
-          </button>
+          {!singleMode && (
+            <button className="btn" onClick={addToBatch}>
+              Add to batch
+            </button>
+          )}
         </div>
 
         <div className="composer-preview">
@@ -332,28 +341,32 @@ export default function PersonaComposer({ busy, onCast }) {
             numeric axes for &quot;{form.language || '—'}&quot;
           </div>
 
-          <div className="batch-list">
-            {batch.length === 0 && <div className="loading">No custom personas queued yet.</div>}
-            {batch.map((spec, i) => (
-              <div key={i} className="batch-item">
-                <span>
-                  {spec.label} <span className={`badge ${spec.verdict === 'reject' ? 'flag' : spec.verdict === 'select' ? 'draft' : 'running'}`}>{spec.verdict}</span>
-                </span>
-                <button className="btn sm" onClick={() => removeFromBatch(i)}>
-                  Remove
-                </button>
+          {!singleMode && (
+            <>
+              <div className="batch-list">
+                {batch.length === 0 && <div className="loading">No custom personas queued yet.</div>}
+                {batch.map((spec, i) => (
+                  <div key={i} className="batch-item">
+                    <span>
+                      {spec.label} <span className={`badge ${spec.verdict === 'reject' ? 'flag' : spec.verdict === 'select' ? 'draft' : 'running'}`}>{spec.verdict}</span>
+                    </span>
+                    <button className="btn sm" onClick={() => removeFromBatch(i)}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          <button
-            className="btn primary"
-            style={{ marginTop: 8, width: '100%' }}
-            disabled={Boolean(busy) || batch.length === 0}
-            onClick={cast}
-          >
-            {busy === 'enroll:custom' ? 'Casting…' : `Cast ${batch.length} custom persona(s)`}
-          </button>
+              <button
+                className="btn primary"
+                style={{ marginTop: 8, width: '100%' }}
+                disabled={Boolean(busy) || batch.length === 0}
+                onClick={cast}
+              >
+                {busy === 'enroll:custom' ? 'Casting…' : `Cast ${batch.length} custom persona(s)`}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
