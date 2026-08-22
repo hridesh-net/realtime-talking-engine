@@ -168,4 +168,23 @@ proving a composed archetype holds the same guarantees a hand-written one
 does, not a relaxed subset. Also covers all four bias traps, all three
 compliance-trap types landing distinctly in the compiled prompt, taxonomy
 values reaching the prompt verbatim, and a 25-seed trait-bounds sweep.
+`tests/test_full_interview_pipeline_integration.py` drives the whole
+manager-facing HTTP surface end to end — cast a persona (composed or
+hand-written) -> read its `InterviewerScorecard` "report" -> run a multi-turn
+practice session via `CandidateSessionAgent` -> end it -> re-read the
+transcript and confirm the report is unchanged — across a matrix of five
+compositions (every bias trap plus none, each paired with a distinct
+competence/honesty/communication combination). Also covers the edge cases a
+manager hits in practice: a persona never engaged still has a readable
+report, ending a session with zero manager turns, an unknown candidate's
+scorecard is 404, two personas run independent sessions in one interview
+without leaking into each other's transcript or report, re-casting the same
+spec reuses both the candidate and its report, a hand-written catalog
+archetype follows the identical lifecycle, and the live transcript is
+readable mid-session before `end` is ever called. Note: there is no
+post-session judge/grader yet — the "report" a manager can pull today is the
+pre-computed `InterviewerScorecard` answer key, generated at casting time, not
+a score of what actually happened in the transcript; `JUDGE_MODEL` and the
+Go `Judge` port (`engine/internal/ports/judge.go`) are reserved for that,
+unbuilt in Python.
 Live: `tests/test_candidate_agent.py`, six archetypes plus a determinism check.
