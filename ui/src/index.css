@@ -1167,12 +1167,14 @@ details.raw pre {
 
 .radar-chart .radar-grid {
   fill: none;
-  stroke: var(--line);
+  stroke: var(--ink-4);
+  stroke-width: 1;
   stroke-dasharray: 3 3;
 }
 
 .radar-chart .radar-spoke {
-  stroke: var(--line);
+  stroke: var(--ink-4);
+  stroke-width: 1;
 }
 
 .radar-chart .radar-shape {

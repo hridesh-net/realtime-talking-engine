@@ -358,7 +358,8 @@ export default function InterviewDetail({
             <span className="h2">Compose a custom persona</span>
             <span className="note">
               Pick a value for each dimension below — any combination is valid. The radar
-              shows the 3 dimensions that are genuinely numeric; the rest are categorical.
+              plots this exact persona's selected competence, effort, composure, honesty,
+              comprehension, and fluency.
             </span>
           </div>
           <PersonaComposer busy={busy} onCast={onEnrollCustom} />

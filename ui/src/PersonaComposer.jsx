@@ -9,14 +9,32 @@ import { listTraitDimensions } from './api'
  * client-side copy can never drift into something the server rejects.
  */
 
-const languageRadarAxes = (languagePreset) =>
-  languagePreset
-    ? [
-        { label: 'Fluency', value: languagePreset.fluency * 10 },
-        { label: 'Accent strength', value: languagePreset.accent_strength * 100 },
-        { label: 'Code-switching', value: languagePreset.code_switch_probability * 100 },
-      ]
-    : []
+// The radar chart plots the *actually selected* preset for this persona, not
+// a static example — each axis reads the score of whichever option is chosen
+// in the form below, so changing a dropdown moves the chart immediately.
+// `dim` names a `dimension_catalog()` entry whose presets carry a
+// comparable 0-10 "score" (see `trait_dimensions.dimension_catalog`).
+const PERSONA_RADAR_DIMENSIONS = [
+  { label: 'Competence', dim: 'competence' },
+  { label: 'Effort', dim: 'conscientiousness' },
+  { label: 'Composure', dim: 'emotional_stance' },
+  { label: 'Honesty', dim: 'honesty' },
+  { label: 'Comprehension', dim: 'comprehension' },
+]
+
+function personaRadarAxes(dims, form) {
+  if (!dims) return []
+  const axes = PERSONA_RADAR_DIMENSIONS.map(({ label, dim }) => {
+    const preset = dims[dim]?.[form[dim]]
+    return preset ? { label, value: preset.score * 10 } : null
+  })
+  const language = dims.language?.[form.language]
+  axes.push(language ? { label: 'Fluency', value: language.fluency * 10 } : null)
+  // Until every field the form drives has a resolved preset (e.g. right
+  // after `GET /trait-dimensions` returns but before the form's defaults are
+  // set), show nothing rather than a chart with silently-missing axes.
+  return axes.every(Boolean) ? axes : []
+}
 
 const EMPTY_PERSONA = {
   label: '',
@@ -46,28 +64,39 @@ const EMPTY_PERSONA = {
   offers_in_hand: 0,
 }
 
-function RadarChart({ axes, size = 200 }) {
+function RadarChart({ axes, size = 220 }) {
   if (!axes.length) return null
   const cx = size / 2
   const cy = size / 2
-  const radius = size / 2 - 44
+  // Labels sit outside the outer ring by a fixed pixel gap rather than a
+  // percentage of the radius — a percentage-based offset gives the vertical
+  // (top) axis plenty of clearance but leaves near-horizontal side axes
+  // close enough to the axis's edge that its label collides with it.
+  const labelGap = 16
+  const valueGap = 30
+  const radius = size / 2 - (44 + valueGap - 20)
   const n = axes.length
   const angleFor = (i) => (Math.PI * 2 * i) / n - Math.PI / 2
-  const pointFor = (i, valuePct) => {
-    const r = (Math.max(0, Math.min(100, valuePct)) / 100) * radius
+  const pointAt = (i, r) => {
     const a = angleFor(i)
     return [cx + r * Math.cos(a), cy + r * Math.sin(a)]
   }
+  const pointFor = (i, valuePct) => pointAt(i, (Math.max(0, Math.min(100, valuePct)) / 100) * radius)
   const ringPoints = (frac) => axes.map((_, i) => pointFor(i, frac * 100).join(',')).join(' ')
   const dataPoints = axes.map((ax, i) => pointFor(i, ax.value))
+  // A label centered on its anchor point overflows the svg's own viewBox
+  // once the point sits near the left/right edge (e.g. "Conscientiousness"
+  // on a side axis) — anchor from the point outward instead of straddling
+  // it, the way most radar-chart implementations place side labels.
+  const anchorFor = (x) => (Math.abs(x - cx) < 8 ? 'middle' : x > cx ? 'start' : 'end')
 
   return (
-    <svg width={size} height={size} className="radar-chart">
+    <svg width={size} height={size} className="radar-chart" style={{ overflow: 'visible' }}>
       {[0.25, 0.5, 0.75, 1].map((f) => (
         <polygon key={f} points={ringPoints(f)} className="radar-grid" />
       ))}
       {axes.map((_, i) => {
-        const [x, y] = pointFor(i, 100)
+        const [x, y] = pointAt(i, radius)
         return <line key={i} x1={cx} y1={cy} x2={x} y2={y} className="radar-spoke" />
       })}
       <polygon points={dataPoints.map((p) => p.join(',')).join(' ')} className="radar-shape" />
@@ -75,18 +104,23 @@ function RadarChart({ axes, size = 200 }) {
         <circle key={i} cx={x} cy={y} r={4} className="radar-dot" />
       ))}
       {axes.map((ax, i) => {
-        const [lx, ly] = pointFor(i, 130)
+        // "Farther from the shape" means "higher up" for an axis pointing
+        // into the top half and "lower down" for one pointing into the
+        // bottom half — so which gap (label vs. value) goes on the outside
+        // has to flip with the axis's direction, or the top axis reads
+        // value-then-label while every other axis reads label-then-value.
+        const pointsUp = Math.sin(angleFor(i)) < -0.01
+        const [lx, ly] = pointAt(i, radius + (pointsUp ? valueGap : labelGap))
+        const [vx, vy] = pointAt(i, radius + (pointsUp ? labelGap : valueGap))
+        const anchor = anchorFor(lx)
         return (
-          <text key={`l-${i}`} x={lx} y={ly - 4} textAnchor="middle" className="radar-label">
-            {ax.label}
-          </text>
-        )
-      })}
-      {axes.map((ax, i) => {
-        const [lx, ly] = pointFor(i, 130)
-        return (
-          <text key={`v-${i}`} x={lx} y={ly + 10} textAnchor="middle" className="radar-value">
-            {Math.round(ax.value)}
+          <text key={`labels-${i}`}>
+            <tspan x={lx} y={ly} textAnchor={anchor} className="radar-label">
+              {ax.label}
+            </tspan>
+            <tspan x={vx} y={vy} textAnchor={anchor} className="radar-value">
+              {Math.round(ax.value)}
+            </tspan>
           </text>
         )
       })}
@@ -172,7 +206,11 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
               </option>
             ))
           : Object.entries(options).map(([k, v]) => (
-              <option key={k} value={k} title={withHint ? v : undefined}>
+              <option
+                key={k}
+                value={k}
+                title={withHint ? (typeof v === 'object' ? v.text : v) : undefined}
+              >
                 {k}
               </option>
             ))}
@@ -335,10 +373,11 @@ export default function PersonaComposer({ busy, onCast, singleMode = false, onCh
 
         <div className="composer-preview">
           <div className="radar-card">
-            <RadarChart axes={languageRadarAxes(dims.language[form.language])} />
+            <RadarChart axes={personaRadarAxes(dims, form)} />
           </div>
           <div className="small muted" style={{ textAlign: 'center', marginTop: 4 }}>
-            numeric axes for &quot;{form.language || '—'}&quot;
+            this persona&apos;s selected competence, effort, composure, honesty, comprehension
+            and fluency
           </div>
 
           {!singleMode && (

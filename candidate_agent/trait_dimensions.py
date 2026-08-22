@@ -45,24 +45,28 @@ COMPETENCE: dict[str, dict] = {
         "knowledge_band": (7, 9),
         "text": "genuinely strong in the required skills",
         "failure_mode": "keyword-checks instead of testing the real ceiling",
+        "score": 9,
     },
     "solid": {
         "traits": {"smartness": (6, 8), "dumbness": (2, 4)},
         "knowledge_band": (5, 7),
         "text": "solidly competent, not exceptional",
         "failure_mode": "either overrates them as expert or underrates them as weak",
+        "score": 7,
     },
     "developing": {
         "traits": {"smartness": (4, 6), "dumbness": (4, 6)},
         "knowledge_band": (3, 5),
         "text": "still developing in the required skills",
         "failure_mode": "does not distinguish a coachable gap from a hard ceiling",
+        "score": 5,
     },
     "weak": {
         "traits": {"smartness": (2, 4), "dumbness": (6, 8)},
         "knowledge_band": (1, 3),
         "text": "genuinely below the bar on the required skills",
         "failure_mode": "gets talked out of a clear reject by confidence or rapport",
+        "score": 3,
     },
 }
 
@@ -72,18 +76,21 @@ CONSCIENTIOUSNESS: dict[str, dict] = {
         "answer_depth": "thorough",
         "text": "prepared and puts in real effort",
         "failure_mode": "spends the saved time selling the role instead of probing further",
+        "score": 9,
     },
     "adequate": {
         "traits": {"effort": (5, 7), "preparedness": (4, 6), "seriousness": (5, 7)},
         "answer_depth": "adequate",
         "text": "average effort, no more and no less",
         "failure_mode": "never checks whether more depth is available on request",
+        "score": 6,
     },
     "low_effort": {
         "traits": {"effort": (1, 3), "preparedness": (1, 3), "seriousness": (2, 4)},
         "answer_depth": "minimal",
         "text": "did little preparation and does not pretend otherwise",
         "failure_mode": "scores them as unskilled when the skill was never actually tested",
+        "score": 2,
     },
 }
 
@@ -137,6 +144,7 @@ EMOTIONAL_STANCE: dict[str, dict] = {
         "hesitation_frequency": 1,
         "on_pressure": "stays steady and reasons it through out loud",
         "text": "composed under pressure",
+        "score": 8,  # composure = 10 - midpoint(nervousness)
     },
     "nervous": {
         "traits": {"nervousness": (7, 9), "interest": (5, 7)},
@@ -144,6 +152,7 @@ EMOTIONAL_STANCE: dict[str, dict] = {
         "hesitation_frequency": 6,
         "on_pressure": "stumbles, self-corrects mid-sentence, and needs room to settle",
         "text": "nervous, self-corrects constantly",
+        "score": 2,
     },
     "disengaged": {
         "traits": {"nervousness": (2, 4), "interest": (1, 3)},
@@ -151,6 +160,7 @@ EMOTIONAL_STANCE: dict[str, dict] = {
         "hesitation_frequency": 3,
         "on_pressure": "gives a slightly longer answer, then stops again",
         "text": "visibly disengaged",
+        "score": 7,
     },
     "defensive": {
         "traits": {"nervousness": (5, 7), "interest": (4, 6)},
@@ -158,6 +168,7 @@ EMOTIONAL_STANCE: dict[str, dict] = {
         "hesitation_frequency": 4,
         "on_pressure": "gets clipped and guarded rather than opening up",
         "text": "turns defensive under pressure",
+        "score": 4,
     },
 }
 
@@ -166,6 +177,7 @@ HONESTY: dict[str, dict] = {
         "traits": {"honesty": (8, 10)},
         "on_unknown_question": "admits the gap plainly and reasons about it out loud",
         "text": "straightforwardly honest about limits",
+        "score": 9,
     },
     "embellishing": {
         "traits": {"honesty": (4, 6)},
@@ -173,6 +185,7 @@ HONESTY: dict[str, dict] = {
             "reframes toward an adjacent win rather than admitting the gap outright"
         ),
         "text": "tends to embellish rather than lie outright",
+        "score": 5,
     },
     "bluffing": {
         "traits": {"honesty": (1, 3)},
@@ -180,6 +193,7 @@ HONESTY: dict[str, dict] = {
             "bluffs with confident, vague language rather than admitting the gap"
         ),
         "text": "bluffs when they don't know something",
+        "score": 2,
     },
 }
 
@@ -576,27 +590,48 @@ INTEGRITY_RED_FLAG_VALUES = (
 )
 
 
+#: `COMPREHENSION_PRESETS` values are spread (`**comp`) straight into
+#: `HumanTraitProfile(...)` in `compose_human_traits`, so a "score" key cannot
+#: live inside that table without becoming an unexpected constructor kwarg.
+#: Kept here instead, purely for `dimension_catalog()`'s radar-chart output.
+COMPREHENSION_SCORES: dict[str, int] = {
+    "sharp_listener": 9,
+    "average_listener": 6,
+    "frequent_clarifier": 5,
+    "misreads_questions": 2,
+}
+
+
 def dimension_catalog() -> dict[str, object]:
     """Every dimension and preset this module knows, serializable for a UI.
 
-    The archetype-side dimensions (competence, conscientiousness, ...) list
-    their keys plus the descriptive `text` fallback (present on every entry
-    in those tables) so a picker can show a hint. `language`, `comprehension`,
-    and `environment` return their full preset dicts, including the numeric
-    fields (fluency, accent_strength, code_switch_probability) a radar chart
-    can plot directly without re-deriving them.
+    The archetype-side dimensions that carry a comparable 0-10 "score"
+    (competence, conscientiousness, emotional_stance, honesty, comprehension)
+    return `{key: {"text": ..., "score": ...}}` so a radar chart can plot the
+    *actual selected preset's* trait strength — not a stand-in — alongside
+    its hint text. `communication` and `bias_trap` have no single comparable
+    scalar, so they stay `{key: text}`. `language` and `environment` return
+    their full preset dicts, including the numeric fields (fluency,
+    accent_strength, code_switch_probability) a radar chart can plot directly
+    without re-deriving them.
     """
     return {
-        "competence": {k: v["text"] for k, v in COMPETENCE.items()},
-        "conscientiousness": {k: v["text"] for k, v in CONSCIENTIOUSNESS.items()},
+        "competence": {k: {"text": v["text"], "score": v["score"]} for k, v in COMPETENCE.items()},
+        "conscientiousness": {
+            k: {"text": v["text"], "score": v["score"]} for k, v in CONSCIENTIOUSNESS.items()
+        },
         "communication": {k: v["text"] for k, v in COMMUNICATION.items()},
-        "emotional_stance": {k: v["text"] for k, v in EMOTIONAL_STANCE.items()},
-        "honesty": {k: v["text"] for k, v in HONESTY.items()},
+        "emotional_stance": {
+            k: {"text": v["text"], "score": v["score"]} for k, v in EMOTIONAL_STANCE.items()
+        },
+        "honesty": {k: {"text": v["text"], "score": v["score"]} for k, v in HONESTY.items()},
         "bias_trap": {k: v["text"] for k, v in BIAS_TRAP.items()},
         "affect": list(AFFECT_VALUES),
         "verbal_style": list(VERBAL_STYLE_VALUES),
         "language": LANGUAGE_PROFILE_PRESETS,
-        "comprehension": COMPREHENSION_PRESETS,
+        "comprehension": {
+            k: {**v, "score": COMPREHENSION_SCORES[k]} for k, v in COMPREHENSION_PRESETS.items()
+        },
         "motivation": list(MOTIVATION_VALUES),
         "negotiation_stance": list(NEGOTIATION_STANCE_VALUES),
         "compliance_traps": list(COMPLIANCE_TRAP_VALUES),

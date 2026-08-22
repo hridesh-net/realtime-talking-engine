@@ -227,5 +227,36 @@ def test_dimension_catalog_has_every_taxonomy_dimension():
     # an empty dropdown with no way to compose a valid persona.
     for key in ("affect", "verbal_style", "motivation", "negotiation_stance"):
         assert len(d[key]) > 0
+
+
+def test_dimension_catalog_scores_are_present_and_ordered_with_their_presets():
+    """The composer's radar chart plots these scores directly.
+
+    Every preset in the five scored dimensions must carry a 0-10 "score", and
+    within each dimension the scores must be monotonic with the preset's own
+    plain-English ordering (e.g. "expert" outscores "weak") — otherwise the
+    radar chart would visually contradict the persona the fields describe.
+    """
+    d = td.dimension_catalog()
+    for key, order in (
+        ("competence", ["weak", "developing", "solid", "expert"]),
+        ("conscientiousness", ["low_effort", "adequate", "diligent"]),
+        ("emotional_stance", ["nervous", "defensive", "disengaged", "composed"]),
+        ("honesty", ["bluffing", "embellishing", "transparent"]),
+        (
+            "comprehension",
+            ["misreads_questions", "frequent_clarifier", "average_listener", "sharp_listener"],
+        ),
+    ):
+        assert set(order) == set(d[key])
+        scores = [d[key][name]["score"] for name in order]
+        assert scores == sorted(scores), f"{key} scores are not ordered with {order}"
+        for name in order:
+            assert 0 <= d[key][name]["score"] <= 10
+
+    # comprehension keeps its original functional fields alongside the score
+    # — the score is additive, not a replacement of what compose_human_traits
+    # actually consumes.
+    assert d["comprehension"]["sharp_listener"]["clarification_rate"] == "low"
     for key in ("language", "comprehension", "environment", "competence"):
         assert len(d[key]) > 0
