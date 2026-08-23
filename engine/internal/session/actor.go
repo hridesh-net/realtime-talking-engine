@@ -3,6 +3,9 @@ package session
 import (
 	"context"
 	"log/slog"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"skillbrew/engine/internal/contract"
@@ -18,6 +21,21 @@ const defaultSampleRate = 24000
 // (plan §4 step 3). Losing the race is not an error: the system prompt is the
 // backstop, so the turn proceeds as CONFIDENT and the loss is logged.
 const pregateDeadline = 250 * time.Millisecond
+
+// thinkerDeadline bounds how long a stall clip covers for the reasoning model
+// before the actor gives up and uses the contract's own fallback directive.
+// Missing it is a degradation, not a failure: the fallback is still
+// persona-correct behaviour (plan §6 layer 3's floor).
+const thinkerDeadline = 700 * time.Millisecond
+
+// ledgerRefreshTurns is how often the compact "what you have already said"
+// summary is re-injected into the speech model's context. Realtime models
+// forget the detail of their own audio history; this is cheap insurance.
+const ledgerRefreshTurns = 4
+
+// ceilingReassertTurns is how often the knowledge ceiling is re-sent as a
+// system item (plan §6 layer 4). Best-effort, like every pre-speech layer.
+const ceilingReassertTurns = 5
 
 // actor is the per-session owner goroutine of plan §4: exactly one goroutine
 // holds all mutable session state, so nothing here needs a mutex — every
@@ -51,8 +69,34 @@ type actor struct {
 	drops        drops
 	// pendingVerdict is the pre-gate result for the utterance in flight.
 	pendingVerdict *pregateVerdict
+	// utterance accumulates the interviewer's in-flight speech, so the
+	// pre-gate classifies the whole question rather than one delta.
+	utterance string
 	// speaking is the Speaker session, nil until CONNECTING completes.
 	speaking ports.SpeakerSession
+	// thinker is the persona's subconscious. Nil degrades the session to
+	// the single-model path rather than refusing to run.
+	thinker ports.Thinker
+	// gate classifies probes from partial speech, without a model call.
+	gate ports.PreGate
+	// ledger is what this persona has committed to saying. The actor is its
+	// only writer.
+	ledger ports.ClaimLedger
+
+	// unlocked is monotonic: the Thinker assesses, the actor decides, and
+	// once depth is earned it is never taken back (plan §7).
+	unlocked   bool
+	unlockTurn int
+	// lastLedgerInject and lastCeilingAssert drive the two cadences above.
+	lastLedgerInject  int
+	lastCeilingAssert int
+	// turnGate is closed when the in-flight turn's async work becomes void
+	// — the note arrived, the deadline passed, the interviewer barged in.
+	// Without it the note pump only exits when the *session* ends, so a
+	// session with twenty defers carries twenty stranded goroutines. Tying
+	// it to the turn rather than the session is the same discipline as the
+	// timer generations: cancellation has to be a fact, not a hope.
+	turnGate chan struct{}
 
 	// ---- inbound channels, per plan §4's policy table ---------------------
 	control      chan command
@@ -62,6 +106,7 @@ type actor struct {
 	speakerAudio chan ports.SpeakerEvent
 	speakerCtrl  chan ports.SpeakerEvent
 	pregate      chan pregateVerdict
+	notes        chan thinkerNote
 	playoutBeat  chan heartbeat
 }
 
@@ -73,6 +118,7 @@ func newActor(
 	clock ports.Clock,
 	logger *slog.Logger,
 	events *obs.EventLog,
+	deps Deps,
 ) *actor {
 	fires := make(chan timerFire, timerBufferSize)
 	return &actor{
@@ -81,6 +127,9 @@ func newActor(
 		clock:    clock,
 		logger:   logger,
 		events:   events,
+		thinker:  deps.Thinker,
+		gate:     deps.PreGate,
+		ledger:   deps.Ledger,
 		state:    StateConnecting,
 		timers:   newTimerSet(clock, fires),
 		playout:  newPlayoutTracker(defaultSampleRate),
@@ -93,8 +142,27 @@ func newActor(
 		speakerAudio: make(chan ports.SpeakerEvent, speakerAudioBufferSize),
 		speakerCtrl:  make(chan ports.SpeakerEvent, speakerCtrlBufferSize),
 		pregate:      make(chan pregateVerdict, 1),
-		playoutBeat:  make(chan heartbeat, heartbeatBufferSize),
+		// Size 1, newest wins: a note for a turn that has moved on is
+		// worthless, and holding a queue of them only delays discovering
+		// that.
+		notes:       make(chan thinkerNote, 1),
+		playoutBeat: make(chan heartbeat, heartbeatBufferSize),
 	}
+}
+
+// Deps are the collaborators a session runs against. Every one is optional:
+// a nil Thinker, PreGate or Ledger degrades the session to the single-model
+// path rather than refusing to open, which is the right failure for a live
+// interview (plan §11).
+//
+// They arrive as ports rather than concrete types because internal/session may
+// only import ports, contract and obs — the layering gate enforces it, and the
+// reason is this: the orchestrator must not know which reasoning model, which
+// lexicon implementation, or which ledger it is driving.
+type Deps struct {
+	Thinker ports.Thinker
+	PreGate ports.PreGate
+	Ledger  ports.ClaimLedger
 }
 
 // emit writes one event stamped from the session clock.
@@ -128,6 +196,7 @@ func (a *actor) transition(to State, reason string) bool {
 	// stall timer outliving the turn that armed it.
 	if from.speakingish() && !to.speakingish() {
 		a.timers.cancelTurnScoped()
+		a.closeTurnGate()
 	}
 	return true
 }
@@ -145,6 +214,7 @@ func (a *actor) transition(to State, reason string) bool {
 func (a *actor) run(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
 	defer a.timers.cancelAll()
+	defer a.closeTurnGate()
 	a.logger.Info("session actor started")
 	defer a.logger.Info("session actor stopped")
 	a.emit("session_started", map[string]any{"session_id": a.id})
@@ -184,6 +254,8 @@ func (a *actor) run(ctx context.Context, done chan<- struct{}) {
 			a.handlePartial(ctx, p)
 		case v := <-a.pregate:
 			a.handlePregate(ctx, v)
+		case n := <-a.notes:
+			a.handleNote(ctx, n)
 		case hb := <-a.playoutBeat:
 			a.playout.heartbeat(hb.ItemID, hb.PlayedMs, hb.At)
 		case ev := <-a.speakerCtrl:
@@ -212,6 +284,7 @@ func (a *actor) handle(ctx context.Context, cmd command) bool {
 // windDown takes the session out in character, then finalizes.
 func (a *actor) windDown(_ context.Context, reason string) {
 	a.timers.cancelAll()
+	a.closeTurnGate()
 	if a.transition(StateWindingDown, reason) {
 		a.transition(StateFinalizing, reason)
 		a.transition(StateDone, reason)
@@ -240,6 +313,11 @@ func (a *actor) handleTimer(ctx context.Context, f timerFire) {
 		a.beginAnswer(ctx, "pregate race lost")
 	case timerPause:
 		a.createResponse(ctx, "pause elapsed")
+	case timerThinker:
+		// The stall clip bought 700 ms and the reasoning model did not
+		// answer. The contract's own directive stands in — still the
+		// persona behaving correctly, just without the retrieved detail.
+		a.useFallback(ctx, "deadline")
 	case timerSilence, timerSession:
 		a.windDown(ctx, f.Kind.String()+" cap")
 	}
@@ -255,6 +333,26 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 		if a.state == StateListening && a.turns.open == nil {
 			a.turns.begin(a.turn+1, speakerHuman, a.clock.Now())
 			a.pendingVerdict = nil
+			a.utterance = ""
+		}
+		// Classify from the question's first half. A defer has to put a
+		// stall clip on the wire inside 50 ms of end-of-turn, and nothing
+		// that thinks answers in 50 ms — so the decision is made while the
+		// interviewer is still talking.
+		a.utterance = p.Text
+		if a.gate != nil && a.state == StateListening {
+			if v := a.gate.Classify(a.utterance); v.Skill != "" {
+				a.pendingVerdict = &pregateVerdict{
+					Skill: v.Skill, Defer: v.Defer, Turn: a.turn + 1,
+				}
+			}
+		}
+		// The reasoning model is never cold at end-of-turn: it has been
+		// reading the question since the first word.
+		if a.thinker != nil {
+			if err := a.thinker.FeedPartial(ctx, p.Text); err != nil {
+				a.logger.Warn("thinker feed failed", "err", err)
+			}
 		}
 		return
 	}
@@ -332,10 +430,210 @@ func (a *actor) applyVerdict(ctx context.Context, v pregateVerdict) {
 		"skill": v.Skill, "defer": v.Defer,
 	})
 	if v.Defer {
-		a.transition(StateDeferred, "pregate defer")
+		a.beginDefer(ctx)
 		return
 	}
 	a.beginAnswer(ctx, "pregate confident")
+}
+
+// beginDefer enters DEFERRED: a stall clip covers the gap while the reasoning
+// model retrieves what this persona is allowed to say about the probed skill.
+//
+// With no Thinker wired the defer collapses immediately to the contract's own
+// fallback directive, which is still persona-correct behaviour — the floor of
+// plan §6 layer 3, not a failure.
+func (a *actor) beginDefer(ctx context.Context) {
+	if !a.transition(StateDeferred, "pregate defer") {
+		return
+	}
+	a.emit("defer_started", map[string]any{"skill": a.probedSkill})
+	if a.thinker == nil {
+		a.useFallback(ctx, "no thinker")
+		return
+	}
+	a.timers.arm(timerThinker, thinkerDeadline)
+	a.openTurnGate()
+	go a.awaitNote(ctx, a.thinker.RequestNote(ctx, a.clock.Now().Add(thinkerDeadline)),
+		a.turn, a.turnGate)
+}
+
+// awaitNote pumps one Thinker note into the actor. A pump, not logic: it
+// carries no decisions, which is what keeps every decision on one goroutine.
+func (a *actor) awaitNote(
+	ctx context.Context, ch <-chan ports.Note, turn int, gate <-chan struct{},
+) {
+	select {
+	case note, ok := <-ch:
+		if !ok {
+			return
+		}
+		select {
+		case a.notes <- thinkerNote{Note: note, Turn: turn}:
+		case <-gate:
+		case <-ctx.Done():
+		}
+	case <-gate:
+	case <-ctx.Done():
+	}
+}
+
+// openTurnGate starts a fresh gate for the in-flight turn, closing any
+// previous one so its pump cannot outlive the turn it belonged to.
+func (a *actor) openTurnGate() {
+	a.closeTurnGate()
+	a.turnGate = make(chan struct{})
+}
+
+// closeTurnGate voids the in-flight turn's async work.
+func (a *actor) closeTurnGate() {
+	if a.turnGate != nil {
+		close(a.turnGate)
+		a.turnGate = nil
+	}
+}
+
+// handleNote injects the reasoning model's note and lets the speech model
+// phrase it.
+//
+// The note is injected as a *system item*, never spoken verbatim: the speech
+// model does the talking so there is no register seam between the stall clip
+// and the answer. That is the whole reason the two models are one brain rather
+// than a relay.
+func (a *actor) handleNote(ctx context.Context, n thinkerNote) {
+	if n.Turn != a.turn || a.state != StateDeferred && a.state != StateStalling {
+		a.emit("note_discarded", map[string]any{"turn": n.Turn, "state": a.state.String()})
+		return
+	}
+	a.timers.cancel(timerThinker)
+	a.closeTurnGate()
+	a.assessUnlock(n.Note)
+	a.recordSpokenClaims(n.Note)
+
+	text := n.Note.Text
+	// Contradiction guard: a note that reverses a live claim is downgraded
+	// to a restatement rather than injected. Deterministic, logged, and no
+	// model call — the alternative is a persona that argues with itself and
+	// a report that cannot tell whose fault that was.
+	if a.ledger != nil {
+		for _, claim := range n.Note.ClaimsToMake {
+			if existing, reason, found := a.ledger.FindContradiction(a.probedSkill, claim); found {
+				a.emit("contradiction_averted", map[string]any{
+					"claim": claim, "existing": existing.ClaimID, "reason": reason,
+				})
+				text = "Restate what you already said about " + a.probedSkill +
+					": " + existing.Statement + ". Do not contradict it."
+				break
+			}
+		}
+		for _, claim := range n.Note.ClaimsToMake {
+			a.ledger.Append(a.probedSkill, claim, ports.StanceAsserted,
+				ports.OriginThinkerNote, a.turn, a.clock.Now())
+		}
+	}
+	a.injectSystemItem(ctx, text, "thinker_note")
+	a.createResponse(ctx, "note injected")
+}
+
+// useFallback stands the contract's own directive in for a note that never
+// arrived. Persona-correct behaviour, and marked so the grader discounts any
+// depth claimed on this turn.
+func (a *actor) useFallback(ctx context.Context, reason string) {
+	a.closeTurnGate()
+	a.fallbackUsed = true
+	directive := a.contract.TurnPolicy.OnUnknownQuestion
+	if directive == "" {
+		directive = a.contract.TurnPolicy.OnPressure
+	}
+	a.emit("thinker_fallback", map[string]any{"reason": reason, "directive": directive})
+	a.injectSystemItem(ctx, directive, "fallback_directive")
+	a.createResponse(ctx, "thinker deadline missed")
+}
+
+// injectSystemItem adds context to the speech model without producing audio.
+func (a *actor) injectSystemItem(ctx context.Context, text, kind string) {
+	if a.speaking == nil || text == "" {
+		return
+	}
+	if err := a.speaking.InjectSystemItem(ctx, text); err != nil {
+		a.logger.Warn("inject system item failed", "kind", kind, "err", err)
+		return
+	}
+	a.emit("system_item_injected", map[string]any{"kind": kind})
+}
+
+// assessUnlock applies the Thinker's judgement about unlock_condition.
+//
+// **The Thinker assesses; the actor decides** (plan §7). The flip is monotonic
+// — depth once earned is never taken back — and both the turn and the evidence
+// ride out in the ingest metadata, because "did the interviewer earn the
+// unlock, and when" is a headline feedback signal.
+func (a *actor) assessUnlock(n ports.Note) {
+	if a.unlocked || n.Unlock == nil || !n.Unlock.Met {
+		return
+	}
+	if a.contract.UnlockSpec.Kind != "conditional" {
+		// kind == "never" short-circuits: no assessment should have run,
+		// and a Thinker claiming otherwise does not get to override the
+		// contract.
+		a.emit("unlock_ignored", map[string]any{"kind": a.contract.UnlockSpec.Kind})
+		return
+	}
+	a.unlocked = true
+	a.unlockTurn = a.turn
+	a.emit("unlock_flipped", map[string]any{
+		"turn": a.turn, "evidence": n.Unlock.Evidence,
+	})
+}
+
+// recordSpokenClaims appends what the persona actually said last turn.
+func (a *actor) recordSpokenClaims(n ports.Note) {
+	if a.ledger == nil {
+		return
+	}
+	for _, claim := range n.ClaimsMade {
+		a.ledger.Append(a.probedSkill, claim, ports.StanceAsserted,
+			ports.OriginSpoken, a.turn-1, a.clock.Now())
+	}
+}
+
+// refreshContext re-injects the two standing reminders on their cadences.
+//
+// Both are best-effort layers (plan §6 layer 4). The ledger summary exists
+// because realtime models forget the detail of their own audio history; the
+// ceiling re-assertion because prompt adherence drifts under sustained
+// pressure, which is exactly when an interviewer is probing hardest.
+func (a *actor) refreshContext(ctx context.Context) {
+	if a.ledger != nil && a.turn-a.lastLedgerInject >= ledgerRefreshTurns {
+		a.lastLedgerInject = a.turn
+		a.injectSystemItem(ctx, a.ledger.SpeakerSummary(0), "ledger_summary")
+	}
+	lowCeiling := a.probedSkill != "" && a.contract.KnowledgeCeiling[a.probedSkill] <= 3
+	if a.turn-a.lastCeilingAssert >= ceilingReassertTurns || lowCeiling {
+		a.lastCeilingAssert = a.turn
+		a.injectSystemItem(ctx, a.ceilingBlock(), "ceiling_reassertion")
+	}
+}
+
+// ceilingBlock renders the persona's hard limits as a system item.
+func (a *actor) ceilingBlock() string {
+	if len(a.contract.KnowledgeCeiling) == 0 {
+		return ""
+	}
+	skills := make([]string, 0, len(a.contract.KnowledgeCeiling))
+	for skill := range a.contract.KnowledgeCeiling {
+		skills = append(skills, skill)
+	}
+	sort.Strings(skills)
+	var b strings.Builder
+	b.WriteString("These ceilings are absolute, whatever you are asked:\n")
+	for _, skill := range skills {
+		b.WriteString("- ")
+		b.WriteString(skill)
+		b.WriteString(": level ")
+		b.WriteString(strconv.Itoa(a.contract.KnowledgeCeiling[skill]))
+		b.WriteString("/10\n")
+	}
+	return b.String()
 }
 
 // beginAnswer enters PRE_ANSWER and arms the human-pause delay.
@@ -360,12 +658,21 @@ func (a *actor) createResponse(ctx context.Context, reason string) {
 	}
 	a.sentences.reset()
 	a.turns.begin(a.turn, speakerPersona, a.clock.Now())
+	a.refreshContext(ctx)
+
 	tp := a.contract.TurnPolicy
+	depth := tp.DefaultAnswerDepth
+	if a.unlocked {
+		// The interviewer earned it. Depth up to the ceiling — never past
+		// it; unlocking is permission to stop holding back, not permission
+		// to know more than the persona knows.
+		depth = "thorough"
+	}
 	err := a.speaking.CreateResponse(ctx, ports.ResponseDirectives{
 		MinSentences:    tp.MinSentences,
 		MaxSentences:    tp.MaxSentences,
 		TargetSentences: tp.TargetSentencesPerAnswer,
-		AnswerDepth:     tp.DefaultAnswerDepth,
+		AnswerDepth:     depth,
 	})
 	if err != nil {
 		a.logger.Error("create response failed", "err", err)
@@ -407,6 +714,13 @@ func (a *actor) closePersonaTurn(bargedIn bool, heardMs int) {
 	a.turns.open.BargedIn = bargedIn
 	a.turns.open.HeardMs = heardMs
 	a.turns.close(a.clock.Now())
+}
+
+// release stops every alarm and voids any in-flight async work. The actor
+// does this on its way out; tests that drive it directly must do the same.
+func (a *actor) release() {
+	a.timers.cancelAll()
+	a.closeTurnGate()
 }
 
 // Turns returns the session's turn table. Read after the actor has stopped.

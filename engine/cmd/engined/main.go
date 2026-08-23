@@ -18,7 +18,10 @@ import (
 	"time"
 
 	"skillbrew/engine/internal/config"
+	"skillbrew/engine/internal/contract"
 	"skillbrew/engine/internal/fakes"
+	"skillbrew/engine/internal/gate"
+	"skillbrew/engine/internal/ledger"
 	"skillbrew/engine/internal/obs"
 	"skillbrew/engine/internal/session"
 )
@@ -84,7 +87,19 @@ func run(logger *slog.Logger) error {
 	// Session events go to stdout for now. Phase 5 routes them to the
 	// per-session JSONL artifact that ships to S3 with the recording.
 	events := obs.NewEventLog(os.Stdout)
-	manager := session.NewManager(realClock{}, contractSource, logger, events)
+	// The composition root, and the only place that names concrete
+	// implementations. internal/session sees ports; which lexicon, which
+	// ledger and which reasoning model back them is decided exactly here.
+	newDeps := func(c *contract.EngineContract) session.Deps {
+		return session.Deps{
+			PreGate: gate.New(c),
+			Ledger:  ledger.New(c.PrecompiledBeliefs, time.Now()),
+			// Thinker stays nil until a vendor adapter is wired: the
+			// session degrades to the single-model path rather than
+			// refusing to open.
+		}
+	}
+	manager := session.NewManager(realClock{}, contractSource, logger, events, newDeps)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)

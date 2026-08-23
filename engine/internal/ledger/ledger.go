@@ -17,61 +17,31 @@ import (
 	"time"
 
 	"skillbrew/engine/internal/contract"
+	"skillbrew/engine/internal/ports"
 )
 
-// Stance is how the persona holds a claim.
-const (
-	StanceAsserted = "asserted"
-	StanceDenied   = "denied"
-	StanceHedged   = "hedged"
-)
+// DefaultSpeakerSummaryLines caps the compact summary injected into the
+// realtime context.
+const DefaultSpeakerSummaryLines = 15
 
-// Origin records where a claim came from, so the grader can separate what the
-// persona was *designed* to believe from what it said on the day.
-const (
-	// OriginPrecompiled is a belief fixed at cast time. These exist before
-	// the first question, which is what keeps a session reproducible.
-	OriginPrecompiled = "precompiled_belief"
-	// OriginThinkerNote is a claim the reasoning model proposed.
-	OriginThinkerNote = "thinker_note"
-	// OriginSpoken is a claim extracted from what the persona actually said.
-	OriginSpoken = "spoken_extracted"
-)
-
-// Entry is one claim in the ledger.
-type Entry struct {
-	ClaimID   string    `json:"claim_id"`
-	Skill     string    `json:"skill"`
-	Statement string    `json:"statement"`
-	Stance    string    `json:"stance"`
-	Origin    string    `json:"origin"`
-	Turn      int       `json:"turn"`
-	TS        time.Time `json:"ts"`
-	// Supersedes names the claim this one walks back, empty otherwise. A
-	// walk-back is the only sanctioned reversal (plan §6 layer 7); anything
-	// else that reverses a claim is a contradiction, not a correction.
-	Supersedes string `json:"supersedes,omitempty"`
-}
-
-// Ledger is the per-session claim store.
+// Ledger is the per-session claim store, implementing ports.ClaimLedger.
 //
-// **Single writer: the session actor.** Everything else proposes. That is not
-// a concurrency shortcut — it is what makes the ledger a coherent account of
-// one persona rather than a race between two models writing beliefs.
-//
-// Not safe for concurrent use, deliberately.
+// **Single writer: the session actor.** Everything else proposes. Not safe for
+// concurrent use, deliberately.
 type Ledger struct {
-	entries []Entry
+	entries []ports.Claim
 	// bySkill indexes into entries for contradiction lookup.
 	bySkill map[string][]int
 	// nextRuntime numbers runtime claims r1, r2, … Precompiled ones keep
-	// the contract's b* ids so a session's beliefs trace back to the cast.
+	// the contract's b* ids, so a glance at an id says whether the persona
+	// was designed to believe this or said it on the day.
 	nextRuntime int
-	// superseded marks claims a walk-back has retired, so they stop
-	// counting as live commitments without being deleted — the timeline is
-	// the point.
+	// superseded marks claims a walk-back has retired: they stop counting
+	// as live commitments without leaving the timeline.
 	superseded map[string]bool
 }
+
+var _ ports.ClaimLedger = (*Ledger)(nil)
 
 // New returns a ledger seeded from the contract's precompiled beliefs at
 // turn 0. The persona's false beliefs exist before the first question.
@@ -81,12 +51,12 @@ func New(beliefs []contract.PrecompiledBelief, at time.Time) *Ledger {
 		superseded: make(map[string]bool),
 	}
 	for _, b := range beliefs {
-		l.appendEntry(Entry{
+		l.appendEntry(ports.Claim{
 			ClaimID:   b.ClaimID,
 			Skill:     b.Skill,
 			Statement: b.Statement,
-			Stance:    StanceAsserted,
-			Origin:    OriginPrecompiled,
+			Stance:    ports.StanceAsserted,
+			Origin:    ports.OriginPrecompiled,
 			Turn:      0,
 			TS:        at,
 		})
@@ -94,18 +64,19 @@ func New(beliefs []contract.PrecompiledBelief, at time.Time) *Ledger {
 	return l
 }
 
-func (l *Ledger) appendEntry(e Entry) Entry {
+func (l *Ledger) appendEntry(e ports.Claim) ports.Claim {
 	l.entries = append(l.entries, e)
-	l.bySkill[canonicalSkill(e.Skill)] = append(l.bySkill[canonicalSkill(e.Skill)], len(l.entries)-1)
+	key := canonicalSkill(e.Skill)
+	l.bySkill[key] = append(l.bySkill[key], len(l.entries)-1)
 	return e
 }
 
 // Append records a claim the persona has made. The statement is stored as
 // given — the canonical form is derived for comparison, never substituted for
 // what was actually said.
-func (l *Ledger) Append(skill, statement, stance, origin string, turn int, at time.Time) Entry {
+func (l *Ledger) Append(skill, statement, stance, origin string, turn int, at time.Time) ports.Claim {
 	l.nextRuntime++
-	return l.appendEntry(Entry{
+	return l.appendEntry(ports.Claim{
 		ClaimID:   runtimeID(l.nextRuntime),
 		Skill:     skill,
 		Statement: statement,
@@ -118,52 +89,44 @@ func (l *Ledger) Append(skill, statement, stance, origin string, turn int, at ti
 
 // WalkBack records an in-character retraction of an earlier claim.
 //
-// This is the only sanctioned reversal. It supersedes rather than deletes: the
-// belief timeline is what the grader reads, and a persona that said something
-// wrong and then corrected it is a different session from one that never said
-// it.
-func (l *Ledger) WalkBack(claimID, statement string, turn int, at time.Time) (Entry, bool) {
+// The only sanctioned reversal. It supersedes rather than deletes: a persona
+// that said something wrong and corrected it is a different session from one
+// that never said it, and the report is about the interviewer either way.
+func (l *Ledger) WalkBack(claimID, statement string, turn int, at time.Time) (ports.Claim, bool) {
 	prior, ok := l.byID(claimID)
 	if !ok {
-		return Entry{}, false
+		return ports.Claim{}, false
 	}
 	l.nextRuntime++
 	l.superseded[claimID] = true
-	return l.appendEntry(Entry{
+	return l.appendEntry(ports.Claim{
 		ClaimID:    runtimeID(l.nextRuntime),
 		Skill:      prior.Skill,
 		Statement:  statement,
-		Stance:     StanceDenied,
-		Origin:     OriginSpoken,
+		Stance:     ports.StanceDenied,
+		Origin:     ports.OriginSpoken,
 		Turn:       turn,
 		TS:         at,
 		Supersedes: claimID,
 	}), true
 }
 
-// Contradiction is a live claim that a proposed statement would reverse.
-type Contradiction struct {
-	Existing Entry
-	// Reason names how the conflict was detected, for the event log.
-	Reason string
-}
-
 // FindContradiction reports whether a proposed claim reverses something the
-// persona already committed to on the same skill.
+// persona already committed to on the same skill, and how it was detected.
 //
 // Deterministic and code-owned: it compares canonical forms and negation
-// parity. That catches the case this exists for — "Redis is single-threaded"
-// at turn 4 against "Redis is not single-threaded" at turn 19 — without a
-// model call on the latency path.
+// parity, catching the case it exists for — "Redis is single-threaded" at turn
+// 4 against "Redis is not single-threaded" at turn 19 — with no model call on
+// the latency path.
 //
 // It does **not** catch semantic contradiction between differently-worded
 // claims. Nothing deterministic does. That is the async Judge's job (plan §6
 // layer 6), and pretending otherwise here would be the kind of guarantee this
 // codebase refuses to claim.
-func (l *Ledger) FindContradiction(skill, statement string) (Contradiction, bool) {
+func (l *Ledger) FindContradiction(skill, statement string) (ports.Claim, string, bool) {
 	key, neg := canonicalStatement(statement)
 	if key == "" {
-		return Contradiction{}, false
+		return ports.Claim{}, "", false
 	}
 	for _, idx := range l.bySkill[canonicalSkill(skill)] {
 		e := l.entries[idx]
@@ -173,7 +136,7 @@ func (l *Ledger) FindContradiction(skill, statement string) (Contradiction, bool
 		// A hedge commits to nothing, so nothing can reverse it. Checked
 		// before the polarity comparison, or "I think Redis is
 		// single-threaded" would be treated as a firm claim to contradict.
-		if e.Stance == StanceHedged {
+		if e.Stance == ports.StanceHedged {
 			continue
 		}
 		existingKey, existingNeg := canonicalStatement(e.Statement)
@@ -181,18 +144,18 @@ func (l *Ledger) FindContradiction(skill, statement string) (Contradiction, bool
 			continue
 		}
 		if existingNeg != neg {
-			return Contradiction{Existing: e, Reason: "negation_flip"}, true
+			return e, "negation_flip", true
 		}
 		if oppositeStance(e.Stance, statement) {
-			return Contradiction{Existing: e, Reason: "stance_flip"}, true
+			return e, "stance_flip", true
 		}
 	}
-	return Contradiction{}, false
+	return ports.Claim{}, "", false
 }
 
 // Live returns the claims still standing, oldest first.
-func (l *Ledger) Live() []Entry {
-	out := make([]Entry, 0, len(l.entries))
+func (l *Ledger) Live() []ports.Claim {
+	out := make([]ports.Claim, 0, len(l.entries))
 	for _, e := range l.entries {
 		if !l.superseded[e.ClaimID] {
 			out = append(out, e)
@@ -203,8 +166,8 @@ func (l *Ledger) Live() []Entry {
 
 // All returns every claim including superseded ones, in append order. This is
 // the belief timeline the ingest payload carries.
-func (l *Ledger) All() []Entry {
-	out := make([]Entry, len(l.entries))
+func (l *Ledger) All() []ports.Claim {
+	out := make([]ports.Claim, len(l.entries))
 	copy(out, l.entries)
 	return out
 }
@@ -219,14 +182,13 @@ func (l *Ledger) SpeakerSummary(maxLines int) string {
 	if maxLines <= 0 {
 		maxLines = DefaultSpeakerSummaryLines
 	}
-	bySkill := make(map[string][]Entry)
+	bySkill := make(map[string][]ports.Claim)
 	skills := make([]string, 0, len(l.bySkill))
 	for _, e := range l.Live() {
-		k := e.Skill
-		if _, seen := bySkill[k]; !seen {
-			skills = append(skills, k)
+		if _, seen := bySkill[e.Skill]; !seen {
+			skills = append(skills, e.Skill)
 		}
-		bySkill[k] = append([]Entry{e}, bySkill[k]...) // newest first
+		bySkill[e.Skill] = append([]ports.Claim{e}, bySkill[e.Skill]...) // newest first
 	}
 	sort.Strings(skills)
 
@@ -274,15 +236,11 @@ func (l *Ledger) ThinkerSummary() string {
 	return b.String()
 }
 
-// DefaultSpeakerSummaryLines caps the compact summary injected into the
-// realtime context.
-const DefaultSpeakerSummaryLines = 15
-
-func (l *Ledger) byID(id string) (Entry, bool) {
+func (l *Ledger) byID(id string) (ports.Claim, bool) {
 	for _, e := range l.entries {
 		if e.ClaimID == id {
 			return e, true
 		}
 	}
-	return Entry{}, false
+	return ports.Claim{}, false
 }

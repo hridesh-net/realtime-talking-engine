@@ -52,6 +52,11 @@ type Manager struct {
 	// the log is the grader's record, not a runtime dependency, and a
 	// missing sink must never stop an interview.
 	events *obs.EventLog
+	// newDeps builds a session's collaborators from its contract. The
+	// Manager holds the factory, not the collaborators: a Thinker and a
+	// ledger are per-session, and the wiring that knows which vendor backs
+	// them lives in cmd/engined.
+	newDeps func(*contract.EngineContract) Deps
 
 	mu       sync.RWMutex
 	sessions map[string]*entry
@@ -65,9 +70,16 @@ func NewManager(
 	contracts ports.ContractSource,
 	logger *slog.Logger,
 	events *obs.EventLog,
+	newDeps func(*contract.EngineContract) Deps,
 ) *Manager {
+	if newDeps == nil {
+		// No collaborators wired: the session runs single-model. Legal,
+		// and what a v1.0-v1.2 contract gets anyway.
+		newDeps = func(*contract.EngineContract) Deps { return Deps{} }
+	}
 	return &Manager{
 		events:    events,
+		newDeps:   newDeps,
 		clock:     clock,
 		contracts: contracts,
 		logger:    logger,
@@ -122,7 +134,7 @@ func (m *Manager) CreateSession(ctx context.Context, candidateID string) (Sessio
 	// doc): a session outlives the HTTP request that created it.
 	actorCtx, cancel := context.WithCancel(context.Background())
 	a := newActor(id, c, m.clock,
-		m.logger.With("session_id", id, "candidate_id", candidateID), m.events)
+		m.logger.With("session_id", id, "candidate_id", candidateID), m.events, m.newDeps(c))
 	done := make(chan struct{})
 	go a.run(actorCtx, done)
 

@@ -77,8 +77,14 @@ func TestAFullFakeConversationProducesACorrectTurnTable(t *testing.T) {
 	clock.Advance(time.Second)
 	a.handlePartial(ctx, ports.Partial{Text: "How would you scale that?", Final: true})
 	a.handlePregate(ctx, pregateVerdict{Skill: "System design", Defer: true, Turn: a.turn})
-	if a.state != StateDeferred {
-		t.Fatalf("state = %s, want DEFERRED", a.state)
+	// No Thinker is wired in this session, so the defer collapses straight
+	// to the contract's own fallback directive — still persona-correct
+	// behaviour, and marked so the grader discounts depth on this turn.
+	if a.state != StateSpeaking {
+		t.Fatalf("state = %s, want SPEAKING via the fallback path", a.state)
+	}
+	if !a.fallbackUsed {
+		t.Fatal("a defer with no Thinker must be marked as having used the fallback")
 	}
 
 	turns := a.Turns()

@@ -52,6 +52,13 @@ type heartbeat struct {
 	At       time.Time
 }
 
+// thinkerNote carries one reasoning-model note into the actor, scoped to the
+// turn it was requested for so a late note cannot drive the next turn.
+type thinkerNote struct {
+	Note ports.Note
+	Turn int
+}
+
 // pregateVerdict is the deterministic pre-gate's classification of the
 // in-flight interviewer utterance.
 type pregateVerdict struct {

@@ -35,7 +35,7 @@ func newManager(t *testing.T) (*session.Manager, *fakes.ContractSource) {
 	if err != nil {
 		t.Fatalf("NewSampleContractSource: %v", err)
 	}
-	return session.NewManager(fakes.NewFakeClock(fixedNow), cs, testLogger(), nil), cs
+	return session.NewManager(fakes.NewFakeClock(fixedNow), cs, testLogger(), nil, nil), cs
 }
 
 func TestCreateSession_SpawnsAndIsLookupable(t *testing.T) {
@@ -110,7 +110,7 @@ func TestCreateSession_UnparseableContractRejectedWithTypedError(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	badCS := fakes.NewContractSource([]byte(`{"contract_version": "v2.0"}`))
-	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger(), nil)
+	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger(), nil, nil)
 
 	_, err := mgr.CreateSession(context.Background(), "vc-test-1")
 	if !errors.Is(err, session.ErrContractRejected) {
@@ -133,7 +133,7 @@ func TestCreateSession_MalformedContractJSONRejectedWithTypedError(t *testing.T)
 	defer goleak.VerifyNone(t)
 
 	badCS := fakes.NewContractSource([]byte(`not json at all`))
-	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger(), nil)
+	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger(), nil, nil)
 
 	_, err := mgr.CreateSession(context.Background(), "vc-test-1")
 	if !errors.Is(err, session.ErrContractRejected) {

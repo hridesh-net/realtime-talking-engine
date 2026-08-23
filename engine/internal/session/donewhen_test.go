@@ -37,7 +37,7 @@ func testContract(mayInterrupt bool) *contract.EngineContract {
 func newTestActor(t *testing.T, mayInterrupt bool) (*actor, *fakes.FakeClock) {
 	t.Helper()
 	clock := fakes.NewFakeClock(testNow)
-	a := newActor("sess-1", testContract(mayInterrupt), clock, quietLogger(), nil)
+	a := newActor("sess-1", testContract(mayInterrupt), clock, quietLogger(), nil, Deps{})
 	return a, clock
 }
 

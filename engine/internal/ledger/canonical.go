@@ -3,6 +3,8 @@ package ledger
 import (
 	"strconv"
 	"strings"
+
+	"skillbrew/engine/internal/ports"
 )
 
 // runtimeID numbers a runtime-observed claim. Precompiled beliefs keep their
@@ -12,12 +14,12 @@ func runtimeID(n int) string { return "r" + strconv.Itoa(n) }
 
 func normalizeStance(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case StanceDenied:
-		return StanceDenied
-	case StanceHedged:
-		return StanceHedged
+	case ports.StanceDenied:
+		return ports.StanceDenied
+	case ports.StanceHedged:
+		return ports.StanceHedged
 	default:
-		return StanceAsserted
+		return ports.StanceAsserted
 	}
 }
 
@@ -96,9 +98,9 @@ func stem(w string) string {
 func oppositeStance(existing, proposed string) bool {
 	_, negated := canonicalStatement(proposed)
 	switch existing {
-	case StanceAsserted:
+	case ports.StanceAsserted:
 		return negated
-	case StanceDenied:
+	case ports.StanceDenied:
 		return !negated
 	default:
 		// A hedge commits to nothing, so nothing contradicts it.

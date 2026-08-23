@@ -7,6 +7,7 @@ import (
 
 	"skillbrew/engine/internal/contract"
 	"skillbrew/engine/internal/ledger"
+	"skillbrew/engine/internal/ports"
 )
 
 var t0 = time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
@@ -32,8 +33,8 @@ func TestTheLedgerIsSeededBeforeTheFirstQuestion(t *testing.T) {
 		if e.Turn != 0 {
 			t.Errorf("%s seeded at turn %d, want 0", e.ClaimID, e.Turn)
 		}
-		if e.Origin != ledger.OriginPrecompiled {
-			t.Errorf("%s origin = %q, want %q", e.ClaimID, e.Origin, ledger.OriginPrecompiled)
+		if e.Origin != ports.OriginPrecompiled {
+			t.Errorf("%s origin = %q, want %q", e.ClaimID, e.Origin, ports.OriginPrecompiled)
 		}
 	}
 }
@@ -42,8 +43,8 @@ func TestPrecompiledAndRuntimeClaimsAreTellableApart(t *testing.T) {
 	// "Was this persona designed to believe it, or did it say it on the
 	// day" is a question the grader asks, so the id answers it.
 	l := seeded()
-	e := l.Append("Redis", "we used it for sessions too", ledger.StanceAsserted,
-		ledger.OriginSpoken, 3, t0)
+	e := l.Append("Redis", "we used it for sessions too", ports.StanceAsserted,
+		ports.OriginSpoken, 3, t0)
 	if !strings.HasPrefix(e.ClaimID, "r") {
 		t.Fatalf("runtime claim id = %q, want an r* id", e.ClaimID)
 	}
@@ -60,12 +61,12 @@ func TestAPlantedContradictionIsCaught(t *testing.T) {
 	// the ledger exists for: without it the persona asserts both, and the
 	// report cannot tell whether the interviewer missed a contradiction or
 	// there never was one.
-	c, found := l.FindContradiction("Redis", "Redis is not single-threaded")
+	existing, reason, found := l.FindContradiction("Redis", "Redis is not single-threaded")
 	if !found {
 		t.Fatal("a direct negation of a seeded belief must be caught")
 	}
-	if c.Existing.ClaimID != "b1" || c.Reason != "negation_flip" {
-		t.Fatalf("caught %+v, want b1 via negation_flip", c)
+	if existing.ClaimID != "b1" || reason != "negation_flip" {
+		t.Fatalf("caught %s via %q, want b1 via negation_flip", existing.ClaimID, reason)
 	}
 }
 
@@ -73,14 +74,14 @@ func TestRestatingAClaimIsNotAContradiction(t *testing.T) {
 	// A persona repeating itself is normal, and downgrading that note to
 	// "restate what you said before" would be a no-op that reads as a bug.
 	l := seeded()
-	if _, found := l.FindContradiction("Redis", "Redis is single-threaded"); found {
+	if _, _, found := l.FindContradiction("Redis", "Redis is single-threaded"); found {
 		t.Fatal("restating an existing claim must not count as contradiction")
 	}
 }
 
 func TestContradictionLookupIsScopedToTheSkill(t *testing.T) {
 	l := seeded()
-	if _, found := l.FindContradiction("Go", "Redis is not single-threaded"); found {
+	if _, _, found := l.FindContradiction("Go", "Redis is not single-threaded"); found {
 		t.Fatal("a claim about Go must not collide with a Redis belief")
 	}
 }
@@ -91,15 +92,15 @@ func TestSkillMatchingSurvivesCasingAndSpacing(t *testing.T) {
 	l := ledger.New([]contract.PrecompiledBelief{
 		{ClaimID: "b1", Skill: "System Design", Statement: "sharding fixes every scale problem"},
 	}, t0)
-	if _, found := l.FindContradiction("system  design", "sharding does not fix every scale problem"); !found {
+	if _, _, found := l.FindContradiction("system  design", "sharding does not fix every scale problem"); !found {
 		t.Fatal("skill matching must normalize case and whitespace")
 	}
 }
 
 func TestAHedgeCommitsToNothingSoNothingContradictsIt(t *testing.T) {
 	l := ledger.New(nil, t0)
-	l.Append("Redis", "Redis is single-threaded", ledger.StanceHedged, ledger.OriginSpoken, 2, t0)
-	if _, found := l.FindContradiction("Redis", "Redis is not single-threaded"); found {
+	l.Append("Redis", "Redis is single-threaded", ports.StanceHedged, ports.OriginSpoken, 2, t0)
+	if _, _, found := l.FindContradiction("Redis", "Redis is not single-threaded"); found {
 		t.Fatal("a hedged claim is not a commitment and cannot be contradicted")
 	}
 }
@@ -141,7 +142,7 @@ func TestAWalkBackSupersedesRatherThanDeletes(t *testing.T) {
 func TestAWalkBackClearsTheWayForTheCorrectedClaim(t *testing.T) {
 	l := seeded()
 	l.WalkBack("b1", "actually, I've only read about it", 11, t0)
-	if _, found := l.FindContradiction("Redis", "Redis is not single-threaded"); found {
+	if _, _, found := l.FindContradiction("Redis", "Redis is not single-threaded"); found {
 		t.Fatal("once walked back, the old claim must stop blocking the correction")
 	}
 }
@@ -160,8 +161,8 @@ func TestWalkingBackAnUnknownClaimFails(t *testing.T) {
 func TestTheSpeakerSummaryIsCappedBecauseItCompetesForContext(t *testing.T) {
 	l := ledger.New(nil, t0)
 	for i := 0; i < 40; i++ {
-		l.Append("Redis", "claim number "+string(rune('a'+i%26)), ledger.StanceAsserted,
-			ledger.OriginSpoken, i, t0)
+		l.Append("Redis", "claim number "+string(rune('a'+i%26)), ports.StanceAsserted,
+			ports.OriginSpoken, i, t0)
 	}
 	// One header line plus at most the cap in claim lines.
 	got := strings.Count(strings.TrimSpace(l.SpeakerSummary(0)), "\n")
