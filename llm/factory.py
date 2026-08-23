@@ -57,8 +57,14 @@ API_KEY_VARS: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
 }
 
+#: Pinned deliberately rather than pointed at a moving alias like
+#: `gemini-flash-latest`. A persona is compiled once and replayed from the
+#: database for every session, so the casting model silently changing under a
+#: stored persona is exactly the drift this codebase is built to prevent.
+#: `gemini-2.5-flash` was retired by Google and is scheduled for removal in
+#: September 2026 — moved off it before the removal, not after.
 DEFAULT_MODEL_IDS: dict[str, str] = {
-    "gemini": "gemini-2.5-flash",
+    "gemini": "gemini-3.7-flash",
     "openai": "gpt-4o-mini",
 }
 

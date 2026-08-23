@@ -106,7 +106,7 @@ the browser reports it back through `POST /sessions/{id}/transcript`.
 | Voice transcript is missing turns | Only finalised transcripts are stored — greyed italic text on screen has not been persisted yet. A `transcript not saved` banner means the POST failed. |
 | The voice persona answers above its knowledge ceiling | Known Speaker-only limitation: in voice mode the ceiling is prompt text with nothing enforcing it. See [Realtime voice](/concepts/contracts/realtime-voice.md). Reproduce in **Chat** to confirm whether the persona or the modality is at fault. |
 
-Latency is one model round trip per turn: roughly 2–8s on `gemini-2.5-flash`.
+Latency is one model round trip per turn: roughly 2–8s on `gemini-3.7-flash`.
 Point `SESSION_PROVIDER` / `SESSION_MODEL` at something else to trade cost
 against pace without touching the casting or expectation calls.
 

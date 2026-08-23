@@ -378,7 +378,12 @@ def _realism_section(traits: HumanTraitProfile | None) -> str:
         language.append("More than once you ask the interviewer to put a question another way.")
 
     compliance = [
-        COMPLIANCE_TRAP_DIRECTIVES[t].format(protected_info_type=traits.protected_info_type)
+        # `marital_status` is a vocabulary key, not English. The same rule the
+        # directive tables exist for applies to the one value interpolated
+        # into them.
+        COMPLIANCE_TRAP_DIRECTIVES[t].format(
+            protected_info_type=_english(traits.protected_info_type or "")
+        )
         for t in traits.compliance_traps
     ]
 
@@ -443,16 +448,85 @@ def _realism_section(traits: HumanTraitProfile | None) -> str:
         "WHO YOU ARE ON PAPER",
         f'Seniority: "{traits.seniority}". Function: "{traits.function}". '
         f'Region: "{traits.region}".',
-        f'Gender presentation: "{traits.gender_presentation}". Age band: "{traits.age_band}".',
-        f'Notice period: "{traits.notice_period}". Offers in hand: {traits.offers_in_hand}.',
+        f'Gender presentation: "{_english(traits.gender_presentation)}". '
+        f'Age band: "{traits.age_band}".',
+        f'Notice period: "{_english(traits.notice_period)}". '
+        f"Offers in hand: {traits.offers_in_hand}.",
     ]
 
     return "\n".join(parts) + "\n\n"
 
 
+def _english(value: str) -> str:
+    """A vocabulary key rendered for a reader: `30_days` -> `30 days`.
+
+    Closed vocabularies are keys, not English. Everywhere one is emitted as
+    prompt text rather than looked up in a directive table, it goes through
+    here — the underscore is an implementation detail of the key space.
+    """
+    return value.replace("_", " ")
+
+
 def _bullets(lines: list[str]) -> str:
     """One directive per line, as a bulleted block."""
     return "\n".join(f"- {line}" for line in lines)
+
+
+def casting_realism_note(traits: HumanTraitProfile | None) -> str:
+    """The realism layer, phrased for the *casting* prompt rather than the persona.
+
+    The compiled system prompt is not the only place these traits have to land.
+    `opening_line`, `sample_phrases`, `verbal_tics` and `always_does` are all
+    written by the casting model and then **stored**, and a session replays the
+    stored persona rather than re-deriving it. If the casting model never sees
+    the realism layer, it writes an opening line for a candidate who arrived on
+    time and chatty sample phrases for a monosyllabic one, and the contradiction
+    is baked into the artifact — left for the runtime model to reconcile, or
+    not, every session.
+
+    Same directive tables as `_realism_section`, so the two cannot drift.
+    """
+    if traits is None:
+        return "(none — this persona has no realism layer)"
+
+    env = traits.environment
+    lines = [
+        AFFECT_DIRECTIVES[traits.affect],
+        VERBAL_STYLE_DIRECTIVES[traits.verbal_style],
+        MOTIVATION_DIRECTIVES[traits.motivation],
+        NEGOTIATION_DIRECTIVES[traits.negotiation_stance],
+        VOCABULARY_CEILING_DIRECTIVES[traits.vocabulary_ceiling],
+        _accent_directive(traits.accent_strength),
+        _code_switch_directive(traits.code_switch_probability),
+        CLARIFICATION_DIRECTIVES[traits.clarification_rate],
+        MISINTERPRETATION_DIRECTIVES[traits.misinterprets_question_rate],
+    ]
+    lines += [INTEGRITY_DIRECTIVES[f] for f in traits.integrity_red_flags]
+    lines += [
+        COMPLIANCE_TRAP_DIRECTIVES[t].format(
+            protected_info_type=_english(traits.protected_info_type or "")
+        )
+        for t in traits.compliance_traps
+    ]
+    if env.joins_late_minutes:
+        lines.append(
+            f"You joined {env.joins_late_minutes} minutes late and acknowledge it briefly in "
+            "your first turn."
+        )
+    if env.mobile_or_driving:
+        lines.append("You are on your phone and moving, and it shows.")
+    # Facts, not behaviour — but the casting model picks `name`, `background`
+    # and `years_experience`, and picking them blind produced a persona called
+    # Manish Kumawat whose own runtime instructions read `Gender presentation:
+    # "woman"`. The stored artifact has to agree with itself.
+    lines.append(
+        f"On paper you are: {_english(traits.seniority)} in {traits.function}, based in "
+        f"{traits.region}, gender presentation {_english(traits.gender_presentation)}, age "
+        f"{traits.age_band}, notice period {_english(traits.notice_period)}, "
+        f"{traits.offers_in_hand} offer(s) in hand. The name and background you write must "
+        "be consistent with all of that."
+    )
+    return _bullets(lines)
 
 
 def _compile_system_prompt(

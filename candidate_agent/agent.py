@@ -23,7 +23,11 @@ from typing import Any
 
 from candidate_agent import archetypes as catalog
 from candidate_agent.archetypes import CATALOG_VERSION, TRAIT_NAMES, Archetype
-from candidate_agent.engine_contract import DEFAULT_LANGUAGE, build_engine_contract
+from candidate_agent.engine_contract import (
+    DEFAULT_LANGUAGE,
+    build_engine_contract,
+    casting_realism_note,
+)
 from candidate_agent.prompts import (
     PERSONA,
     SYSTEM_GUARDRAILS,
@@ -175,6 +179,7 @@ class VirtualCandidateAgent:
                 verdict=archetype.verdict,
                 interviewer_challenge=archetype.interviewer_challenge,
                 session_beats=archetype.session_beats,
+                realism_directives=casting_realism_note(human_traits),
                 language=language,
                 candidate_notes=candidate_notes,
                 traits=traits,

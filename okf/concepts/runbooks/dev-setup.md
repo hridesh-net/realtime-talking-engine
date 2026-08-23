@@ -75,7 +75,7 @@ Resolution per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/`LLM_MO
 | `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` / `ROLE_FACTS_PROVIDER` | — (auto-detect) |
 | `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` / `ROLE_FACTS_MODEL` | — |
 | `LLM_PROVIDER` / `LLM_MODEL` | — |
-| provider default model | `gemini-2.5-flash` / `gpt-4o-mini` |
+| provider default model | `gemini-3.7-flash` / `gpt-4o-mini` |
 
 `SESSION` is the one worth tuning: it is the only role called on every turn, so
 it dominates both cost and the pace of a practice interview.

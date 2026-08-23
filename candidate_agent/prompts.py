@@ -91,6 +91,14 @@ and opening_line so that a model reading only the compiled persona would perform
 them unprompted. Never mention the beats themselves — they are behaviour, not a
 script to recite.
 
+=== HOW THIS PERSONA COMES ACROSS (FIXED) ===
+{realism_directives}
+These are already compiled into the persona's own runtime instructions, so do
+not restate them. Write opening_line, sample_phrases, verbal_tics and
+always_does so they are *consistent* with these — a persona who joined late
+does not open as though they arrived on time, and one who answers in a handful
+of words does not get long, chatty sample phrases.
+
 === TRAIT SCORES (FIXED — write behaviour consistent with these) ===
 {traits_json}
 
@@ -161,6 +169,7 @@ def build_user_prompt(
     session_beats: list[str],
     language: str,
     candidate_notes: str,
+    realism_directives: str,
     traits: dict[str, int],
     speech: Mapping[str, Any],
     policy: Mapping[str, Any],
@@ -179,6 +188,7 @@ def build_user_prompt(
         else "Do not add skills beyond the required list."
     )
     return USER_PROMPT_TEMPLATE.format(
+        realism_directives=realism_directives,
         job_title=job_title,
         jd=jd,
         skills_required=", ".join(skills_required),

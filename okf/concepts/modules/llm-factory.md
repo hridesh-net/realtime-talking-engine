@@ -29,7 +29,7 @@ PROVIDERS: dict[str, Callable[[str, float, str], StructuredModel]] = {
 CHAT_PROVIDERS: dict[str, Callable[[str, float, str], ChatModel]] = {
     "gemini": GeminiChatModel, "openai": OpenAIChatModel}
 API_KEY_VARS   = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
-DEFAULT_MODEL_IDS = {"gemini": "gemini-2.5-flash", "openai": "gpt-4o-mini"}
+DEFAULT_MODEL_IDS = {"gemini": "gemini-3.7-flash", "openai": "gpt-4o-mini"}  # pinned, not `-latest`
 REALTIME_PROVIDERS: dict[str, Callable[[str, str], RealtimeBroker]] = {
     "openai": OpenAIRealtimeBroker}          # deliberately PARTIAL
 DEFAULT_REALTIME_MODEL_IDS = {"openai": "gpt-realtime-2"}
@@ -70,7 +70,7 @@ stripped and falsiness-checked), which is what makes the blank entries in
 
 ## Gotchas
 
-* `resolve_model_id` falls back to `LLM_MODEL` **regardless of provider**, so setting `LLM_MODEL=gemini-2.5-flash` while forcing `CANDIDATE_PROVIDER=openai` sends a Gemini model id to OpenAI. Per-role vars avoid it.
+* `resolve_model_id` falls back to `LLM_MODEL` **regardless of provider**, so setting `LLM_MODEL=gemini-3.7-flash` while forcing `CANDIDATE_PROVIDER=openai` sends a Gemini model id to OpenAI. Per-role vars avoid it.
 * Adding a role means adding a `ROLE_PREFIXES` entry; an unknown role silently skips the per-role lookup and uses only the shared fallback.
 * Both builders re-read the key after `resolve_provider` already checked it, via the shared `_credential` helper — the second check is marked `# pragma: no cover`.
 * **`build_realtime_broker` does not use `resolve_provider`.** It resolves against `REALTIME_PROVIDERS` alone, because the configured text provider may have no realtime API — falling through to it would fail at mint time with an error about the wrong thing. An explicit `VOICE_PROVIDER` naming a provider without realtime support is rejected up front, by name.

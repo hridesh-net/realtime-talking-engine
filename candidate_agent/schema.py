@@ -18,7 +18,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, StringConstraints
 
-PERSONA_VERSION = "v1.1"
+PERSONA_VERSION = "v1.2"
 ENGINE_CONTRACT_VERSION = "v1.2"
 
 

@@ -56,6 +56,18 @@ behaviour by another route. Every value therefore renders through a directive
 table in `candidate_agent/engine_contract.py`, and a test asserts no directive
 restates its own key.
 
+**A persona is compiled once and replayed.** The full `VirtualCandidate`,
+compiled `system_prompt` included, is stored as `persona_json` and a session
+resolves it from the database rather than re-deriving it. That makes casting-time
+coherence a correctness property, not a nicety: `opening_line`, `sample_phrases`,
+`verbal_tics` and `always_does` are model-authored and *stored*, so anything the
+casting model cannot see is permanently missing from the artifact that runs. The
+realism layer and the profile facts therefore reach the casting prompt as well as
+the compiled one (`engine_contract.casting_realism_note`) — before that, a
+persona told it joined six minutes late had an opening line written as though it
+arrived on time, and one whose profile said `gender presentation: woman` was cast
+under a man's name.
+
 Enforcement is not by prompt alone — the agent **re-imposes** the code side after
 the call:
 

@@ -165,7 +165,7 @@ row.
 
 * `ui/` is excluded from ruff and mypy; there is no JS lint or test setup.
 * `node_modules/` and `ui/dist/` are gitignored; `package-lock.json` is committed.
-* The AI-calling actions are slow and each shows its own pending state: *Generating…*, *Casting…*, and the session's *typing…* bubble. Enrollment is one serial model call per archetype; a session turn is one call round trip (~2–8s on `gemini-2.5-flash`).
+* The AI-calling actions are slow and each shows its own pending state: *Generating…*, *Casting…*, and the session's *typing…* bubble. Enrollment is one serial model call per archetype; a session turn is one call round trip (~2–8s on `gemini-3.7-flash`).
 * Sessions are now **listed** on the detail screen, but there is no *resume*. Closing the tab loses the live connection; the transcript is still stored and readable from the table. For a voice session the call is gone — a WebRTC peer connection is not re-establishable from a reload, so a reopened live session shows its transcript and nothing else.
 * Open Sans is loaded from Google Fonts in `index.html`. It is the only external request the UI makes, and the stack falls back to `system-ui` offline.
 * No JS test setup, so both session views are covered only by the Python endpoint tests plus manual use.
