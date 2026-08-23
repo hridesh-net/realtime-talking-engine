@@ -69,8 +69,8 @@ func canonicalStatement(s string) (key string, negated bool) {
 		// English inflects the verb when it negates: "fixes" becomes "does
 		// not fix". Dropping the negation token alone therefore leaves two
 		// keys that differ only by an "s", and the contradiction slips
-		// through. Stemming a trailing "s"/"es" is crude — it also folds
-		// "process" to "proces" — but it is applied identically to both
+		// through. Stemming a trailing "s"/"es" is crude — it also clips
+		// the final letter off a word like "process" — but it is applied identically to both
 		// sides, so equality comparison is unaffected and the inflection
 		// case is caught.
 		kept = append(kept, stem(f))

@@ -24,6 +24,7 @@ func NewHandler(manager *Manager, logger *slog.Logger) *Handler {
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/sessions", h.create)
 	mux.HandleFunc("DELETE /v1/sessions/{id}", h.stop)
+	mux.HandleFunc("POST /v1/sessions/{id}/transport", h.attachTransport)
 }
 
 // createRequest is the POST /v1/sessions request body.
@@ -81,6 +82,58 @@ func (h *Handler) writeCreateError(w http.ResponseWriter, err error) {
 	default:
 		h.logger.Error("session: create failed", "err", err)
 		h.writeError(w, http.StatusBadGateway, "could not create session")
+	}
+}
+
+// attachTransportRequest is the POST /v1/sessions/{id}/transport request
+// body: the client's SDP offer, carried as text (SDP is textual; unlike the
+// session id or the answer that comes back, no encoding decision is
+// needed).
+type attachTransportRequest struct {
+	Offer string `json:"offer"`
+}
+
+// attachTransportResponse is the POST /v1/sessions/{id}/transport response
+// body: the SDP answer.
+type attachTransportResponse struct {
+	Answer string `json:"answer"`
+}
+
+func (h *Handler) attachTransport(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		h.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+	var req attachTransportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+
+	answer, err := h.manager.AttachTransport(r.Context(), id, []byte(req.Offer))
+	if err != nil {
+		h.writeAttachTransportError(w, id, err)
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, attachTransportResponse{Answer: string(answer)})
+}
+
+// writeAttachTransportError maps an AttachTransport error to an HTTP
+// status: an unknown session id is 404, an already-attached transport is
+// 409 (the client's own retry racing its first call, not a new attempt to
+// service), and anything else — a rejected offer, no transport adapter
+// configured — is an upstream/engine-side problem, mapped to 502.
+func (h *Handler) writeAttachTransportError(w http.ResponseWriter, id string, err error) {
+	switch {
+	case errors.Is(err, ErrSessionNotFound):
+		h.writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrTransportAlreadyAttached):
+		h.writeError(w, http.StatusConflict, err.Error())
+	default:
+		h.logger.Error("session: attach transport failed", "session_id", id, "err", err)
+		h.writeError(w, http.StatusBadGateway, "could not attach transport")
 	}
 }
 

@@ -79,9 +79,19 @@ func (s State) String() string {
 // speakingish reports whether persona audio may be in flight in this state,
 // and therefore whether a barge-in has anything to interrupt. DEFERRED counts:
 // a stall clip is already queued by the time that state is entered.
+//
+// GREETING does **not** count, and used to. In GREETING the session is waiting
+// for the interviewer's *first utterance to end*; the opening line does not
+// start until the transition out of it, so there is no persona audio to
+// interrupt. Counting it caused two live faults: the interviewer's first word
+// registered as a barge-in and skipped the opening line entirely, and — worse —
+// the mic gate closed, so a persona with barge_in_allowed=false never heard the
+// first question at all.
 func (s State) speakingish() bool {
+	//exhaustive:ignore -- every other state defaults to false below, which
+	// is the correct answer for it, not a missing case.
 	switch s {
-	case StateGreeting, StatePreAnswer, StateDeferred, StateStalling, StateSpeaking:
+	case StatePreAnswer, StateDeferred, StateStalling, StateSpeaking:
 		return true
 	default:
 		return false

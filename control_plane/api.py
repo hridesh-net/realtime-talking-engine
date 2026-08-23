@@ -8,6 +8,7 @@ from candidate_agent import archetypes as archetype_catalog
 from candidate_agent import trait_dimensions
 from candidate_agent.agent import VirtualCandidateAgent
 from candidate_agent.archetypes import Archetype
+from candidate_agent.engine_contract import GEMINI_TTS_VOICES
 from candidate_agent.schema import (
     EngineContract,
     HumanTraitProfile,
@@ -287,6 +288,7 @@ async def enroll_candidates(
                 avoid_names=taken,
                 human_traits=human_traits,
                 archetype=archetype,
+                voices=GEMINI_TTS_VOICES,
             )
         except ModelError as exc:
             # A casting failure is the provider's answer, not a bug in this
@@ -415,6 +417,7 @@ async def start_session(
                 candidate_notes=interview.candidate_notes,
                 expectation=None,
                 avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
+                voices=GEMINI_TTS_VOICES,
             )
         except ModelError as exc:
             # A casting failure is the provider's answer, not a bug in this

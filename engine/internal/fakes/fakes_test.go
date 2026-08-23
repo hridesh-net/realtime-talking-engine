@@ -6,7 +6,9 @@ package fakes_test
 
 import (
 	"context"
+	"errors"
 	"io"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -365,13 +367,13 @@ func TestSampleContractSource_ServesParsableContract(t *testing.T) {
 	if err := src.NotifyIngest(ctx, ingest); err != nil {
 		t.Fatalf("NotifyIngest: %v", err)
 	}
-	if got := src.Ingests(); len(got) != 1 || got[0] != ingest {
+	if got := src.Ingests(); len(got) != 1 || !reflect.DeepEqual(got[0], ingest) {
 		t.Fatalf("Ingests() = %v, want [%v]", got, ingest)
 	}
 
 	wantErr := context.Canceled
 	src.SetFetchError(wantErr)
-	if _, err := src.FetchContract(ctx, "any"); err != wantErr {
+	if _, err := src.FetchContract(ctx, "any"); !errors.Is(err, wantErr) {
 		t.Fatalf("FetchContract after SetFetchError = %v, want %v", err, wantErr)
 	}
 }

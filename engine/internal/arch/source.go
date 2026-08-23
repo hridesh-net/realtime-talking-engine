@@ -214,7 +214,14 @@ func findCalls(root, importPath string, fns []string, exemptDirs []string, repor
 // gemini-*, gpt-*, or a Gemini "models/*" resource name. Anchored at the
 // start of the string, so a literal that merely mentions one of these
 // substrings mid-sentence (e.g. in a log message) does not false-positive.
-var modelIDPattern = regexp.MustCompile(`^(gemini-|gpt-|models/)`)
+//
+// "models/" requires something after the slash. The bare prefix is the Live
+// API's resource-path form, not a model identity — an adapter turning a
+// configured id into "models/<id>" is doing exactly what this rule wants,
+// and flagging it pushed a vendor-specific path format into internal/config,
+// which is meant to be vendor-neutral. A rule that is wrong in an obvious
+// case gets worked around rather than obeyed.
+var modelIDPattern = regexp.MustCompile(`^(gemini-|gpt-|models/.+)`)
 
 // FindModelIDLiterals reports every string literal under root that matches
 // modelIDPattern, except inside a directory that is, or is nested under, one

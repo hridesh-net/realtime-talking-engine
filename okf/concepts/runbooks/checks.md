@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-21T19:17:54Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T18:00:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
 status: stable
@@ -35,9 +37,23 @@ non-zero if any failed, with a summary list.
 | `pytest tests/test_candidate_rubric.py` | Determinism, clamping, scorecard integrity, prompt byte-stability |
 | `pytest tests/test_session.py` | The live text session — contract-verbatim prompt, transcript ordering, session SQL, and the session endpoints under `TestClient`. Offline: a fake `ChatModel`, an in-memory database |
 | `pytest tests/test_voice.py` | The voice session — deterministic voice/speed/eagerness, prompt verbatimness, the never-leak-the-prompt guarantee, and the voice endpoints. Offline: a fake `RealtimeBroker` |
-| gofmt / go vet / go build / `go test -race` / go architecture / golangci-lint | The [live-session engine](/concepts/subsystems/engine.md) in `engine/`. Every gate runs **from inside the module** — a repo-root `go vet ./...` finds no packages. Race detector always on. Activates when `engine/go.mod` exists; `golangci-lint` skips with a hint when not installed |
+| gofmt / go vet / go build / `go test -race` / go architecture / golangci-lint | The [live-session engine](/concepts/subsystems/engine.md) in `engine/`. Every gate runs **from inside the module** — a repo-root `go vet ./...` finds no packages. Race detector always on |
 | `export_schemas.py --check` | `owner_handover/` matches the Pydantic models |
-| Live scenarios | Only with `--live` — Python model scenarios plus the engine's `//go:build live` vendor tests |
+| Live scenarios | Only with `--live` — Python model scenarios plus the engine's `//go:build live` vendor tests. The Go live tests read credentials through `internal/config`, not `os.Getenv`, because the layering gate allows only that package to read the environment — which also means they exercise the same configuration path production does |
+
+### A gate that did not run must never read as one that did
+
+`check.sh` distinguishes two things that used to be the same call. **SKIP** is a
+gate deliberately not requested — `--live`, which costs money. **NOT RUN** is a
+gate whose tooling is absent, and it *fails the script*.
+
+The distinction was bought the hard way: `golangci-lint` was never installed, so
+the lint gate had never executed once in the module's life while the script
+still printed "All checks passed". `unused`, `gosec` and `revive` were silently
+inactive throughout. Set `ALLOW_MISSING_TOOLS=1` to accept the gap deliberately;
+do not make it the default.
+
+Install what the Go gates need with `brew install golangci-lint`.
 
 ## Live scenarios
 

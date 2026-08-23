@@ -1,0 +1,380 @@
+{
+  "_comment": "Offline evaluation fixture for the judgellm adapter. This file pins the adapter's parsing, normalisation and labelling pipeline against canned model responses driven through an httptest server — it does NOT measure real model judgement quality. Calibrating actual model precision/recall against a fixture like this is a separate, later, live task (requires a real vendor call and costs money); claiming this offline fixture measures model quality would be dishonest.",
+  "cases": [
+    {
+      "id": "clean-sql-index-heuristic",
+      "class": "clean",
+      "skill": "sql-query-optimization",
+      "ceiling": 3,
+      "beliefs": [
+        "Indexes 'make things faster' but she can't say why",
+        "She has run EXPLAIN a couple of times but doesn't trust the output"
+      ],
+      "question": "How would you speed up a slow SELECT against a million-row table?",
+      "answer": "Honestly I'd just try adding an index on whatever column is in the WHERE clause and see if it helps. I haven't really gone deeper than that.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Stays at a surface heuristic with no execution-plan reasoning; consistent with the ceiling.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "clean-redis-caching-generic",
+      "class": "clean",
+      "skill": "redis-caching",
+      "ceiling": 2,
+      "beliefs": [
+        "Redis is 'the fast database we cache stuff in'",
+        "Has heard of TTLs but has never configured eviction policy"
+      ],
+      "question": "How do you decide what goes into Redis versus the primary database?",
+      "answer": "Stuff that's read a lot and doesn't change much, I guess. We just cache the response and set some expiry so it doesn't go stale forever.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Generic caching intuition with no mention of eviction policy, memory pressure or invalidation strategy.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "clean-kubernetes-networking-basic",
+      "class": "clean",
+      "skill": "kubernetes-networking",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows pods get IPs and services 'route traffic somehow'",
+        "Has restarted a deployment before to fix a networking-looking issue"
+      ],
+      "question": "How does traffic get from outside the cluster to a specific pod?",
+      "answer": "There's a service in front of the pods, and I think it load balances between them. If a pod is unhealthy I usually just restart the deployment and that tends to fix it.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Correctly describes the shape without touching kube-proxy, iptables/IPVS, or endpoint reconciliation, which the ceiling excludes.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "clean-react-rendering-basic",
+      "class": "clean",
+      "skill": "react-rendering",
+      "ceiling": 2,
+      "beliefs": [
+        "Believes 'state changes re-render the component'",
+        "Has never profiled a render with the DevTools flamegraph"
+      ],
+      "question": "Why might a component re-render more often than you expect?",
+      "answer": "Probably because some state above it changed, or maybe a prop changed. I usually just add React.memo around things until it stops happening.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Surface-level cause and a trial-and-error fix, no reconciliation or dependency-array reasoning.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "clean-oauth2-basic",
+      "class": "clean",
+      "skill": "oauth2-flows",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows there's a 'login with Google' button and a redirect",
+        "Has never implemented a token refresh"
+      ],
+      "question": "What happens after a user clicks 'Sign in with Google'?",
+      "answer": "It sends them to Google, they log in, and then it bounces back to our app already signed in. I've never really looked at what happens in between.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Black-box description of the redirect flow with no mention of authorization code, tokens, or PKCE.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "clean-kafka-partitioning-basic",
+      "class": "clean",
+      "skill": "kafka-partitioning",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows Kafka 'splits topics into partitions for scale'",
+        "Has never had to reason about partition key skew"
+      ],
+      "question": "How would you make sure related events are processed in order?",
+      "answer": "I think you pick a key so related events go to the same partition, and then order is preserved there. I haven't had to tune the key choice myself though.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "States the correct high-level rule without reasoning about skew, rebalancing, or consumer-group semantics beyond it.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "clean-cpp-memory-basic",
+      "class": "clean",
+      "skill": "memory-management-cpp",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows 'new' needs a matching 'delete'",
+        "Has fixed leaks by adding delete calls until Valgrind stopped complaining"
+      ],
+      "question": "How do you avoid memory leaks in a long-running C++ service?",
+      "answer": "Mostly by making sure every new has a matching delete. I've run Valgrind before and just kept adding deletes until it stopped flagging things.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Manual pairing discipline, no mention of RAII, smart pointers, or ownership semantics.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "clean-terraform-state-basic",
+      "class": "clean",
+      "skill": "terraform-state",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows 'terraform apply' and that there's a state file somewhere",
+        "Has hit a state lock error once and asked a teammate for help"
+      ],
+      "question": "What would you do if two people ran terraform apply at the same time?",
+      "answer": "I'm not totally sure, but I've seen it throw an error about the state being locked before. I just waited and asked someone on the team what to do.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Reports the observed symptom and an escalation habit, no reasoning about the locking mechanism itself.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "breach-semantic-depth-redis-single-threaded",
+      "class": "breach",
+      "skill": "redis-caching",
+      "ceiling": 2,
+      "beliefs": [
+        "Redis is 'the fast database we cache stuff in'",
+        "Has heard of TTLs but has never configured eviction policy"
+      ],
+      "question": "Why might a single slow Redis command hurt throughput for everyone else?",
+      "answer": "Oh yeah, that's because Redis is single-threaded for command execution, so a long-running command like a big KEYS scan or an unbounded SORT blocks the event loop and every other client queued behind it stalls until it finishes.",
+      "canned_verdict": { "breach": true, "severity": "high", "rationale": "Accurately explains Redis's single-threaded event loop and command-blocking behaviour, well beyond the ceiling's black-box caching intuition.", "walkback_hint": "Trail off and say you 'just know it can get slow sometimes' without explaining why." },
+      "expected_breach": true,
+      "expected_severity": "high"
+    },
+    {
+      "id": "breach-semantic-depth-sql-execution-plan",
+      "class": "breach",
+      "skill": "sql-query-optimization",
+      "ceiling": 3,
+      "beliefs": [
+        "Indexes 'make things faster' but she can't say why",
+        "She has run EXPLAIN a couple of times but doesn't trust the output"
+      ],
+      "question": "How would you speed up a slow SELECT against a million-row table?",
+      "answer": "I'd pull the execution plan and check whether the planner is doing a sequential scan versus an index scan — if the index exists but isn't being used, it's often because the column has low cardinality or there's an implicit type cast preventing index usage, so I'd fix the predicate or add a partial index instead.",
+      "canned_verdict": { "breach": true, "severity": "high", "rationale": "Demonstrates fluent execution-plan reasoning, cardinality and implicit-cast awareness, and partial-index knowledge — several levels above a ceiling that distrusts EXPLAIN output.", "walkback_hint": "Say you mostly just try adding an index and see if the query 'feels faster'." },
+      "expected_breach": true,
+      "expected_severity": "high"
+    },
+    {
+      "id": "breach-semantic-depth-kubernetes-iptables",
+      "class": "breach",
+      "skill": "kubernetes-networking",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows pods get IPs and services 'route traffic somehow'",
+        "Has restarted a deployment before to fix a networking-looking issue"
+      ],
+      "question": "How does traffic get from outside the cluster to a specific pod?",
+      "answer": "kube-proxy watches the Endpoints objects and programs iptables DNAT rules — or IPVS if that mode's enabled — so a packet hitting the service's ClusterIP gets rewritten to one of the healthy pod IPs based on those rules, which is also why stale endpoints during a rollout can briefly blackhole traffic.",
+      "canned_verdict": { "breach": true, "severity": "medium", "rationale": "Correctly names kube-proxy's DNAT/IPVS programming and endpoint reconciliation, exceeding a ceiling that only knows 'a service routes traffic somehow.'", "walkback_hint": "Shrug and say you just know a service sits in front of the pods and 'balances' between them." },
+      "expected_breach": true,
+      "expected_severity": "medium"
+    },
+    {
+      "id": "breach-semantic-depth-react-fiber",
+      "class": "breach",
+      "skill": "react-rendering",
+      "ceiling": 2,
+      "beliefs": [
+        "Believes 'state changes re-render the component'",
+        "Has never profiled a render with the DevTools flamegraph"
+      ],
+      "question": "Why might a component re-render more often than you expect?",
+      "answer": "It's usually because a new object or function identity gets created on every render and passed down as a prop, so React's shallow comparison in memo or the reconciler's fiber diffing sees it as changed even though the value looks the same — you'd fix it with useMemo or useCallback to stabilize the reference.",
+      "canned_verdict": { "breach": true, "severity": "medium", "rationale": "Names referential-identity causes, shallow comparison, and the stabilization fix — a level of reconciler fluency the ceiling does not permit.", "walkback_hint": "Say you just wrap things in React.memo until the extra re-renders stop." },
+      "expected_breach": true,
+      "expected_severity": "medium"
+    },
+    {
+      "id": "breach-oauth2-pkce-detail",
+      "class": "breach",
+      "skill": "oauth2-flows",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows there's a 'login with Google' button and a redirect",
+        "Has never implemented a token refresh"
+      ],
+      "question": "What happens after a user clicks 'Sign in with Google'?",
+      "answer": "The app generates a PKCE code verifier and sends the hashed code challenge in the authorization request; after the user consents, Google redirects back with an authorization code, and the backend exchanges that code plus the original verifier for an access and refresh token.",
+      "canned_verdict": { "breach": true, "severity": "medium", "rationale": "Names PKCE verifier/challenge mechanics and the code-for-token exchange, well past a ceiling that has never touched token refresh.", "walkback_hint": "Say it just redirects them and 'somehow' they end up signed in." },
+      "expected_breach": true,
+      "expected_severity": "medium"
+    },
+    {
+      "id": "breach-kafka-rebalance-detail",
+      "class": "breach",
+      "skill": "kafka-partitioning",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows Kafka 'splits topics into partitions for scale'",
+        "Has never had to reason about partition key skew"
+      ],
+      "question": "What can go wrong if one partition key is much more popular than the others?",
+      "answer": "You get hot-partition skew — one broker ends up handling a disproportionate share of the traffic, consumer lag climbs on just that partition, and if you're relying on a single partition per consumer for ordering you can't just add more consumers to fix it because parallelism is capped by partition count.",
+      "canned_verdict": { "breach": true, "severity": "low", "rationale": "Correctly reasons about hot-partition skew and the parallelism-is-capped-by-partition-count constraint, one notch past the ceiling's high-level 'a key routes to a partition' understanding.", "walkback_hint": "Say you'd just add more partitions if things seemed slow, without explaining why." },
+      "expected_breach": true,
+      "expected_severity": "low"
+    },
+    {
+      "id": "breach-cpp-raii-detail",
+      "class": "breach",
+      "skill": "memory-management-cpp",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows 'new' needs a matching 'delete'",
+        "Has fixed leaks by adding delete calls until Valgrind stopped complaining"
+      ],
+      "question": "How do you avoid memory leaks in a long-running C++ service?",
+      "answer": "I lean on RAII — wrap ownership in a unique_ptr or shared_ptr so the destructor releases the resource automatically, even if an exception unwinds the stack partway through, rather than hand-pairing every new with a delete.",
+      "canned_verdict": { "breach": true, "severity": "low", "rationale": "Introduces RAII, smart-pointer ownership, and exception-safety reasoning the ceiling's manual new/delete pairing does not cover.", "walkback_hint": "Say you just try to make sure every new has a matching delete somewhere." },
+      "expected_breach": true,
+      "expected_severity": "low"
+    },
+    {
+      "id": "breach-terraform-locking-detail",
+      "class": "breach",
+      "skill": "terraform-state",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows 'terraform apply' and that there's a state file somewhere",
+        "Has hit a state lock error once and asked a teammate for help"
+      ],
+      "question": "What would you do if two people ran terraform apply at the same time?",
+      "answer": "With a remote backend like S3 plus a DynamoDB lock table, the second apply should fail to acquire the lock and back off — if it doesn't, you'd want to check the lock table for a stale lock ID left behind by a crashed run and force-unlock it carefully after confirming no apply is actually in flight.",
+      "canned_verdict": { "breach": true, "severity": "medium", "rationale": "Names the S3/DynamoDB locking mechanism and the stale-lock recovery procedure, well past a ceiling that only recalls seeing a lock error once.", "walkback_hint": "Say you saw a lock error once and just asked a teammate what to do." },
+      "expected_breach": true,
+      "expected_severity": "medium"
+    },
+    {
+      "id": "breach-distributed-consensus-quorum",
+      "class": "breach",
+      "skill": "distributed-consensus",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows 'we need more than half the nodes to agree'",
+        "Has never reasoned about split-brain during a network partition"
+      ],
+      "question": "What happens to your cluster if the network splits into two groups of nodes?",
+      "answer": "Whichever side still has a majority quorum keeps accepting writes and elects a leader if needed, while the minority side has to stop accepting writes to avoid a split-brain where both sides diverge — that's the whole reason you want an odd number of nodes, so a partition can't produce two equal-sized majorities.",
+      "canned_verdict": { "breach": true, "severity": "high", "rationale": "Explains quorum-based split-brain avoidance and the odd-node-count rationale in detail, far past a ceiling that only knows 'more than half must agree.'", "walkback_hint": "Say you're not sure what happens during a network split, just that you need most nodes to agree normally." },
+      "expected_breach": true,
+      "expected_severity": "high"
+    },
+    {
+      "id": "breach-embeddings-ann-detail",
+      "class": "breach",
+      "skill": "embeddings-search",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows embeddings 'turn text into vectors you can compare'",
+        "Has never tuned an approximate-nearest-neighbour index"
+      ],
+      "question": "How would you search a million embeddings quickly?",
+      "answer": "A flat brute-force scan doesn't scale, so you'd use an approximate-nearest-neighbour index like HNSW, tuning the graph's ef_search and M parameters to trade recall against latency, or IVF with product quantization if memory is the tighter constraint.",
+      "canned_verdict": { "breach": true, "severity": "medium", "rationale": "Names HNSW parameter tuning and IVF/PQ trade-offs, well past a ceiling that only knows embeddings are comparable vectors.", "walkback_hint": "Say you'd probably just compare every vector to every other one and hope it's fast enough." },
+      "expected_breach": true,
+      "expected_severity": "medium"
+    },
+    {
+      "id": "vague-sql-deflect",
+      "class": "vague",
+      "skill": "sql-query-optimization",
+      "ceiling": 3,
+      "beliefs": [
+        "Indexes 'make things faster' but she can't say why",
+        "She has run EXPLAIN a couple of times but doesn't trust the output"
+      ],
+      "question": "Can you walk me through how the query planner chooses between a sequential scan and an index scan?",
+      "answer": "Honestly, I've looked at the plan output before but I don't fully trust what I'm reading, so I usually just try adding an index and see if it gets faster rather than reasoning about what the planner is doing.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Sincere deflection to trial-and-error that matches the persona's stated distrust of EXPLAIN output; vagueness here is the correct, designed response.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "vague-redis-deflect",
+      "class": "vague",
+      "skill": "redis-caching",
+      "ceiling": 2,
+      "beliefs": [
+        "Redis is 'the fast database we cache stuff in'",
+        "Has heard of TTLs but has never configured eviction policy"
+      ],
+      "question": "What eviction policy does your Redis instance use, and why that one?",
+      "answer": "I'd have to check — I know there's a setting for that but I've never actually had to touch it or figure out which one we're on.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Honest admission of not knowing, consistent with never having configured eviction policy — vague but not a breach.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "vague-kubernetes-deflect",
+      "class": "vague",
+      "skill": "kubernetes-networking",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows pods get IPs and services 'route traffic somehow'",
+        "Has restarted a deployment before to fix a networking-looking issue"
+      ],
+      "question": "What actually rewrites the packet when it hits a Service's ClusterIP?",
+      "answer": "I'm honestly not sure what component does that under the hood — I just know there's a service in front of the pods and traffic gets spread across them somehow.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Explicit deflection that stays at the black-box level the ceiling permits; correctly vague rather than a breach.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "vague-oauth2-deflect",
+      "class": "vague",
+      "skill": "oauth2-flows",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows there's a 'login with Google' button and a redirect",
+        "Has never implemented a token refresh"
+      ],
+      "question": "How does the app know the user is still signed in an hour later without asking them to log in again?",
+      "answer": "I'm not totally sure — I think there's some kind of token that gets refreshed automatically, but I've never had to build that part myself.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Correctly vague gesture toward 'some kind of token' without naming refresh-token mechanics, matching a ceiling that has never implemented refresh.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "vague-kafka-deflect",
+      "class": "vague",
+      "skill": "kafka-partitioning",
+      "ceiling": 3,
+      "beliefs": [
+        "Knows Kafka 'splits topics into partitions for scale'",
+        "Has never had to reason about partition key skew"
+      ],
+      "question": "How would you detect that one partition is getting way more traffic than the others?",
+      "answer": "I haven't actually had to dig into that — I'd probably just notice something felt slow and ask someone on the platform team to take a look at the metrics.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Honest deflection to escalation, consistent with never having reasoned about key skew; correctly vague.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "vague-cpp-deflect",
+      "class": "vague",
+      "skill": "memory-management-cpp",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows 'new' needs a matching 'delete'",
+        "Has fixed leaks by adding delete calls until Valgrind stopped complaining"
+      ],
+      "question": "How would you reason about ownership of a pointer that's shared across two threads?",
+      "answer": "That's honestly past what I've had to deal with — I've mostly just made sure my news and deletes match up in single-threaded code and leaned on Valgrind to catch what I missed.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Sincere admission the question is past her depth, consistent with never reasoning about ownership beyond manual pairing; correctly vague.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    },
+    {
+      "id": "vague-terraform-deflect",
+      "class": "vague",
+      "skill": "terraform-state",
+      "ceiling": 2,
+      "beliefs": [
+        "Knows 'terraform apply' and that there's a state file somewhere",
+        "Has hit a state lock error once and asked a teammate for help"
+      ],
+      "question": "How does Terraform actually implement the state lock — what's underneath it?",
+      "answer": "I don't really know what's underneath it — I just remember hitting an error that said the state was locked once, and I asked a teammate who knew what to do about it.",
+      "canned_verdict": { "breach": false, "severity": "", "rationale": "Repeats the one known surface fact and defers to a teammate rather than inventing mechanism; correctly vague.", "walkback_hint": "" },
+      "expected_breach": false,
+      "expected_severity": ""
+    }
+  ]
+}

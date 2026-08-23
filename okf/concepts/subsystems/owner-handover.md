@@ -45,16 +45,31 @@ serves it. `candidate_archetypes.json` is exported too — the full catalog as
 
 ## Hand-maintained
 
-Samples are written by hand and left alone by the exporter:
+Samples are written by hand and left alone by `scripts/export_schemas.py`:
 `interview_create_sample.json`, `expectation_output_sample.json`,
-`candidate_output_sample.json`, `engine_contract_sample.json`, plus
-`interview_create_schema.json` and `expectation_input_schema.json`.
+`candidate_output_sample.json`, plus `interview_create_schema.json` and
+`expectation_input_schema.json`.
+
+**`engine_contract_sample.json` is the one exception (since M1.2), and it is
+not hand-written.** It is produced by its own script,
+`scripts/export_engine_contract_sample.py`, which drives
+`build_engine_contract` and its compiling helpers over real persona fields — no
+live model call, deterministic (byte-identical on a repeat run). Before M1.2
+this file (and its Go-side twin,
+`engine/internal/contract/testdata/engine_contract_sample.json`) had drifted to
+`contract_version: "v1.0"` against a schema on `"v1.3"`, with all five v1.3
+fields silently absent, and `export_schemas.py --check` did not catch it
+because it validated schemas only. `--check` now also asserts this one sample's
+version and v1.3 fields directly — see
+[engine_contract.py](/concepts/modules/candidate-agent-engine-contract.md).
 
 ## The rule
 
-`scripts/check.sh` runs `--check`, so **any change to one of those five Pydantic
-models fails the build until the schemas are regenerated.** That is the whole
-point: the handover cannot drift from the code.
+`scripts/check.sh` runs `export_schemas.py --check`, so **any change to one of
+those five Pydantic models fails the build until the schemas are
+regenerated** — and now also fails if `engine_contract_sample.json` drifts from
+`ENGINE_CONTRACT_VERSION`. That is the whole point: the handover cannot drift
+from the code.
 
 ## ⚠️ These files are gitignored
 

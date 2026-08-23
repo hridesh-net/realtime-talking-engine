@@ -106,20 +106,20 @@ func TestACancelledTimerCannotDriveTheNextTurn(t *testing.T) {
 	ts := newTimerSet(clock, fires)
 	defer ts.cancelAll()
 
-	ts.arm(timerStall, 100*time.Millisecond)
-	stale := timerFire{Kind: timerStall, At: testNow, Gen: ts.gens[timerStall]}
-	ts.cancel(timerStall)
+	ts.arm(timerPlayout, 100*time.Millisecond)
+	stale := timerFire{Kind: timerPlayout, At: testNow, Gen: ts.gens[timerPlayout]}
+	ts.cancel(timerPlayout)
 
 	if ts.live(stale) {
 		t.Fatal("a fire from a cancelled timer must not be live")
 	}
 
 	// Re-arming the same kind must not resurrect the old fire either.
-	ts.arm(timerStall, 100*time.Millisecond)
+	ts.arm(timerPlayout, 100*time.Millisecond)
 	if ts.live(stale) {
 		t.Fatal("a fire from a superseded arming must not be live")
 	}
-	fresh := timerFire{Kind: timerStall, At: testNow, Gen: ts.gens[timerStall]}
+	fresh := timerFire{Kind: timerPlayout, At: testNow, Gen: ts.gens[timerPlayout]}
 	if !ts.live(fresh) {
 		t.Fatal("the current arming's fire must be live")
 	}
@@ -129,12 +129,12 @@ func TestBargeInCancelsEveryTurnTimerButNotTheSessionCaps(t *testing.T) {
 	clock := fakes.NewFakeClock(testNow)
 	ts := newTimerSet(clock, make(chan timerFire, 8))
 	defer ts.cancelAll()
-	for _, k := range []timerKind{timerPause, timerPregate, timerStall, timerThinker, timerSilence, timerSession} {
+	for _, k := range []timerKind{timerPause, timerPregate, timerPlayout, timerThinker, timerSilence, timerSession} {
 		ts.arm(k, time.Second)
 	}
 	ts.cancelTurnScoped()
 
-	for _, k := range []timerKind{timerPause, timerPregate, timerStall, timerThinker} {
+	for _, k := range []timerKind{timerPause, timerPregate, timerPlayout, timerThinker} {
 		if ts.isArmed(k) {
 			t.Errorf("%s should be cancelled with the turn", k)
 		}
@@ -188,7 +188,7 @@ func TestBargeInTruncatesAtWhatWasHeardNotWhatWasSent(t *testing.T) {
 	p := newPlayoutTracker(defaultSampleRate)
 	now := testNow
 	p.begin("item-1", now)
-	p.sent(pcmFor(5 * time.Second))
+	p.sent(pcmFor(5*time.Second), defaultSampleRate)
 
 	now = now.Add(2100 * time.Millisecond)
 	p.heartbeat("item-1", 2100, now)
@@ -205,7 +205,7 @@ func TestHeardTimeExtrapolatesBetweenHeartbeats(t *testing.T) {
 	p := newPlayoutTracker(defaultSampleRate)
 	now := testNow
 	p.begin("item-1", now)
-	p.sent(pcmFor(5 * time.Second))
+	p.sent(pcmFor(5*time.Second), defaultSampleRate)
 	p.heartbeat("item-1", 2000, now)
 
 	// 250 ms later, before the next heartbeat, the human has heard 250 ms
@@ -219,7 +219,7 @@ func TestHeardTimeNeverExceedsWhatWasActuallySent(t *testing.T) {
 	p := newPlayoutTracker(defaultSampleRate)
 	now := testNow
 	p.begin("item-1", now)
-	p.sent(pcmFor(1 * time.Second))
+	p.sent(pcmFor(1*time.Second), defaultSampleRate)
 	p.heartbeat("item-1", 1000, now)
 
 	// Ten seconds of wall time later, only one second was ever transmitted.
@@ -234,7 +234,7 @@ func TestAStaleHeartbeatCannotWalkTheEstimateBackwards(t *testing.T) {
 	p := newPlayoutTracker(defaultSampleRate)
 	now := testNow
 	p.begin("item-1", now)
-	p.sent(pcmFor(5 * time.Second))
+	p.sent(pcmFor(5*time.Second), defaultSampleRate)
 	p.heartbeat("item-1", 3000, now)
 	p.heartbeat("item-1", 1000, now) // stale, out of order
 
@@ -246,7 +246,7 @@ func TestAStaleHeartbeatCannotWalkTheEstimateBackwards(t *testing.T) {
 func TestHeartbeatsForAnotherItemAreIgnored(t *testing.T) {
 	p := newPlayoutTracker(defaultSampleRate)
 	p.begin("item-2", testNow)
-	p.sent(pcmFor(2 * time.Second))
+	p.sent(pcmFor(2*time.Second), defaultSampleRate)
 	p.heartbeat("item-1", 1900, testNow) // previous response, still in flight
 
 	if got := p.heardMs(testNow); got != 0 {

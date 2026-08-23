@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-21T19:17:54Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T18:00:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
 status: stable
@@ -57,6 +59,12 @@ status: stable
 | `docs/ENGINE_IMPLEMENTATION_PLAN.md` | [Live-session engine](/concepts/subsystems/engine.md) |
 | `docs/ENGINE_ONE_BRAIN_TWO_PARTS.html` | [Live-session engine](/concepts/subsystems/engine.md) — diagrams of the Speaker/Thinker sync; open in a browser |
 | `engine/` | [Live-session engine](/concepts/subsystems/engine.md) — Go module, separate build and CI gate |
+| `engine/internal/session/` | [Live-session engine](/concepts/subsystems/engine.md) — the turn loop and the actor; start at its state table |
+| `engine/internal/audio/` | [Live-session engine](/concepts/subsystems/engine.md) — sample domain: resampler, onset detection, jitter buffer, send ring |
+| `engine/internal/transport/` | [Live-session engine](/concepts/subsystems/engine.md) — `wsfallback` carries live traffic today; `webrtc` is a placeholder |
+| `engine/internal/vendors/gemini/` | [Live-session engine](/concepts/subsystems/engine.md) — the Speaker, over the Gemini **Live** API. Read its live-verified facts before changing it |
+| `engine/internal/vendors/` (others) | [Live-session engine](/concepts/subsystems/engine.md) — reasoning adapters and TTS; only `cmd/engined` may import any of them |
+| `engine/internal/stall/` | [Live-session engine](/concepts/subsystems/engine.md) — pre-synthesized opening line and stall clips |
 | `.golangci.yml` | [Live-session engine](/concepts/subsystems/engine.md), [Checks](/concepts/runbooks/checks.md) |
 | `pyproject.toml`, `.env.example` | [Conventions](/concepts/conventions.md), [Dev setup](/concepts/runbooks/dev-setup.md) |
 | `control_plane.db` | [Database schema](/concepts/contracts/database-schema.md) — gitignored |
@@ -78,4 +86,5 @@ status: stable
 | The transcript shape, turn timing, or session status | [Session transcript](/concepts/contracts/session-transcript.md) — the evaluation layer and the Go engine both depend on it |
 | Swap SQLite for Postgres | [Storage ports](/concepts/contracts/storage-ports.md), [Database schema](/concepts/contracts/database-schema.md) |
 | Anything inside `engine/` | [Live-session engine](/concepts/subsystems/engine.md) — then `go test ./internal/arch`, which enforces the layering |
+| A vendor's observed behaviour (Live API, TTS) | [Live-session engine](/concepts/subsystems/engine.md) — the live-verified facts section. Several of them removed planned work; do not re-derive them from docs |
 | Change any Pydantic model in the public surface | [Owner handover](/concepts/subsystems/owner-handover.md) — regenerate, or CI fails |

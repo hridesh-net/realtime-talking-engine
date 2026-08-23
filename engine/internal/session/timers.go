@@ -17,9 +17,19 @@ const (
 	// timerPregate bounds how long the actor waits for a pre-gate verdict
 	// after end-of-turn before treating the turn as CONFIDENT.
 	timerPregate
-	// timerStall bounds how long a stall clip covers for the Thinker
-	// before the actor falls back to the contract's own directive.
-	timerStall
+	// timerPlayout fires when a pre-synthesized clip — the opening line or
+	// a stall clip — has finished playing.
+	//
+	// It exists because those clips are not vendor responses: no
+	// ResponseDone will ever arrive for them, and ResponseDone is
+	// SPEAKING's only legal exit. Without this alarm the greeting is a
+	// dead end, which is exactly what it was.
+	//
+	// It replaced a timerStall kind that was dead three ways over — never
+	// armed, no handler, present only in String(). Its documented job,
+	// bounding how long a stall clip covers for the Thinker, is what
+	// timerThinker actually does, so it was redundant as well as dead.
+	timerPlayout
 	// timerThinker bounds the Thinker's note deadline.
 	timerThinker
 	// timerSilence detects an interviewer who has stopped participating.
@@ -35,8 +45,8 @@ func (k timerKind) String() string {
 		return "pause"
 	case timerPregate:
 		return "pregate"
-	case timerStall:
-		return "stall"
+	case timerPlayout:
+		return "playout"
 	case timerThinker:
 		return "thinker"
 	case timerSilence:

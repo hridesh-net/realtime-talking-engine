@@ -2,12 +2,14 @@ package arch
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Package is one Go package as reported by `go list -json`, trimmed to the
@@ -46,13 +48,24 @@ type rawListPackage struct {
 // reachable indirectly, the intermediate package that imports it directly is
 // itself a violation, so checking direct imports of every package is
 // sufficient.
+// The call is bounded by a context rather than left open-ended. `go list` can
+// block indefinitely — on a module fetch against an unreachable proxy, most
+// obviously — and this function is the first thing the layering gate does, so
+// an unbounded call turns a network problem into a CI run that hangs rather
+// than fails. Two minutes is far beyond a warm local run and still finite.
 func LoadPackages(moduleDir string) ([]Package, error) {
-	cmd := exec.Command("go", "list", "-json", "./...")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "list", "-json", "./...")
 	cmd.Dir = moduleDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("arch: go list -json ./... in %s timed out after 2m: %w", moduleDir, ctx.Err())
+		}
 		return nil, fmt.Errorf("arch: go list -json ./... in %s: %w (stderr: %s)", moduleDir, err, stderr.String())
 	}
 
@@ -82,6 +95,9 @@ func LoadPackages(moduleDir string) ([]Package, error) {
 // hardcoded module name.
 func ModulePath(moduleDir string) (string, error) {
 	path := filepath.Join(moduleDir, "go.mod")
+	// #nosec G304 -- moduleDir is resolved from this package's own source
+	// location via runtime.Caller, never from external or caller-supplied
+	// input, and the filename is a constant.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("arch: read %s: %w", path, err)
@@ -149,21 +165,43 @@ func allImports(pkg Package) []string {
 // CheckVendorLeakage exempts from the "no vendor/transport/store" rule.
 const cmdEnginedPrefix = "cmd/engined"
 
-// forbiddenPackagePrefixes are the internal package trees only cmd/engined
-// may reach, per plan §3/§10: vendor SDKs, wire transports, and the S3 store
-// are adapters wired once at the process edge, mirroring this repo's Python
-// rule that vendor SDKs live only inside llm/.
+// Why "internal/vendors" and not "internal/vendor": Go reserves any
+// directory literally named "vendor" for its own dependency-vendoring
+// mechanism, and a package that lives under one cannot be imported by its
+// import path at all — confirmed against a scratch module, where
+// probe/internal/vendor/foo can only be imported as "foo". The adapter
+// trees originally lived under internal/vendor/ and that would have blocked
+// every single adapter (Speaker, Transcriber, TTS, Judge) from ever being
+// imported, staying invisible only because Phase 0 shipped them as empty
+// doc.go stubs nothing imported yet. The tree was renamed to
+// internal/vendors/ for that reason; this comment is what keeps it from
+// being "tidied" back to the singular.
 var forbiddenPackagePrefixes = []string{
-	"internal/vendor",
+	"internal/vendors",
 	"internal/transport",
 	"internal/store",
 }
 
+// vendorsSharedPrefix is the one package tree under internal/vendors/ that
+// forbiddenPackagePrefixes' own members may import from each other. It holds
+// vendor-facing plumbing (e.g. the shared Gemini JSON-mode HTTP client) that
+// more than one adapter legitimately needs, and nothing else — see
+// CheckVendorLeakage's carve-out.
+const vendorsSharedPrefix = "internal/vendors/shared"
+
 // CheckVendorLeakage enforces plan §10 rule 1: no package outside
-// cmd/engined imports internal/vendor/…, internal/transport/…, or
+// cmd/engined imports internal/vendors/…, internal/transport/…, or
 // internal/store/…. Both production imports and test imports are in scope —
 // a test that reaches around internal/fakes to call a vendor SDK directly
 // defeats the point of having fakes just as much as production code would.
+//
+// The one narrow exception: a package under internal/vendors/ may import a
+// package under internal/vendors/shared/, since that is where plumbing two
+// or more adapters legitimately share lives (e.g. thinkerllm and judgellm
+// both speaking the same JSON-mode HTTP client). This is deliberately not a
+// general "same-tree siblings may import each other" rule — that would also
+// legalise a Speaker adapter importing a reasoning-model adapter, which is
+// precisely the coupling rule 1 exists to prevent.
 func CheckVendorLeakage(pkgs []Package, modulePath string) []Violation {
 	var violations []Violation
 	for _, pkg := range pkgs {
@@ -171,11 +209,21 @@ func CheckVendorLeakage(pkgs []Package, modulePath string) []Violation {
 		if under(rel, cmdEnginedPrefix) {
 			continue
 		}
+		isVendorPkg := under(rel, "internal/vendors")
 		for _, imp := range allImports(pkg) {
+			if imp == pkg.ImportPath {
+				// An external test package (package foo_test) importing the
+				// very package under test is go list's ordinary XTestImports
+				// shape, not a package reaching into a sibling adapter.
+				continue
+			}
 			if !isModuleInternal(imp, modulePath) {
 				continue
 			}
 			impRel := relativeImport(imp, modulePath)
+			if isVendorPkg && under(impRel, vendorsSharedPrefix) {
+				continue
+			}
 			for _, forbidden := range forbiddenPackagePrefixes {
 				if under(impRel, forbidden) {
 					violations = append(violations, Violation{
@@ -257,7 +305,7 @@ func CheckRestrictedImports(pkgs []Package, modulePath string) []Violation {
 		rel := relativeImport(pkg.ImportPath, modulePath)
 		isRestricted := false
 		for _, p := range restrictedPackages {
-			if rel == p {
+			if under(rel, p) {
 				isRestricted = true
 				break
 			}
@@ -276,6 +324,61 @@ func CheckRestrictedImports(pkgs []Package, modulePath string) []Violation {
 					Detail: fmt.Sprintf(
 						"imports %s; %s may only import internal/ports, internal/contract, internal/obs, and stdlib — move this dependency behind a port",
 						imp, rel,
+					),
+				})
+			}
+		}
+	}
+	return violations
+}
+
+// adapterAllowedPrefixes are the module-internal package trees a package
+// under a forbiddenPackagePrefixes tree (internal/vendors, internal/transport,
+// internal/store) may import. These are the process-edge adapters — the plan
+// states they may depend on ports, config, obs, the audio helpers, and the
+// vendor plumbing shared under internal/vendors/shared, and nothing else
+// module-internal: an adapter is wired once at cmd/engined and must not reach
+// sideways into the session's deterministic core or into another adapter.
+var adapterAllowedPrefixes = []string{
+	"internal/ports",
+	"internal/config",
+	"internal/obs",
+	"internal/audio",
+	vendorsSharedPrefix,
+}
+
+// CheckAdapterImports enforces the plan's adapter-layering rule, stated in
+// ENGINE_IMPLEMENTATION_PLAN.md §10 but never wired into this package until
+// now: a package under internal/vendors/, internal/transport/, or
+// internal/store/ may import, among this module's own packages, only
+// internal/ports, internal/config, internal/obs, internal/audio, and
+// internal/vendors/shared/….
+//
+// The restriction applies only to module-internal imports. Third-party and
+// stdlib imports are always allowed and outside this rule's concern — an
+// adapter's entire job is to speak a vendor's or a transport's wire protocol,
+// so github.com/hraban/opus and the Pion WebRTC stack must remain legal.
+// Only production imports (pkg.Imports) are checked, matching
+// CheckRestrictedImports' precedent: a test importing internal/fakes is the
+// intended testing pattern, not a layering violation.
+func CheckAdapterImports(pkgs []Package, modulePath string) []Violation {
+	var violations []Violation
+	for _, pkg := range pkgs {
+		rel := relativeImport(pkg.ImportPath, modulePath)
+		if !underAny(rel, forbiddenPackagePrefixes) {
+			continue
+		}
+		for _, imp := range pkg.Imports {
+			if !isModuleInternal(imp, modulePath) {
+				continue // stdlib or third-party: always allowed
+			}
+			impRel := relativeImport(imp, modulePath)
+			if !underAny(impRel, adapterAllowedPrefixes) {
+				violations = append(violations, Violation{
+					Subject: pkg.ImportPath,
+					Detail: fmt.Sprintf(
+						"imports %s; an adapter under internal/vendors, internal/transport, or internal/store may only depend on internal/ports, internal/config, internal/obs, internal/audio, or internal/vendors/shared — move this dependency behind a port",
+						imp,
 					),
 				})
 			}

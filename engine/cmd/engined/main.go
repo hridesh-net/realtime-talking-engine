@@ -24,7 +24,17 @@ import (
 	"skillbrew/engine/internal/ledger"
 	"skillbrew/engine/internal/obs"
 	"skillbrew/engine/internal/session"
+	"skillbrew/engine/internal/stall"
+	"skillbrew/engine/internal/transport/wsfallback"
+	"skillbrew/engine/internal/vendors/gemini"
+	"skillbrew/engine/internal/vendors/geminitts"
+	"skillbrew/engine/internal/vendors/thinkerllm"
 )
+
+// mediaPath is where a client attaches its media socket, using the ticket
+// returned in the transport answer. It matches the path the answer implies,
+// so changing one without the other silently strands every client.
+const mediaPath = "/v1/media/ws"
 
 // shutdownTimeout bounds how long engined waits, on SIGINT/SIGTERM, for the
 // HTTP server to drain in-flight requests and for live sessions to stop
@@ -54,10 +64,24 @@ func run(logger *slog.Logger) error {
 	sampleContract := flag.Bool("dev-sample-contract", false,
 		"serve the checked-in sample persona to every session instead of fetching "+
 			"from the control plane; development only")
-	flag.Parse()
 
-	cfg, err := config.LoadFromEnv()
-	if err != nil {
+	// cfg is non-nil even if the load below fails (see Load's doc comment):
+	// every optional field still carries its default or env-derived value,
+	// which is what lets BindFlags register real, well-defaulted flags —
+	// and "-h" produce a real usage listing — even when a required key is
+	// missing. BindFlags must run before Parse: Parse then overwrites
+	// cfg's fields in place with anything the operator passed on the
+	// command line. Whether the load itself was fatal is checked only
+	// after Parse returns, so "-h" is handled (and exits 0) before that
+	// check ever runs.
+	cfg, loadErr := config.LoadFromEnv()
+	cfg.BindFlags(flag.CommandLine)
+	flag.Parse()
+	// Flags are parsed after Load, so a required key supplied on the command
+	// line is still recorded as missing. ResolveFlagOverrides drops the issues
+	// whose variable the operator explicitly overrode and keeps the rest, so a
+	// flag can actually satisfy the variable it names.
+	if err := config.ResolveFlagOverrides(flag.CommandLine, loadErr); err != nil {
 		return fmt.Errorf("engined: load config: %w", err)
 	}
 	logger.Info("config loaded",
@@ -84,25 +108,76 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("engined: load sample contract source: %w", err)
 	}
 
+	// The WebSocket/PCM transport is process-wide, not per-session: it holds
+	// the ticket registry that binds an arriving socket to the MediaConn
+	// created for it when the offer was accepted. WebRTC is the intended
+	// primary path and lands in a later milestone; this one needs no CGo and
+	// no ICE, which is what makes it the transport a client can use today.
+	media := wsfallback.New(wsfallback.DefaultConfig(), realClock{}, logger)
+
 	// Session events go to stdout for now. Phase 5 routes them to the
 	// per-session JSONL artifact that ships to S3 with the recording.
 	events := obs.NewEventLog(os.Stdout)
 	// The composition root, and the only place that names concrete
 	// implementations. internal/session sees ports; which lexicon, which
 	// ledger and which reasoning model back them is decided exactly here.
-	newDeps := func(c *contract.EngineContract) session.Deps {
-		return session.Deps{
-			PreGate: gate.New(c),
-			Ledger:  ledger.New(c.PrecompiledBeliefs, time.Now()),
-			// Thinker stays nil until a vendor adapter is wired: the
-			// session degrades to the single-model path rather than
-			// refusing to open.
+	//
+	// This factory stays cheap and non-network, per DepsFactory's own
+	// contract: it hands back ports, it does not dial. There is still no
+	// real Transcriber/Judge/StallBank/Recorder/Finalizer adapter yet (those
+	// land in later milestones), so those fields are left nil here — legal
+	// per the connect failure classification: Speaker and Transport are the
+	// two that are fatal once a client actually tries to attach a transport,
+	// and the rest degrade.
+	newDeps := func(_ context.Context, _ string, c *contract.EngineContract) (session.Deps, error) {
+		deps := session.Deps{
+			PreGate:        gate.New(c),
+			Ledger:         ledger.New(c.PrecompiledBeliefs, time.Now()),
+			Transport:      media,
+			ConnectTimeout: cfg.ConnectTimeout,
+			// The two session-scoped caps. Projected here rather than read
+			// in internal/session, which may not import internal/config.
+			SilenceTimeout:     cfg.SilenceTimeout,
+			SessionDurationCap: cfg.SessionDurationCap,
 		}
+		// The Speaker is the persona's mouth and is fatal when absent —
+		// but absent at *connect* time, not here: a factory that refused
+		// to build deps would fail the session before it could report why.
+		if cfg.SpeakerModelID != "" && !cfg.GeminiAPIKey.IsZero() {
+			deps.Speaker = gemini.New(cfg.SpeakerModelID, cfg.GeminiAPIKey.Reveal(), logger)
+		} else {
+			logger.Warn("no Speaker configured; sessions will fail on transport attach",
+				"have_model_id", cfg.SpeakerModelID != "")
+		}
+		// The stall bank is per-session: its clips are this persona's, in
+		// this persona's frozen voice, pre-synthesized before the first turn
+		// that might need one. Without it the opening line has no audio and
+		// its duration can only be estimated from the text.
+		if cfg.TTSModelID != "" && !cfg.GeminiAPIKey.IsZero() && c.TTSVoiceID != "" {
+			deps.Stall = stall.New(
+				geminitts.New(cfg.TTSModelID, cfg.GeminiAPIKey.Reveal()),
+				c.TTSVoiceID, c.OpeningLine, c.StallPhrases, logger)
+		} else {
+			logger.Warn("no stall bank; the opening line will be timed from its text",
+				"have_model_id", cfg.TTSModelID != "", "have_voice", c.TTSVoiceID != "")
+		}
+		// The reasoning model is optional at runtime. Without a key or a
+		// model id the session runs single-model rather than refusing to
+		// open — a live interview degrading is better than one that never
+		// starts (plan §11).
+		if cfg.ThinkerModelID != "" && !cfg.GeminiAPIKey.IsZero() {
+			deps.Thinker = thinkerllm.New(cfg.ThinkerModelID, cfg.GeminiAPIKey.Reveal())
+		} else {
+			logger.Warn("no Thinker configured; sessions run single-model",
+				"have_model_id", cfg.ThinkerModelID != "")
+		}
+		return deps, nil
 	}
 	manager := session.NewManager(realClock{}, contractSource, logger, events, newDeps)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
+	mux.Handle(mediaPath, media)
 	session.NewHandler(manager, logger).Register(mux)
 
 	server := &http.Server{

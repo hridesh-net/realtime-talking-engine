@@ -27,6 +27,7 @@ type FakeTranscriber struct {
 	started   bool
 	closed    bool
 	sentAudio []ports.Frame
+	startErr  error
 }
 
 // NewFakeTranscriber returns a FakeTranscriber whose Partials channel
@@ -52,12 +53,23 @@ func (f *FakeTranscriber) Start(ctx context.Context) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.startErr != nil {
+		return f.startErr
+	}
 	if f.started {
 		return nil
 	}
 	f.started = true
 	go f.feed()
 	return nil
+}
+
+// SetStartError makes every subsequent Start call return err instead of
+// starting the tape-feeding goroutine. Pass nil to clear it.
+func (f *FakeTranscriber) SetStartError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startErr = err
 }
 
 // feed replays the tape onto partials in order, stopping early if the

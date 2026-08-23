@@ -4,6 +4,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -253,6 +257,8 @@ func TestSecret_StringAndFormatting_Redacts(t *testing.T) {
 	}{
 		{"String()", s.String()},
 		{"%v", fmt.Sprintf("%v", s)},
+		//nolint:staticcheck // exercising the fmt %s path is the point: Secret must
+		// redact through fmt, not only when String is called directly.
 		{"%s", fmt.Sprintf("%s", s)},
 		{"%+v", fmt.Sprintf("%+v", s)},
 		{"%#v", fmt.Sprintf("%#v", s)},
@@ -338,5 +344,299 @@ func TestBindFlags_NoSecretFlagsRegistered(t *testing.T) {
 		if fs.Lookup(name) != nil {
 			t.Errorf("BindFlags registered a flag for secret %q; env must remain the sole source of truth", name)
 		}
+	}
+}
+
+func TestListLoaderSplitsAndTrimsCSV(t *testing.T) {
+	t.Parallel()
+
+	// A deploy sets a list variable as a comma-separated string with
+	// human-typed spacing; strList must split on commas, trim the
+	// surrounding whitespace off each element, and drop elements that are
+	// empty after trimming (e.g. a trailing comma) rather than keeping a
+	// stray "" entry.
+	l := &loader{lookup: fakeEnv(map[string]string{
+		"LIST_KEY": " a, b ,c ,, d",
+	})}
+
+	got := l.strList("LIST_KEY", []string{"unused-default"})
+	want := []string{"a", "b", "c", "d"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("strList = %#v, want %#v", got, want)
+	}
+	if len(l.issues) != 0 {
+		t.Errorf("strList recorded issues for valid input: %v", l.issues)
+	}
+}
+
+func TestListLoaderFallsBackToTheDefaultWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	// Both an entirely absent variable and one set to the empty string
+	// must fall back to the caller's default — an operator who sets
+	// FOO= in a .env file did not mean "empty list", they meant "not
+	// overridden".
+	def := []string{"stun:stun.l.google.com:19302"}
+
+	unset := &loader{lookup: fakeEnv(nil)}
+	if got := unset.strList("LIST_KEY", def); !reflect.DeepEqual(got, def) {
+		t.Errorf("strList on unset key = %#v, want default %#v", got, def)
+	}
+
+	empty := &loader{lookup: fakeEnv(map[string]string{"LIST_KEY": ""})}
+	if got := empty.strList("LIST_KEY", def); !reflect.DeepEqual(got, def) {
+		t.Errorf("strList on empty-string key = %#v, want default %#v", got, def)
+	}
+
+	// A value that is only commas/whitespace trims down to zero elements,
+	// which must also fall back to the default rather than returning an
+	// empty-but-non-nil slice a caller might mistake for "explicitly
+	// cleared".
+	blank := &loader{lookup: fakeEnv(map[string]string{"LIST_KEY": " , , "})}
+	if got := blank.strList("LIST_KEY", def); !reflect.DeepEqual(got, def) {
+		t.Errorf("strList on all-blank key = %#v, want default %#v", got, def)
+	}
+}
+
+func TestBooleanLoaderRejectsGarbageAndKeepsTheDefault(t *testing.T) {
+	t.Parallel()
+
+	// A present-but-unparseable boolean must not cascade into a silent
+	// zero value: it records an Issue (so Load's aggregation surfaces it)
+	// and still returns the caller's default, matching durationMs/float64.
+	l := &loader{lookup: fakeEnv(map[string]string{"BOOL_KEY": "maybe"})}
+
+	got := l.boolean("BOOL_KEY", true)
+	if got != true {
+		t.Errorf("boolean on garbage input = %v, want default true", got)
+	}
+	if len(l.issues) != 1 {
+		t.Fatalf("got %d issues, want 1: %v", len(l.issues), l.issues)
+	}
+	if l.issues[0].Key != "BOOL_KEY" {
+		t.Errorf("issue key = %q, want BOOL_KEY", l.issues[0].Key)
+	}
+	if !errors.Is(l.issues[0], ErrInvalid) {
+		t.Errorf("issue does not wrap ErrInvalid: %v", l.issues[0])
+	}
+
+	// Every accepted spelling, case-insensitively, must parse cleanly with
+	// no issue recorded.
+	cases := map[string]bool{
+		"true": true, "TRUE": true, "True": true,
+		"1": true, "yes": true, "YES": true,
+		"false": false, "FALSE": false, "0": false, "no": false, "NO": false,
+	}
+	for input, want := range cases {
+		ll := &loader{lookup: fakeEnv(map[string]string{"BOOL_KEY": input})}
+		if got := ll.boolean("BOOL_KEY", !want); got != want {
+			t.Errorf("boolean(%q) = %v, want %v", input, got, want)
+		}
+		if len(ll.issues) != 0 {
+			t.Errorf("boolean(%q) recorded an issue for valid input: %v", input, ll.issues)
+		}
+	}
+}
+
+func TestBooleanDefaultsThatAreTrueStayTrueWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	// WALKBACK_ENABLED and DEFER_TOOL_ENABLED both default to true. A
+	// naive `v, ok := lookup(key); return ok && v == "true"` style
+	// implementation silently returns false for an unset key regardless
+	// of the caller's default — this guards against that regression by
+	// loading through the real Load path with neither variable set.
+	cfg, err := Load(fakeEnv(allRequired()))
+	if err != nil {
+		t.Fatalf("Load returned unexpected error: %v", err)
+	}
+	if !cfg.WalkbackEnabled {
+		t.Error("WalkbackEnabled = false with WALKBACK_ENABLED unset, want true (the documented default)")
+	}
+	if !cfg.DeferToolEnabled {
+		t.Error("DeferToolEnabled = false with DEFER_TOOL_ENABLED unset, want true (the documented default)")
+	}
+}
+
+func TestNoNewVariableIsRequired(t *testing.T) {
+	t.Parallel()
+
+	// Loading with only the pre-existing required keys present must
+	// succeed: every M1.3 field (SPEAKER_VENDOR, WEBRTC_ICE_SERVERS,
+	// TURN_*, S3_ENDPOINT, S3_FORCE_PATH_STYLE, WALKBACK_ENABLED,
+	// DEFER_TOOL_ENABLED, CONNECT_TIMEOUT_S, SPOOL_DIR, METRICS_ADDR,
+	// GEMINI_TTS_VOICES) is optional. TestLoad_MissingRequired_AggregatesAllAtOnce
+	// pins the exact *count* of required-key issues on an empty
+	// environment; a new required variable would silently inflate that
+	// count without failing loudly here first.
+	cfg, err := Load(fakeEnv(allRequired()))
+	if err != nil {
+		t.Fatalf("Load returned unexpected error with only the pre-existing required set present: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("Load returned a nil Config alongside a nil error")
+	}
+
+	newKeys := []string{
+		"SPEAKER_VENDOR", "WEBRTC_ICE_SERVERS", "TURN_URL", "TURN_USERNAME",
+		"TURN_CREDENTIAL", "S3_ENDPOINT", "S3_FORCE_PATH_STYLE",
+		"WALKBACK_ENABLED", "DEFER_TOOL_ENABLED", "CONNECT_TIMEOUT_S",
+		"SPOOL_DIR", "METRICS_ADDR", "GEMINI_TTS_VOICES",
+	}
+	// Belt-and-suspenders: even if Load somehow returned a non-nil error
+	// above (caught by the Fatalf), make sure none of the new keys are
+	// the cause, so a failure here points at the right variable.
+	var loadErr *LoadError
+	if errors.As(err, &loadErr) {
+		for _, issue := range loadErr.Issues {
+			for _, key := range newKeys {
+				if issue.Key == key {
+					t.Errorf("new optional variable %s produced an issue: %v", key, issue)
+				}
+			}
+		}
+	}
+}
+
+func TestEnvExampleListsEveryEngineVariable(t *testing.T) {
+	t.Parallel()
+
+	// Locate the repo-root .env.example relative to this source file's own
+	// on-disk path (not the working directory, which varies by how `go
+	// test` is invoked) — the same pattern internal/fakes/contractsource.go
+	// uses for its sample-contract fixture.
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	path := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", ".env.example"))
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from this file's own location, not external input; tests are exempt from gosec anyway.
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	content := string(data)
+
+	// Every environment variable the config package reads, kept in sync by
+	// hand with config.go's Load function (19 pre-existing + 13 added by
+	// M1.3 = 32).
+	allEngineKeys := []string{
+		"GEMINI_API_KEY", "OPENAI_API_KEY",
+		"SPEAKER_MODEL_ID", "THINKER_MODEL_ID", "JUDGE_MODEL_ID", "TTS_MODEL_ID", "ASR_MODEL_ID",
+		"S3_BUCKET", "S3_REGION", "S3_PREFIX",
+		"CONTROL_PLANE_BASE_URL", "CONTROL_PLANE_SHARED_SECRET",
+		"SESSION_COST_CAP_USD",
+		"PREGATE_DEADLINE_MS", "STALL_DEADLINE_MS", "THINKER_DEADLINE_MS",
+		"PAUSE_BEFORE_ANSWER_DEFAULT_MS", "ABANDON_AFTER_S", "SESSION_DURATION_CAP_S",
+		"SPEAKER_VENDOR",
+		"WEBRTC_ICE_SERVERS", "TURN_URL", "TURN_USERNAME", "TURN_CREDENTIAL",
+		"S3_ENDPOINT", "S3_FORCE_PATH_STYLE",
+		"WALKBACK_ENABLED", "DEFER_TOOL_ENABLED",
+		"CONNECT_TIMEOUT_S",
+		"SPOOL_DIR",
+		"METRICS_ADDR",
+		"GEMINI_TTS_VOICES",
+	}
+
+	var missing []string
+	for _, key := range allEngineKeys {
+		if !strings.Contains(content, key) {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf(".env.example is missing %d engine variable(s): %s", len(missing), strings.Join(missing, ", "))
+	}
+}
+
+// TestAFlagSuppliesAValueItsEnvironmentVariableWasMissing guards the promise a
+// flag's own name makes. Load runs before flags are parsed, so it records a
+// required key as missing even when the operator passed it on the command line;
+// if that stale issue stayed fatal, every flag naming a required variable would
+// appear in -h while being unable to do the one thing it advertises.
+func TestAFlagSuppliesAValueItsEnvironmentVariableWasMissing(t *testing.T) {
+	t.Parallel()
+
+	env := allRequired()
+	delete(env, "SPEAKER_MODEL_ID")
+	cfg, loadErr := Load(fakeEnv(env))
+	if loadErr == nil {
+		t.Fatal("expected Load to report the missing SPEAKER_MODEL_ID")
+	}
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	cfg.BindFlags(fs)
+	if err := fs.Parse([]string{"-speaker-model-id", "some-model"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := ResolveFlagOverrides(fs, loadErr); err != nil {
+		t.Fatalf("flag override should have satisfied the missing key, got: %v", err)
+	}
+	if cfg.SpeakerModelID != "some-model" {
+		t.Fatalf("flag value did not reach the config: %q", cfg.SpeakerModelID)
+	}
+}
+
+// TestAnUnrelatedFlagDoesNotSuppressAMissingRequiredKey is the other half: only
+// the variable actually overridden is forgiven. Dropping every issue as soon as
+// any flag was passed would let a half-configured process boot.
+func TestAnUnrelatedFlagDoesNotSuppressAMissingRequiredKey(t *testing.T) {
+	t.Parallel()
+
+	env := allRequired()
+	delete(env, "SPEAKER_MODEL_ID")
+	cfg, loadErr := Load(fakeEnv(env))
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	cfg.BindFlags(fs)
+	if err := fs.Parse([]string{"-s3-prefix", "unrelated"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	err := ResolveFlagOverrides(fs, loadErr)
+	if err == nil {
+		t.Fatal("an unrelated flag must not excuse the still-missing SPEAKER_MODEL_ID")
+	}
+	if !strings.Contains(err.Error(), "SPEAKER_MODEL_ID") {
+		t.Fatalf("error should still name the missing key, got: %v", err)
+	}
+}
+
+// TestFlagOverridesLeaveACleanLoadAlone keeps ResolveFlagOverrides honest about
+// the ordinary case: no issues in, no error out.
+func TestFlagOverridesLeaveACleanLoadAlone(t *testing.T) {
+	t.Parallel()
+
+	cfg, loadErr := Load(fakeEnv(allRequired()))
+	if loadErr != nil {
+		t.Fatalf("fixture should load cleanly: %v", loadErr)
+	}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	cfg.BindFlags(fs)
+	if err := fs.Parse([]string{"-s3-prefix", "x"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := ResolveFlagOverrides(fs, nil); err != nil {
+		t.Fatalf("clean load must stay clean, got: %v", err)
+	}
+}
+
+// TestEveryRegisteredFlagMapsToAnEnvironmentVariable stops flagEnvKeys going
+// stale. A flag added to BindFlags without an entry here would silently lose the
+// ability to satisfy its own variable — the exact defect this table fixes, back
+// again and invisible.
+func TestEveryRegisteredFlagMapsToAnEnvironmentVariable(t *testing.T) {
+	t.Parallel()
+
+	var cfg Config
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	cfg.BindFlags(fs)
+
+	var missing []string
+	fs.VisitAll(func(f *flag.Flag) {
+		if _, ok := flagEnvKeys[f.Name]; !ok {
+			missing = append(missing, f.Name)
+		}
+	})
+	if len(missing) > 0 {
+		t.Fatalf("flags registered with no flagEnvKeys entry: %v", missing)
 	}
 }

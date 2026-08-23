@@ -274,7 +274,7 @@ func TestTheStallTimerDiesWithABargeInDuringStalling(t *testing.T) {
 
 	enterDefer(a)
 	a.playout.begin("stall-1", clock.Now())
-	a.playout.sent(pcmFor(500 * time.Millisecond))
+	a.playout.sent(pcmFor(500*time.Millisecond), defaultSampleRate)
 
 	a.bargeIn(context.Background())
 

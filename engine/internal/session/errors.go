@@ -21,3 +21,23 @@ var ErrSessionNotFound = errors.New("session: not found")
 // persona problem, never an engine failure: the HTTP handler matches this
 // sentinel to map every case uniformly to 400 Bad Request rather than 500.
 var ErrContractRejected = errors.New("session: contract rejected")
+
+// ErrTransportAlreadyAttached is returned by Manager.AttachTransport when a
+// session's transport has already been accepted. The HTTP handler maps it
+// to 409 Conflict: a session negotiates media exactly once, and a second
+// offer is a client retry racing its own first call, not a new attempt to
+// service.
+var ErrTransportAlreadyAttached = errors.New("session: transport already attached")
+
+// ErrNoTransportConfigured is returned by Manager.AttachTransport when the
+// session was built with no ports.Transport (e.g. the walking-skeleton
+// wiring in cmd/engined before the real adapter lands). The HTTP handler
+// maps it to 502 Bad Gateway: the caller did nothing wrong, the engine has
+// no media adapter to accept the offer with.
+var ErrNoTransportConfigured = errors.New("session: no transport configured")
+
+// ErrNoSpeakerConfigured is the fatal connect failure recorded when a
+// session has no ports.Speaker wired: no mouth, no interview. The transport
+// handshake may still have succeeded — this only ends the session, in
+// character, with end_reason "error"; it never surfaces as an HTTP error.
+var ErrNoSpeakerConfigured = errors.New("session: no speaker configured")

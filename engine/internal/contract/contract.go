@@ -42,10 +42,6 @@ type TurnPolicy struct {
 	BargeInAllowed           bool   `json:"barge_in_allowed"`
 }
 
-// EngineContract is the Go mirror of the schema at
-// owner_handover/engine_contract_schema.json, v1.0 fields only. The v1.1
-// fields described in plan §8.1 (precompiled_beliefs, stall_phrases,
-// pregate_lexicon, unlock_spec, tts_voice_id) are added in a later task.
 // PrecompiledBelief is one wrong belief the persona holds, fixed at design
 // time along with the material to sustain it. The claims ledger seeds from
 // these at turn 0 — the persona's false beliefs exist before the first
@@ -74,6 +70,18 @@ type UnlockSpec struct {
 	Hints     []string `json:"hints,omitempty"`
 }
 
+// EngineContract is the Go mirror of the schema at
+// owner_handover/engine_contract_schema.json.
+//
+// It carries the v1.3 field set: the v1.0 core plus the dual-model runtime
+// fields — PrecompiledBeliefs, StallPhrases, PregateLexicon, UnlockSpec and
+// TTSVoiceID. All five are optional, so a v1.0-v1.2 contract still parses and
+// the engine degrades to the single-model path rather than refusing to open an
+// interview. Parsing pins the major version only, for the same reason.
+//
+// Nothing here is authored at runtime. The contract is compiled once in Python,
+// stored, and replayed for every session on that persona, which is what makes
+// two interviewers comparable on the same candidate.
 type EngineContract struct {
 	ContractVersion    string          `json:"contract_version"`
 	CandidateID        string          `json:"candidate_id"`
@@ -138,15 +146,15 @@ func Parse(data []byte) (*EngineContract, error) {
 func (c *EngineContract) MinorVersion() int { return c.minorVersion }
 
 // RequireMinor reports an error unless the contract's minor version is at
-// least min. Callers gate minor-versioned features on this so a version skew
+// least want. Callers gate minor-versioned features on this so a version skew
 // fails loudly instead of degrading in silence.
-func (c *EngineContract) RequireMinor(min int) error {
-	if c.minorVersion < min {
+func (c *EngineContract) RequireMinor(want int) error {
+	if c.minorVersion < want {
 		return &ValidationError{
 			Field: "contract_version",
 			Reason: fmt.Sprintf(
 				"contract is v%d.%d but this feature requires at least v%d.%d",
-				supportedMajorVersion, c.minorVersion, supportedMajorVersion, min,
+				supportedMajorVersion, c.minorVersion, supportedMajorVersion, want,
 			),
 		}
 	}

@@ -91,6 +91,16 @@ func TestSessionLedgerGateStallImportOnlyPortsContractObs(t *testing.T) {
 	}
 }
 
+// TestAdaptersOnlyImportPortsConfigObsAudioAndSharedVendorHelpers is the
+// adapter-layering rule ENGINE_IMPLEMENTATION_PLAN.md §10 states but that,
+// until CheckAdapterImports existed, no test ever enforced.
+func TestAdaptersOnlyImportPortsConfigObsAudioAndSharedVendorHelpers(t *testing.T) {
+	_, modulePath, pkgs := loadGraph(t)
+	if violations := arch.CheckAdapterImports(pkgs, modulePath); len(violations) > 0 {
+		t.Errorf("adapter-layering rule violated (internal/vendors, internal/transport, or internal/store package reaches outside its allowlist):\n%s", joinViolations(violations))
+	}
+}
+
 // TestEnvAccessOnlyInConfig is plan §10 rule 4.
 func TestEnvAccessOnlyInConfig(t *testing.T) {
 	root := moduleRoot(t)

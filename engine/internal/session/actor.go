@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -72,16 +73,63 @@ type actor struct {
 	// utterance accumulates the interviewer's in-flight speech, so the
 	// pre-gate classifies the whole question rather than one delta.
 	utterance string
-	// speaking is the Speaker session, nil until CONNECTING completes.
+	// speaking is the Speaker session, nil until the connector hands one
+	// off via cmdConnected.
 	speaking ports.SpeakerSession
 	// thinker is the persona's subconscious. Nil degrades the session to
-	// the single-model path rather than refusing to run.
+	// the single-model path rather than refusing to run — either because
+	// no Thinker was configured, or because it failed to connect.
 	thinker ports.Thinker
 	// gate classifies probes from partial speech, without a model call.
 	gate ports.PreGate
 	// ledger is what this persona has committed to saying. The actor is its
 	// only writer.
 	ledger ports.ClaimLedger
+
+	// transport accepts the client's SDP offer. Nil is legal (no adapter
+	// wired yet); AttachTransport then fails with ErrNoTransportConfigured
+	// rather than panicking.
+	transport ports.Transport
+	// speaker opens the fatal, must-have realtime speech session. A nil
+	// speaker makes the connector fail fatally — no mouth, no interview.
+	speaker ports.Speaker
+	// transcriber runs the independent ASR stream. Nil degrades the
+	// session (flagged degraded:asr) rather than ending it — either
+	// because none was configured, or its connect failed.
+	transcriber ports.Transcriber
+	// stall pre-synthesizes stall clips and the opening line. Nil degrades
+	// the session (flagged degraded:stall) rather than ending it.
+	stall ports.StallBank
+	// judge, recorder and finalizer have no connect-time operation on
+	// their ports (no Start/Warm to fail), so they are wired once at
+	// construction and never touched by the connector.
+	judge     ports.Judge
+	recorder  ports.Recorder
+	finalizer ports.Finalizer
+
+	// silenceTimeout and sessionCap are the two session-scoped alarms'
+	// durations. Zero disables the alarm rather than arming it at zero.
+	silenceTimeout time.Duration
+	sessionCap     time.Duration
+
+	// connectTimeout bounds the connector's concurrent vendor starts.
+	connectTimeout time.Duration
+	// transportAttached is true once AttachTransport has accepted an
+	// offer; a second attempt is a conflict, not a second connector.
+	transportAttached bool
+	// mediaConn is the accepted transport connection, set alongside
+	// transportAttached.
+	mediaConn ports.MediaConn
+	// degradations lists every best-effort collaborator that failed to
+	// connect this session, in the SessionIngest.Degradations vocabulary
+	// (e.g. "degraded:asr"). Owner-goroutine only.
+	degradations []string
+	// stopped is closed exactly once, as run's very first deferred action,
+	// so any goroutine started off the actor (the connector, the Speaker
+	// event pump) can detect "the owner goroutine is gone" independent of
+	// ctx — cmdStop exits run without cancelling ctx, and a goroutine that
+	// only watched ctx.Done() would never learn that happened.
+	stopped chan struct{}
 
 	// unlocked is monotonic: the Thinker assesses, the actor decides, and
 	// once depth is earned it is never taken back (plan §7).
@@ -108,6 +156,11 @@ type actor struct {
 	pregate      chan pregateVerdict
 	notes        chan thinkerNote
 	playoutBeat  chan heartbeat
+	// speechOnset carries locally-detected speech starts from the media
+	// connection. Onset only: end-of-turn belongs to the Transcriber,
+	// because an energy threshold cannot tell a thinking pause from a
+	// finished question, and the human here is composing one.
+	speechOnset chan ports.VADEvent
 }
 
 // newActor constructs a session actor. It does not start the owner goroutine
@@ -122,18 +175,29 @@ func newActor(
 ) *actor {
 	fires := make(chan timerFire, timerBufferSize)
 	return &actor{
-		id:       id,
-		contract: c,
-		clock:    clock,
-		logger:   logger,
-		events:   events,
-		thinker:  deps.Thinker,
-		gate:     deps.PreGate,
-		ledger:   deps.Ledger,
-		state:    StateConnecting,
-		timers:   newTimerSet(clock, fires),
-		playout:  newPlayoutTracker(defaultSampleRate),
-		turns:    newTurnTable(clock.Now()),
+		id:             id,
+		contract:       c,
+		clock:          clock,
+		logger:         logger,
+		events:         events,
+		thinker:        deps.Thinker,
+		gate:           deps.PreGate,
+		ledger:         deps.Ledger,
+		transport:      deps.Transport,
+		speaker:        deps.Speaker,
+		transcriber:    deps.Transcriber,
+		stall:          deps.Stall,
+		judge:          deps.Judge,
+		recorder:       deps.Recorder,
+		finalizer:      deps.Finalizer,
+		connectTimeout: deps.ConnectTimeout,
+		silenceTimeout: deps.SilenceTimeout,
+		sessionCap:     deps.SessionDurationCap,
+		state:          StateConnecting,
+		timers:         newTimerSet(clock, fires),
+		playout:        newPlayoutTracker(defaultSampleRate),
+		turns:          newTurnTable(clock.Now()),
+		stopped:        make(chan struct{}),
 
 		control:      make(chan command, controlBufferSize),
 		timerFire:    fires,
@@ -147,13 +211,17 @@ func newActor(
 		// that.
 		notes:       make(chan thinkerNote, 1),
 		playoutBeat: make(chan heartbeat, heartbeatBufferSize),
+		speechOnset: make(chan ports.VADEvent, speechBufferSize),
 	}
 }
 
-// Deps are the collaborators a session runs against. Every one is optional:
-// a nil Thinker, PreGate or Ledger degrades the session to the single-model
-// path rather than refusing to open, which is the right failure for a live
-// interview (plan §11).
+// Deps are the collaborators a session runs against. Almost every one is
+// optional, and nil degrades rather than refuses to open — the right
+// failure for a live interview (plan §11) — with two exceptions: Speaker
+// and Transport are the persona's mouth and the media path, and a session
+// with neither cannot run an interview at all, so the connector fails
+// fatally without them (see the DepsFactory doc comment for the full
+// failure classification).
 //
 // They arrive as ports rather than concrete types because internal/session may
 // only import ports, contract and obs — the layering gate enforces it, and the
@@ -163,6 +231,50 @@ type Deps struct {
 	Thinker ports.Thinker
 	PreGate ports.PreGate
 	Ledger  ports.ClaimLedger
+
+	// Transport accepts the client's SDP offer. Fatal if nil once a client
+	// actually tries to attach — no media path, no interview.
+	Transport ports.Transport
+	// Speaker opens the realtime speech session. Fatal if nil — no mouth,
+	// no interview.
+	Speaker ports.Speaker
+	// Transcriber runs the independent ASR stream. Non-fatal: a failed or
+	// absent Transcriber flags the session degraded:asr and it continues.
+	Transcriber ports.Transcriber
+	// Judge runs async, post-hoc semantic review. Non-fatal: it has no
+	// connect-time operation, so it is wired at construction and never
+	// blocks or fails the connect.
+	Judge ports.Judge
+	// Stall pre-synthesizes stall clips and the opening line. Non-fatal: a
+	// failed or absent StallBank flags the session degraded:stall.
+	Stall ports.StallBank
+	// Recorder captures the dual-channel recording. Non-fatal by the
+	// port's own contract (RecordingInfo.Degraded); no connect-time
+	// operation, wired at construction.
+	Recorder ports.Recorder
+	// Finalizer assembles and hands off the finished bundle. Non-fatal by
+	// the port's own contract; no connect-time operation, wired at
+	// construction.
+	Finalizer ports.Finalizer
+
+	// ConnectTimeout bounds how long the per-session connector waits for
+	// Speaker.Start, Transcriber.Start, Thinker.Start and StallBank.Warm
+	// before giving up. It is a plain value, not read from the
+	// environment here — internal/session may not import internal/config
+	// — DepsFactory implementations project config.Config.ConnectTimeout
+	// into this field.
+	ConnectTimeout time.Duration
+
+	// SilenceTimeout is how long the session tolerates an interviewer who
+	// has stopped participating before winding down in character, and
+	// SessionDurationCap is the hard wall-clock ceiling on one interview.
+	//
+	// Plain values for the same reason as ConnectTimeout: internal/session
+	// may not import internal/config, so a DepsFactory projects them in.
+	// Zero means "no cap", which is what every test that does not care
+	// gets — the alarm is simply never armed.
+	SilenceTimeout     time.Duration
+	SessionDurationCap time.Duration
 }
 
 // emit writes one event stamped from the session clock.
@@ -198,7 +310,37 @@ func (a *actor) transition(to State, reason string) bool {
 		a.timers.cancelTurnScoped()
 		a.closeTurnGate()
 	}
+	// The abandonment clock runs only while the session is actually
+	// waiting on the interviewer. Centralised here rather than at each
+	// edge for the same reason as the line above: LISTENING is entered
+	// from five different places, and an alarm armed at four of them is
+	// the kind of gap that reads as working.
+	if to == StateListening {
+		a.armSilenceCap()
+	} else if from == StateListening {
+		a.timers.cancel(timerSilence)
+	}
 	return true
+}
+
+// armSilenceCap starts the abandonment alarm, if one is configured.
+//
+// A zero duration means no cap. That is deliberate rather than a missing
+// default: a cap of zero would fire immediately and end every session on its
+// first tick, so the only safe reading of "unset" is "not armed".
+func (a *actor) armSilenceCap() {
+	if a.silenceTimeout <= 0 {
+		return
+	}
+	a.timers.arm(timerSilence, a.silenceTimeout)
+}
+
+// armSessionCap starts the hard duration ceiling, if one is configured.
+func (a *actor) armSessionCap() {
+	if a.sessionCap <= 0 {
+		return
+	}
+	a.timers.arm(timerSession, a.sessionCap)
 }
 
 // run is the actor's owner goroutine: the only goroutine that ever touches
@@ -212,9 +354,23 @@ func (a *actor) transition(to State, reason string) bool {
 // fired but not acted on. The loop therefore drains control and timers
 // non-blockingly first, and only blocks on the full set once both are empty.
 func (a *actor) run(ctx context.Context, done chan<- struct{}) {
+	// Defers run LIFO, so this ordering is deliberate: close(a.stopped)
+	// fires first, giving the connector and the Speaker event pump the
+	// earliest possible signal that the owner goroutine is gone (cmdStop
+	// exits this loop without cancelling ctx, so ctx.Done() alone would
+	// never tell them); closeCollaborators then releases whatever was
+	// actually handed off during normal operation; drainPendingConnect
+	// catches a cmdConnected that raced into the buffered control channel
+	// after this loop stopped reading it — a hand-off a select alone
+	// cannot fully close off, since a buffered send succeeds whether or
+	// not anyone is still receiving; close(done) runs last, so by the time
+	// callers unblock on it every collaborator this run reached is closed.
 	defer close(done)
+	defer a.drainPendingConnect()
+	defer a.closeCollaborators()
 	defer a.timers.cancelAll()
 	defer a.closeTurnGate()
+	defer close(a.stopped)
 	a.logger.Info("session actor started")
 	defer a.logger.Info("session actor stopped")
 	a.emit("session_started", map[string]any{"session_id": a.id})
@@ -258,6 +414,8 @@ func (a *actor) run(ctx context.Context, done chan<- struct{}) {
 			a.handleNote(ctx, n)
 		case hb := <-a.playoutBeat:
 			a.playout.heartbeat(hb.ItemID, hb.PlayedMs, hb.At)
+		case ev := <-a.speechOnset:
+			a.handleSpeechOnset(ctx, ev)
 		case ev := <-a.speakerCtrl:
 			a.handleSpeakerEvent(ctx, ev)
 		case ev := <-a.speakerAudio:
@@ -273,12 +431,163 @@ func (a *actor) run(ctx context.Context, done chan<- struct{}) {
 func (a *actor) handle(ctx context.Context, cmd command) bool {
 	switch cmd.Kind {
 	case cmdInterviewerJoined:
-		a.transition(StateGreeting, "interviewer joined")
+		if a.transition(StateGreeting, "interviewer joined") {
+			// The hard duration cap starts when the interview does, not
+			// when the actor was constructed: a session can sit in
+			// CONNECTING while nobody is talking, and charging that to
+			// the interviewer's hour would cut a real interview short.
+			a.armSessionCap()
+		}
 	case cmdStop:
 		a.windDown(ctx, cmd.Reason)
 		return true
+	case cmdAttachTransport:
+		return a.handleAttachTransport(ctx, cmd)
+	case cmdConnected:
+		a.handleConnected(ctx, cmd.Connected)
+	case cmdConnectFailed:
+		a.handleConnectFailed(ctx, cmd.Err)
+		return true
 	}
 	return false
+}
+
+// degradation reasons, in the SessionIngest.Degradations vocabulary (see
+// ports.SessionIngest's doc comment). Recorded on the actor and emitted to
+// the event log the moment a non-fatal collaborator fails to connect.
+const (
+	degradedASR     = "degraded:asr"
+	degradedThinker = "degraded:thinker"
+	degradedStall   = "degraded:stall"
+)
+
+// handleAttachTransport accepts the client's SDP offer and, on success,
+// spawns the per-session connector. A session negotiates media exactly
+// once: a second attempt is a conflict, not a second connector.
+//
+// Transport.Accept runs here, on ctx (the actor's own run context, never
+// wrapped in connectTimeout) rather than inside connect: SDP answer
+// generation is local and cheap by the port's own contract, and bundling it
+// into the vendor-connect budget would make a slow vendor look like a bad
+// offer.
+//
+// It returns true exactly when it has itself ended the session (the nil
+// Transport and nil Speaker fatal branches both call handleConnectFailed
+// directly rather than going through the cmdConnectFailed command, so
+// handle's own dispatch can't tell the loop to exit for them — this is how
+// it does).
+func (a *actor) handleAttachTransport(ctx context.Context, cmd command) bool {
+	if a.transportAttached {
+		a.replyAttach(cmd.Reply, attachOutcome{Err: ErrTransportAlreadyAttached})
+		return false
+	}
+	if a.transport == nil {
+		// Fatal per the connect failure classification — no media path, no
+		// interview — same as a nil Speaker. Unlike that case there is no
+		// answer to give back (Accept was never attempted), so the caller
+		// gets the error and the session winds down in the background.
+		a.replyAttach(cmd.Reply, attachOutcome{Err: ErrNoTransportConfigured})
+		a.handleConnectFailed(ctx, ErrNoTransportConfigured)
+		return true
+	}
+	answer, conn, err := a.transport.Accept(ctx, cmd.Offer)
+	if err != nil {
+		a.replyAttach(cmd.Reply, attachOutcome{Err: fmt.Errorf("session: accept transport offer: %w", err)})
+		return false
+	}
+	a.transportAttached = true
+	a.mediaConn = conn
+	a.emit("transport_attached", nil)
+
+	if a.speaker == nil {
+		// Fatal per the connect failure classification — no mouth, no
+		// interview — but the media handshake itself succeeded, so the
+		// caller still gets its answer before the session winds down.
+		a.replyAttach(cmd.Reply, attachOutcome{Answer: answer})
+		a.handleConnectFailed(ctx, ErrNoSpeakerConfigured)
+		return true
+	}
+
+	cfg, persona := a.buildConnectInputs()
+	go a.connect(ctx, cfg, persona)
+	a.replyAttach(cmd.Reply, attachOutcome{Answer: answer})
+	return false
+}
+
+// replyAttach delivers a cmdAttachTransport's outcome, when the caller left
+// a Reply channel to receive it. reply is always a fresh channel buffered
+// for exactly one send (Manager.AttachTransport's own doing), so this never
+// blocks the owner goroutine on a caller that gave up.
+func (a *actor) replyAttach(reply chan<- attachOutcome, out attachOutcome) {
+	if reply == nil {
+		return
+	}
+	reply <- out
+}
+
+// buildConnectInputs projects the contract (and, where wired, the ledger)
+// into the primitive shapes the Speaker and Thinker ports take. It runs on
+// the owner goroutine specifically so the ledger read stays on the one
+// goroutine allowed to touch it — internal/ledger.Ledger is deliberately
+// not safe for concurrent use, and the connector runs concurrently with
+// this one.
+func (a *actor) buildConnectInputs() (ports.SessionCfg, ports.PersonaCtx) {
+	cfg := ports.SessionCfg{
+		SessionID:    a.id,
+		SystemPrompt: a.contract.SystemPrompt,
+		VoiceID:      a.contract.TTSVoiceID,
+		MayInterrupt: a.contract.VoiceDirectives.MayInterrupt,
+	}
+	persona := ports.PersonaCtx{SystemPrompt: a.contract.SystemPrompt}
+	if a.ledger != nil {
+		persona.LedgerSummary = a.ledger.ThinkerSummary()
+	}
+	return cfg, persona
+}
+
+// recordDegradation records one best-effort collaborator's connect failure
+// (surfaced later in SessionIngest.Degradations) and emits an event so it
+// reaches the session's event log at the moment it happens, not only at
+// the end.
+func (a *actor) recordDegradation(what string) {
+	a.degradations = append(a.degradations, what)
+	a.emit("degraded", map[string]any{"what": what})
+}
+
+// handleConnected wires in the connector's all-or-nothing result: the
+// fatal Speaker session, already open, and whichever non-fatal
+// collaborators actually came up. It starts the Speaker event pump — the
+// one thing this milestone consumes the connected session for — and drops
+// (and flags degraded) any collaborator that failed to connect.
+func (a *actor) handleConnected(ctx context.Context, out *connectOutcome) {
+	a.speaking = out.Speaker
+	a.emit("speaker_connected", nil)
+	if out.TranscriberFailed {
+		a.transcriber = nil
+		a.recordDegradation(degradedASR)
+	}
+	if out.ThinkerFailed {
+		a.thinker = nil
+		a.recordDegradation(degradedThinker)
+	}
+	if out.StallFailed {
+		a.stall = nil
+		a.recordDegradation(degradedStall)
+	}
+	go pumpSpeakerEvents(ctx, a.speaking, a.speakerAudio, a.speakerCtrl, &a.drops)
+	if a.mediaConn != nil {
+		// Started here rather than at attach: until the Speaker is up there
+		// is nothing to do with the interviewer's audio, and forwarding it
+		// to a nil session would drop it while looking like it worked.
+		go pumpMediaConn(ctx, a.mediaConn, a)
+	}
+}
+
+// handleConnectFailed winds the session down, in character, on a fatal
+// connect failure — no Speaker within budget means no interview.
+func (a *actor) handleConnectFailed(ctx context.Context, err error) {
+	a.emit("connect_failed", map[string]any{"err": err.Error()})
+	a.windDown(ctx, "error")
 }
 
 // windDown takes the session out in character, then finalizes.
@@ -318,6 +627,13 @@ func (a *actor) handleTimer(ctx context.Context, f timerFire) {
 		// answer. The contract's own directive stands in — still the
 		// persona behaving correctly, just without the retrieved detail.
 		a.useFallback(ctx, "deadline")
+	case timerPlayout:
+		// A pre-synthesized clip finished. Nothing else will ever say so:
+		// these are not vendor responses, so no ResponseDone arrives, and
+		// ResponseDone is SPEAKING's only legal exit.
+		a.playout.close(a.clock.Now())
+		a.closePersonaTurn(false, 0)
+		a.transition(StateListening, "clip played out")
 	case timerSilence, timerSession:
 		a.windDown(ctx, f.Kind.String()+" cap")
 	}
@@ -356,6 +672,9 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 		}
 		return
 	}
+	//exhaustive:ignore -- the default below *emits*, so a state added later
+	// cannot fall through unobserved; see .golangci.yml for when this
+	// suppression is allowed.
 	switch a.state {
 	case StateGreeting:
 		// The interviewer's first utterance has ended: play the
@@ -375,6 +694,7 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 		a.turns.begin(a.turn, speakerPersona, a.clock.Now())
 		a.turns.appendText(a.contract.OpeningLine)
 		a.emit("opening_line", nil)
+		a.armClipPlayout(ctx, a.contract.OpeningLine)
 	case StateListening:
 		a.turn++
 		if a.turns.open == nil {
@@ -392,7 +712,107 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 		}
 		// No verdict yet — give it the deadline before defaulting.
 		a.timers.arm(timerPregate, pregateDeadline)
+	default:
+		// An interviewer utterance ended in a state that has nothing to do
+		// with one — mid-drain after a barge-in, most plausibly. Dropping
+		// it is the right behaviour; dropping it silently is not, because
+		// a transcript with a missing utterance and no event explaining
+		// the gap is unreconstructable after the fact.
+		a.emit("utterance_end_ignored", map[string]any{"state": a.state.String()})
 	}
+}
+
+// armClipPlayout starts the alarm that ends a pre-synthesized clip.
+//
+// The opening line and the stall clips are audio the engine already holds,
+// not vendor responses, so no ResponseDone will arrive to close the turn —
+// and ResponseDone is SPEAKING's only legal exit. The alarm is turn-scoped,
+// so a barge-in cancels it through the existing cancelTurnScoped and the
+// clip does not "finish" after the persona was already interrupted.
+func (a *actor) armClipPlayout(ctx context.Context, text string) {
+	a.timers.arm(timerPlayout, a.playClip(ctx, text))
+}
+
+// playClip sends a pre-synthesized clip to the browser and reports how long it
+// will play.
+//
+// Sent as one frame rather than paced into 20 ms pieces on purpose. The
+// transport's send ring is half a second deep and drops oldest, so feeding a
+// five-second clip through it frame by frame would shed all but the tail —
+// the persona would open with the last half-second of its own greeting. The
+// clip is already rendered and the browser buffers it, so there is nothing to
+// pace.
+func (a *actor) playClip(ctx context.Context, text string) time.Duration {
+	clip, ok := a.openingClip()
+	if !ok {
+		// No clip to play. The turn is still timed so the session moves on:
+		// a persona that opens silently is a blemish, one that hangs in
+		// SPEAKING forever is a dead interview.
+		a.emit("clip_unavailable", map[string]any{"estimated_from": "text"})
+		return estimateSpeechDuration(text)
+	}
+	d, exact := clipPlayTime(clip)
+	if !exact {
+		a.emit("clip_unmeasurable", map[string]any{"estimated_from": "text"})
+		return estimateSpeechDuration(text)
+	}
+
+	itemID := fmt.Sprintf("clip-%d", a.turn)
+	a.playout.begin(itemID, a.clock.Now())
+	a.playout.sent(len(clip.Samples), clip.SampleRateHz)
+	if a.mediaConn != nil {
+		frame := ports.Frame{
+			PCM:          clip.Samples,
+			SampleRateHz: clip.SampleRateHz,
+			Timestamp:    a.clock.Now(),
+		}
+		if err := a.mediaConn.SendAudio(ctx, frame); err != nil {
+			a.logger.Warn("send opening clip failed", "err", err)
+		}
+	}
+	a.emit("clip_played", map[string]any{"ms": d.Milliseconds(), "item_id": itemID})
+	return d
+}
+
+// openingClip returns the pre-synthesized opening line, if the bank has one.
+func (a *actor) openingClip() (ports.PCM16Audio, bool) {
+	if a.stall == nil {
+		return ports.PCM16Audio{}, false
+	}
+	return a.stall.OpeningLine()
+}
+
+// clipPlayTime is a clip's true duration, and whether it could be computed.
+func clipPlayTime(clip ports.PCM16Audio) (time.Duration, bool) {
+	if clip.SampleRateHz <= 0 || len(clip.Samples) == 0 {
+		return 0, false
+	}
+	samples := int64(len(clip.Samples) / bytesPerSamplePCM16)
+	return time.Duration(samples * int64(time.Second) / int64(clip.SampleRateHz)), true
+}
+
+// speechWordsPerMinute is the rate the text estimate assumes: unhurried
+// conversational English, which is what a candidate's opening line is.
+const speechWordsPerMinute = 150
+
+// estimateSpeechDuration guesses how long text takes to say aloud, bounded at
+// both ends. The floor keeps an empty or one-word line from closing the turn
+// in the same tick it opened; the ceiling keeps a pathological contract from
+// parking the session in SPEAKING for minutes.
+func estimateSpeechDuration(text string) time.Duration {
+	const (
+		floor   = 750 * time.Millisecond
+		ceiling = 30 * time.Second
+	)
+	words := len(strings.Fields(text))
+	d := time.Duration(words) * time.Minute / speechWordsPerMinute
+	if d < floor {
+		return floor
+	}
+	if d > ceiling {
+		return ceiling
+	}
+	return d
 }
 
 // handlePregate records or applies a pre-gate verdict.
@@ -726,6 +1146,35 @@ func (a *actor) release() {
 // Turns returns the session's turn table. Read after the actor has stopped.
 func (a *actor) Turns() []TurnRecord { return a.turns.Records() }
 
+// handleSpeechOnset reacts to locally-detected speech from the interviewer.
+//
+// Onset is the barge-in trigger. The vendor's own SpeechStarted is not used
+// for it: automatic activity detection is disabled, so the vendor has no view
+// of the human's microphone at all, and the engine's own detector is the only
+// thing that knows the interviewer has started talking. Offset is end-of-turn
+// only on the degraded path — see below.
+func (a *actor) handleSpeechOnset(ctx context.Context, ev ports.VADEvent) {
+	if ev.Started {
+		a.emit("speech_onset", map[string]any{"energy_db": ev.EnergyDB})
+		if a.state.speakingish() {
+			a.bargeIn(ctx)
+		}
+		return
+	}
+	a.emit("speech_offset", map[string]any{"energy_db": ev.EnergyDB})
+	if a.transcriber != nil {
+		// A Transcriber is running and owns end-of-turn. An energy
+		// threshold cannot tell a thinking pause from a finished question,
+		// and the human here is a manager composing one.
+		return
+	}
+	// The degraded path, which plan §11 row 4 promised and did not have:
+	// with no Transcriber, nothing could ever produce the final partial
+	// that ends a turn, so the session reached GREETING and stayed there.
+	a.emit("degraded_end_of_turn", map[string]any{"source": "energy_vad"})
+	a.handlePartial(ctx, ports.Partial{Text: a.utterance, Final: true})
+}
+
 // handleMic forwards the interviewer's audio to the Speaker, honouring the
 // mic gate when the persona does not allow barge-in.
 //
@@ -735,7 +1184,16 @@ func (a *actor) handleMic(ctx context.Context, m micFrame) {
 	if a.speaking == nil {
 		return
 	}
-	if a.state == StateSpeaking && !a.contract.VoiceDirectives.MayInterrupt {
+	// The interviewer is present the moment their audio starts arriving.
+	// Nothing else in production ever moved the session out of CONNECTING —
+	// cmdInterviewerJoined had no producer at all — so GREETING was
+	// unreachable and no interview could ever begin.
+	if a.state == StateConnecting {
+		if a.transition(StateGreeting, "interviewer audio") {
+			a.armSessionCap()
+		}
+	}
+	if a.state.speakingish() && !a.contract.TurnPolicy.BargeInAllowed {
 		return
 	}
 	if err := a.speaking.SendAudio(ctx, m.Frame); err != nil {
@@ -748,9 +1206,22 @@ func (a *actor) handleSpeakerEvent(ctx context.Context, ev ports.SpeakerEvent) {
 	switch e := ev.(type) {
 	case ports.AudioDelta:
 		if !a.playout.active() {
-			a.playout.begin(e.ResponseID, a.clock.Now())
+			// Keyed on ItemID, not ResponseID: ItemID is what the browser
+			// echoes back on every playout heartbeat, so tracking anything
+			// else means no heartbeat ever matches and heardMs silently
+			// degrades to "assume it all played".
+			a.playout.begin(e.ItemID, a.clock.Now())
 		}
-		a.playout.sent(len(e.Frame.PCM))
+		a.playout.sent(len(e.Frame.PCM), e.Frame.SampleRateHz)
+		a.sendToBrowser(ctx, e)
+	case ports.InputTranscript:
+		// The Speaker's own transcription of the interviewer. Verified live:
+		// it still fires with the vendor's automatic voice detection off,
+		// which makes it the ASR fallback when the Transcriber is gone. It
+		// supplies the text; the energy detector supplies the boundary.
+		if e.Text != "" {
+			a.utterance += e.Text
+		}
 	case ports.OutputTranscriptDelta:
 		a.turns.appendText(e.Text)
 		if a.sentences.feed(e.Text, a.contract.TurnPolicy.MaxSentences) {
@@ -762,6 +1233,29 @@ func (a *actor) handleSpeakerEvent(ctx context.Context, ev ports.SpeakerEvent) {
 		a.playout.close(a.clock.Now())
 		a.closePersonaTurn(false, 0)
 		a.transition(StateListening, "response done")
+	default:
+		// An event kind this build does not handle. Emitted rather than
+		// dropped: ports.SpeakerEvent is an open interface that four
+		// adapters implement, and a silently ignored event is how a
+		// vendor adding a kind becomes a session that behaves subtly
+		// wrongly with nothing in the log to say why.
+		a.emit("speaker_event_unhandled", map[string]any{
+			"go_type": fmt.Sprintf("%T", ev),
+		})
+	}
+}
+
+// sendToBrowser hands one frame of persona audio to the media connection.
+//
+// The transport queues and returns — it must, since this runs on the actor's
+// own goroutine — so a slow client sheds frames there rather than stalling the
+// turn loop here.
+func (a *actor) sendToBrowser(ctx context.Context, d ports.AudioDelta) {
+	if a.mediaConn == nil {
+		return
+	}
+	if err := a.mediaConn.SendAudio(ctx, d.Frame); err != nil {
+		a.logger.Warn("send persona audio failed", "err", err)
 	}
 }
 
@@ -777,10 +1271,17 @@ func (a *actor) bargeIn(ctx context.Context) {
 		a.emit("barge_in_ignored", map[string]any{"state": a.state.String()})
 		return
 	}
-	if !a.contract.VoiceDirectives.MayInterrupt && a.state == StateSpeaking {
+	if !a.contract.TurnPolicy.BargeInAllowed {
 		// The persona does not yield. The attempt is still recorded — an
 		// interviewer who tried to interrupt and was talked over is
 		// feedback, not noise.
+		//
+		// No state test here: speakingish() above has already established
+		// that persona audio is in flight, and the gate applies to all of
+		// it. Testing StateSpeaking as well — which this did — meant a
+		// no-barge-in persona still yielded during its own opening line
+		// and its own stall clips, the two moments a nervous interviewer
+		// is most likely to talk over it.
 		a.emit("barge_in_refused", map[string]any{"state": a.state.String()})
 		return
 	}

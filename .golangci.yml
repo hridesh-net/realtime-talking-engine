@@ -1,7 +1,8 @@
 # Go lint standard for the interview-candidate engine.
 #
-# There is no Go source in this repo yet — the engine is a separate build.
-# This file records the standard it will be held to, and scripts/check.sh
+# The engine lives in engine/ and is a separate Go module, so every gate runs
+# from inside that module — a repo-root run finds no packages.
+# This file records the standard it is held to, and scripts/check.sh
 # picks it up automatically once Go files land here.
 #
 # Install: brew install golangci-lint
@@ -22,8 +23,34 @@ linters:
     - revive        # golint successor: naming, exported comments
     - unconvert
     - wastedassign
+    - durationcheck # duration arithmetic that silently means something else
+    - exhaustive    # every enum switch covers every member
+    - nilnil        # never return (nil, nil) from a function returning both
+    - noctx         # no outbound HTTP call without a context to cancel it
+    - predeclared   # no shadowing min/max/len and friends
 
   settings:
+    # exhaustive is here because of what it caught the day it was switched on:
+    # the timer switch in the session actor was missing `timerStall`, one of
+    # three timer kinds that were never armed and never handled, so §11
+    # abandonment and the duration cap did not exist. The churn test armed every
+    # kind by hand and so could not see it. A state machine whose switches are
+    # checked by a compiler-adjacent tool is the whole reason enums are typed
+    # here rather than being ints.
+    #
+    # default-signifies-exhaustive is deliberately NOT set. A `default` clause
+    # is exactly how those three timer kinds stayed dead in plain sight; letting
+    # one silence the check would give back the property being bought.
+    #
+    # The rule for the //exhaustive:ignore escape hatch, so it stays a standard
+    # rather than a habit: it is allowed only where the default is *observable*
+    # — it emits an event, returns an error, or fails a test. A silent default
+    # is the failure mode this linter exists to catch, so suppressing the
+    # linter in favour of one is circular. Every use must name what the default
+    # does.
+    exhaustive:
+      # numTimerKinds and friends are array-sizing sentinels, not states.
+      ignore-enum-members: ".*num[A-Z][A-Za-z]*$"
     revive:
       rules:
         - name: exported          # exported identifiers carry doc comments
@@ -37,6 +64,11 @@ linters:
     rules:
       - path: _test\.go
         linters: [gosec, errcheck]
+      # noctx guards a production risk — an outbound call with no way to
+      # cancel it. In a test, httptest.NewRequest has no such risk and the
+      # finding is pure churn.
+      - path: _test\.go
+        linters: [noctx]
 
 formatters:
   enable:

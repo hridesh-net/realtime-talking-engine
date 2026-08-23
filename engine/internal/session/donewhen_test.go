@@ -2,11 +2,12 @@ package session
 
 import (
 	"context"
-	"go.uber.org/goleak"
 	"io"
 	"log/slog"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 
 	"skillbrew/engine/internal/contract"
 	"skillbrew/engine/internal/fakes"
@@ -18,26 +19,40 @@ func quietLogger() *slog.Logger {
 }
 
 // testContract is the minimum an actor needs to run a turn.
-func testContract(mayInterrupt bool) *contract.EngineContract {
+//
+// bargeInAllowed drives turn_policy.barge_in_allowed — whether the *human*
+// may interrupt the persona, which is the flag the mic gate and bargeIn
+// enforce.
+//
+// voice_directives.may_interrupt is deliberately set to the OPPOSITE value.
+// The two fields name opposite directions of interruption — may_interrupt is
+// the persona's licence to talk over the human — and the actor read the wrong
+// one of them for the whole of Phase 1, gating barge-in on may_interrupt while
+// barge_in_allowed was read nowhere in the codebase, tests included. Setting
+// them to the same value would let that conflation return and every test still
+// pass. Opposed, any code that reaches for may_interrupt when it means
+// barge_in_allowed fails immediately.
+func testContract(bargeInAllowed bool) *contract.EngineContract {
 	return &contract.EngineContract{
 		ContractVersion: "v1.3",
 		CandidateID:     "cand-1",
 		InterviewID:     "int-1",
 		VoiceDirectives: contract.VoiceDirectives{
 			TargetPauseBeforeAnswerMs: 700,
-			MayInterrupt:              mayInterrupt,
+			MayInterrupt:              !bargeInAllowed,
 		},
 		TurnPolicy: contract.TurnPolicy{
 			MinSentences: 1, MaxSentences: 3, TargetSentencesPerAnswer: 2,
 			DefaultAnswerDepth: "adequate",
+			BargeInAllowed:     bargeInAllowed,
 		},
 	}
 }
 
-func newTestActor(t *testing.T, mayInterrupt bool) (*actor, *fakes.FakeClock) {
+func newTestActor(t *testing.T, bargeInAllowed bool) (*actor, *fakes.FakeClock) {
 	t.Helper()
 	clock := fakes.NewFakeClock(testNow)
-	a := newActor("sess-1", testContract(mayInterrupt), clock, quietLogger(), nil, Deps{})
+	a := newActor("sess-1", testContract(bargeInAllowed), clock, quietLogger(), nil, Deps{})
 	return a, clock
 }
 
@@ -129,7 +144,7 @@ func TestNoGhostFireAfterBargeIn(t *testing.T) {
 func TestNoGhostFireAfterSessionStop(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	a, clock := newTestActor(t, true)
-	a.timers.arm(timerStall, 500*time.Millisecond)
+	a.timers.arm(timerPlayout, 500*time.Millisecond)
 	a.timers.arm(timerThinker, 700*time.Millisecond)
 
 	a.windDown(context.Background(), "test stop")
@@ -166,7 +181,7 @@ func TestBargeInTruncatesTheVendorHistoryAtHeardMs(t *testing.T) {
 	a.state = StateSpeaking
 
 	a.playout.begin("item-1", clock.Now())
-	a.playout.sent(pcmFor(5 * time.Second))
+	a.playout.sent(pcmFor(5*time.Second), defaultSampleRate)
 	clock.Advance(2100 * time.Millisecond)
 	a.playout.heartbeat("item-1", 2100, clock.Now())
 
@@ -203,7 +218,7 @@ func TestAPersonaThatDoesNotYieldRecordsTheAttemptAndKeepsTalking(t *testing.T) 
 	a.speaking = sess
 	a.state = StateSpeaking
 	a.playout.begin("item-1", clock.Now())
-	a.playout.sent(pcmFor(2 * time.Second))
+	a.playout.sent(pcmFor(2*time.Second), defaultSampleRate)
 
 	a.bargeIn(context.Background())
 

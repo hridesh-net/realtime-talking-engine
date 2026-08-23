@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-21T19:17:54Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T18:00:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
 status: stable
@@ -87,6 +89,39 @@ a training set, and the same seed reproduces the same person. The expectation
 suite validates each generated document against the guardrails — including the
 two (skill coverage, `min_duration_minutes` ceiling) that code does *not*
 re-impose.
+
+## The Go engine's suite
+
+A separate module with its own gates, run from inside `engine/`. Roughly 270
+tests across 15 packages, always under `-race`, with per-test
+`goleak.VerifyNone` rather than a `TestMain` sweep — a leak should name the test
+that caused it.
+
+| Package | What its tests are for |
+|---|---|
+| `internal/arch` | The layering rules themselves, including synthetic fixtures that fail against the *old* code, so each rule is evidence a hole was real rather than a description of one |
+| `internal/session` | The turn loop: state table, timers, barge-in, the connector's failure classification, and the media seam |
+| `internal/audio` | The resampler measured against its quality bar (87–88 dB SNR, 111 dB out-of-band rejection, p99 70 µs/frame), onset detection, jitter concealment, the send ring |
+| `internal/transport/wsfallback` | Ticketed attach over a real socket, resampling, heartbeats, and that `SendAudio` never blocks |
+| `internal/vendors/gemini` | The Speaker adapter driven against a **local WebSocket**, so the riskiest package in the build tests offline; plus the repo's first `//go:build live` tests |
+| `internal/vendors/{thinkerllm,judgellm,geminitts}`, `internal/stall` | Adapter behaviour over `httptest`, and the Judge's 25-case offline fixture |
+
+Two conventions are load-bearing here. `internal/session` may not call
+`time.Now`, `time.After` or `time.NewTimer` **even in tests** — the layering gate
+enforces it — so turn timing is always driven by `FakeClock` and never by wall
+time. And the resampler's latency gate is a **test**, not a benchmark, because a
+benchmark nobody reads cannot fail; it scales its budget under `-race`, where
+instrumentation costs an order of magnitude and the number stops describing
+production.
+
+### Every fix is re-introduced before it is believed
+
+The discipline this suite is maintained under: when a fix is claimed, put the
+fault back and watch the guard fail, then revert. It has repeatedly caught tests
+that could not fail — a deadlock test whose fake vendor kept draining the socket
+so writes never blocked; a done-when that asserted on the wrong contract field;
+a layering rule that was inert for an entire directory tree while its suite
+stayed green.
 
 ## Gaps
 

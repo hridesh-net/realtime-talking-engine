@@ -27,13 +27,30 @@ type Session struct {
 }
 
 // entry is Manager's private bookkeeping for one live session: the pieces
-// needed to stop it and answer Lookup, kept separate from the actor's own
-// state so Manager never reaches into the actor's goroutine-owned fields.
+// needed to stop it, attach its transport, and answer Lookup. actor is kept
+// only for sending it commands (AttachTransport) — Manager never reaches
+// into the actor's own goroutine-owned fields directly.
 type entry struct {
 	info   Session
+	actor  *actor
 	cancel context.CancelFunc
 	done   chan struct{}
 }
+
+// DepsFactory builds one session's collaborators from its contract. It
+// takes ctx and the session id — unlike a bare constructor — so it can
+// express a failure of its own (e.g. a malformed model configuration),
+// something the collaborators it builds cannot yet express: at this point
+// nothing has dialed anything, so a factory error is always a local wiring
+// problem, never a vendor connect failure.
+//
+// The factory itself must stay cheap and non-network: it hands back ports,
+// it does not dial. Establishing a vendor session (Speaker.Start,
+// Transcriber.Start, Thinker.Start, StallBank.Warm) happens later, in the
+// per-session connector spawned once a client actually attaches a
+// transport (see Manager.AttachTransport) — a live interview should not pay
+// for an open vendor session before a client has even tried to connect.
+type DepsFactory func(ctx context.Context, sessionID string, c *contract.EngineContract) (Deps, error)
 
 // Manager creates, looks up, and stops session actors, keyed by a generated
 // session id. Safe for concurrent use; holding ~50 concurrent live sessions
@@ -56,7 +73,7 @@ type Manager struct {
 	// Manager holds the factory, not the collaborators: a Thinker and a
 	// ledger are per-session, and the wiring that knows which vendor backs
 	// them lives in cmd/engined.
-	newDeps func(*contract.EngineContract) Deps
+	newDeps DepsFactory
 
 	mu       sync.RWMutex
 	sessions map[string]*entry
@@ -70,12 +87,14 @@ func NewManager(
 	contracts ports.ContractSource,
 	logger *slog.Logger,
 	events *obs.EventLog,
-	newDeps func(*contract.EngineContract) Deps,
+	newDeps DepsFactory,
 ) *Manager {
 	if newDeps == nil {
-		// No collaborators wired: the session runs single-model. Legal,
-		// and what a v1.0-v1.2 contract gets anyway.
-		newDeps = func(*contract.EngineContract) Deps { return Deps{} }
+		// No collaborators wired: the session runs single-model, and
+		// AttachTransport will fail fatally (no Speaker) the moment a
+		// client actually tries to connect. Legal at construction — a
+		// v1.0-v1.2 contract gets the single-model path anyway.
+		newDeps = func(context.Context, string, *contract.EngineContract) (Deps, error) { return Deps{}, nil }
 	}
 	return &Manager{
 		events:    events,
@@ -124,6 +143,15 @@ func (m *Manager) CreateSession(ctx context.Context, candidateID string) (Sessio
 		return Session{}, err
 	}
 
+	// The factory is cheap and non-network (see DepsFactory's doc
+	// comment), so bounding it by the caller's ctx here — rather than the
+	// actor's own independent lifetime — is correct: a factory error is a
+	// local wiring problem the create call should surface directly.
+	deps, err := m.newDeps(ctx, id, c)
+	if err != nil {
+		return Session{}, fmt.Errorf("session: build collaborators for %q: %w", id, err)
+	}
+
 	info := Session{
 		ID:          id,
 		CandidateID: candidateID,
@@ -134,12 +162,12 @@ func (m *Manager) CreateSession(ctx context.Context, candidateID string) (Sessio
 	// doc): a session outlives the HTTP request that created it.
 	actorCtx, cancel := context.WithCancel(context.Background())
 	a := newActor(id, c, m.clock,
-		m.logger.With("session_id", id, "candidate_id", candidateID), m.events, m.newDeps(c))
+		m.logger.With("session_id", id, "candidate_id", candidateID), m.events, deps)
 	done := make(chan struct{})
 	go a.run(actorCtx, done)
 
 	m.mu.Lock()
-	m.sessions[id] = &entry{info: info, cancel: cancel, done: done}
+	m.sessions[id] = &entry{info: info, actor: a, cancel: cancel, done: done}
 	m.mu.Unlock()
 
 	m.logger.Info("session created", "session_id", id, "candidate_id", candidateID)
@@ -155,6 +183,45 @@ func (m *Manager) Lookup(id string) (Session, bool) {
 		return Session{}, false
 	}
 	return e.info, true
+}
+
+// AttachTransport accepts a client's SDP offer for session id and returns
+// the SDP answer, spawning the per-session connector on success. It is the
+// transport route's implementation: 404 (ErrSessionNotFound) for an
+// unknown id, 409 (ErrTransportAlreadyAttached) if a transport is already
+// attached to this session.
+//
+// ctx bounds only this call — receiving the answer back from the actor —
+// not the connector it spawns, which (like the session itself) outlives
+// any one HTTP request.
+func (m *Manager) AttachTransport(ctx context.Context, id string, offer []byte) ([]byte, error) {
+	m.mu.RLock()
+	e, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("session: attach transport %q: %w", id, ErrSessionNotFound)
+	}
+
+	reply := make(chan attachOutcome, 1)
+	select {
+	case e.actor.control <- command{Kind: cmdAttachTransport, Offer: offer, Reply: reply}:
+	case <-e.done:
+		return nil, fmt.Errorf("session: attach transport %q: %w", id, ErrSessionNotFound)
+	case <-ctx.Done():
+		return nil, fmt.Errorf("session: attach transport %q: %w", id, ctx.Err())
+	}
+
+	select {
+	case out := <-reply:
+		if out.Err != nil {
+			return nil, fmt.Errorf("session: attach transport %q: %w", id, out.Err)
+		}
+		return out.Answer, nil
+	case <-e.done:
+		return nil, fmt.Errorf("session: attach transport %q: %w", id, ErrSessionNotFound)
+	case <-ctx.Done():
+		return nil, fmt.Errorf("session: attach transport %q: %w", id, ctx.Err())
+	}
 }
 
 // Count returns the number of live sessions.

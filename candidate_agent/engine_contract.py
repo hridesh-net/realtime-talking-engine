@@ -638,6 +638,56 @@ _FALLBACK_STALLS: tuple[str, ...] = (
 )
 
 
+#: The verified Gemini prebuilt voice roster, mirrored from the Go engine's
+#: ``defaultTTSVoices`` (``engine/internal/config/config.go``) — same order,
+#: same members. This is the roster `build_engine_contract` hands to
+#: `pick_voice` when casting through the control plane, so a persona's
+#: `tts_voice_id` is picked from the same list the engine itself falls back to
+#: when a contract omits it.
+#:
+#: **Ordered and append-only, on pain of breaking every already-cast
+#: persona.** `pick_voice` selects `hash(candidate_id) % len(voices)`, so the
+#: choice is a function of this list's *order and length*, not just its
+#: membership. `tts_voice_id` is computed once at cast time and stored in the
+#: persona's contract — it is never recomputed at session time
+#: (`okf/concepts/determinism.md`). Reordering this list, or inserting a voice
+#: anywhere but the end, changes the modulus result for candidate ids that
+#: were never re-cast, silently repointing the voice of every persona already
+#: compiled against the old ordering. New voices may only be appended.
+GEMINI_TTS_VOICES: tuple[str, ...] = (
+    "Zephyr",
+    "Puck",
+    "Charon",
+    "Kore",
+    "Fenrir",
+    "Leda",
+    "Orus",
+    "Aoede",
+    "Callirrhoe",
+    "Autonoe",
+    "Enceladus",
+    "Iapetus",
+    "Umbriel",
+    "Algieba",
+    "Despina",
+    "Erinome",
+    "Algenib",
+    "Rasalgethi",
+    "Laomedeia",
+    "Achernar",
+    "Alnilam",
+    "Schedar",
+    "Gacrux",
+    "Pulcherrima",
+    "Achird",
+    "Zubenelgenubi",
+    "Vindemiatrix",
+    "Sadachbia",
+    "Sadaltager",
+    "Sulafat",
+)
+
+
 def pick_voice(candidate_id: str, voices: Sequence[str]) -> str:
     """Choose this persona's voice, deterministically and stably.
 
@@ -791,6 +841,16 @@ def build_engine_contract(
     voices: Sequence[str] = (),
 ) -> EngineContract:
     """Compile the runtime contract the Go engine consumes for one persona."""
+    tts_voice_id = pick_voice(candidate_id, voices) if voices else ""
+    if voices and (not tts_voice_id or tts_voice_id not in voices):
+        # Defence in depth: `pick_voice` already guarantees this by
+        # construction (it indexes into `voices`), but `tts_voice_id` is
+        # frozen into the stored contract and never re-derived — a silent
+        # regression here would mis-voice every persona cast until caught.
+        raise ValueError(
+            f"compiled tts_voice_id {tts_voice_id!r} is not a non-empty member of the offered "
+            "voice roster"
+        )
     return EngineContract(
         contract_version=ENGINE_CONTRACT_VERSION,
         candidate_id=candidate_id,
@@ -816,6 +876,6 @@ def build_engine_contract(
         stall_phrases=compile_stall_phrases(speech, policy),
         pregate_lexicon=compile_pregate_lexicon(knowledge_map),
         unlock_spec=compile_unlock_spec(policy.reveals_depth_when),
-        tts_voice_id=(pick_voice(candidate_id, voices) if voices else ""),
+        tts_voice_id=tts_voice_id,
         forbidden_behaviors=UNIVERSAL_FORBIDDEN,
     )

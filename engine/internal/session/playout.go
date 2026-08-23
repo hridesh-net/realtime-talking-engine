@@ -23,12 +23,25 @@ const bytesPerSamplePCM16 = 2
 //
 // Actor-owned; not safe for concurrent use.
 type playoutTracker struct {
-	sampleRate int
+	// defaultSampleRate interprets a frame that does not declare its own
+	// rate. Frames normally carry one; this is the documented vendor
+	// normalization rate, used only as a fallback.
+	defaultSampleRate int
 
 	// itemID is the response item currently playing, "" when idle.
 	itemID string
-	// sentSamples counts samples handed to the transport for this item.
-	sentSamples int
+	// sentUs is how much audio has been handed to the transport for this
+	// item, in microseconds.
+	//
+	// Duration, not samples. Every frame is converted with *its own*
+	// declared rate at the moment it arrives, because a sample count is
+	// meaningless without one: accumulating samples and dividing by a
+	// single fixed rate at the end silently mis-measures the moment two
+	// rates appear in one item, and 24 kHz vendor audio alongside a 48 kHz
+	// transport is the normal case, not an exotic one. Microseconds rather
+	// than milliseconds so a 20 ms frame is exact and a long answer does
+	// not accumulate rounding drift into the truncation point.
+	sentUs int64
 	// heardMsReported is the browser's last heartbeat for this item.
 	heardMsReported int
 	// heartbeatAt is when that heartbeat was received, on the session clock.
@@ -39,26 +52,37 @@ type playoutTracker struct {
 	haveHeartbeat bool
 }
 
-func newPlayoutTracker(sampleRate int) *playoutTracker {
-	return &playoutTracker{sampleRate: sampleRate}
+func newPlayoutTracker(defaultSampleRate int) *playoutTracker {
+	return &playoutTracker{defaultSampleRate: defaultSampleRate}
 }
 
 // begin starts tracking a new response item.
 func (p *playoutTracker) begin(itemID string, now time.Time) {
 	p.itemID = itemID
-	p.sentSamples = 0
+	p.sentUs = 0
 	p.heardMsReported = 0
 	p.heartbeatAt = now
 	p.started = now
 	p.haveHeartbeat = false
 }
 
-// sent records audio handed to the transport.
-func (p *playoutTracker) sent(frameBytes int) {
+// sent records audio handed to the transport, converting it to duration with
+// the frame's own sample rate. A frame that declares no rate is interpreted
+// with the tracker's default rather than discarded — dropping it would
+// under-count what was sent and truncate a barge-in too early.
+func (p *playoutTracker) sent(frameBytes int, sampleRateHz int) {
 	if p.itemID == "" {
 		return
 	}
-	p.sentSamples += frameBytes / bytesPerSamplePCM16
+	rate := sampleRateHz
+	if rate <= 0 {
+		rate = p.defaultSampleRate
+	}
+	if rate <= 0 {
+		return
+	}
+	samples := int64(frameBytes / bytesPerSamplePCM16)
+	p.sentUs += samples * 1_000_000 / int64(rate)
 }
 
 // heartbeat records the browser's report of how much it has played.
@@ -77,10 +101,7 @@ func (p *playoutTracker) heartbeat(itemID string, playedMs int, now time.Time) {
 
 // sentMs is everything handed to the transport, in milliseconds.
 func (p *playoutTracker) sentMs() int {
-	if p.sampleRate <= 0 {
-		return 0
-	}
-	return p.sentSamples * 1000 / p.sampleRate
+	return int(p.sentUs / 1000)
 }
 
 // heardMs is the current best estimate of what the human has heard.

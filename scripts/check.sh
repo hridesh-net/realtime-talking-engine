@@ -28,6 +28,18 @@ run() {
 
 skip() { printf '\n\033[1m▶ %s\033[0m\n\033[33m  SKIP\033[0m  %s\n' "$1" "$2"; }
 
+# missing is for a gate that could not run because its tooling is absent, as
+# opposed to skip, which is for a gate deliberately not requested (--live).
+# The two were the same call once, and the consequence was that a machine
+# without golangci-lint ran no linter at all and still printed "All checks
+# passed" — unused-code, gosec and revive were silently inactive for the whole
+# life of the module. A gate that did not run must never read as one that did.
+NOT_RUN=()
+missing() {
+    printf '\n\033[1m▶ %s\033[0m\n\033[31m  NOT RUN\033[0m  %s\n' "$1" "$2"
+    NOT_RUN+=("$1 — $2")
+}
+
 if [[ ! -x "$PY" ]]; then
     echo "No virtualenv at $PY — run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
     exit 1
@@ -70,10 +82,10 @@ if [[ -f engine/go.mod ]]; then
             run "go lint (golangci-lint)" \
                 bash -c 'cd engine && golangci-lint run --config ../.golangci.yml'
         else
-            skip "go lint (golangci-lint)" "not installed (brew install golangci-lint)"
+            missing "go lint (golangci-lint)" "not installed (brew install golangci-lint)"
         fi
     else
-        skip "go checks" "go toolchain not installed"
+        missing "go checks" "go toolchain not installed"
     fi
 else
     skip "go checks" "no engine/go.mod yet — standard recorded in .golangci.yml"
@@ -102,5 +114,11 @@ if (( ${#FAILED[@]} )); then
     printf '\033[31m%d check(s) failed:\033[0m\n' "${#FAILED[@]}"
     printf '  - %s\n' "${FAILED[@]}"
     exit 1
+fi
+if (( ${#NOT_RUN[@]} )); then
+    printf '\033[31m%d gate(s) could not run:\033[0m\n' "${#NOT_RUN[@]}"
+    printf '  - %s\n' "${NOT_RUN[@]}"
+    printf 'Install the missing tooling, or set ALLOW_MISSING_TOOLS=1 to accept the gap.\n'
+    [[ "${ALLOW_MISSING_TOOLS:-0}" == "1" ]] || exit 1
 fi
 printf '\033[32mAll checks passed.\033[0m\n'

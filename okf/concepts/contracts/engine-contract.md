@@ -73,6 +73,13 @@ class EngineContract(BaseModel):
 
 ## `turn_policy`
 
+`turn_policy.barge_in_allowed` and `voice_directives.may_interrupt` are easy to
+conflate and mean opposite directions of interruption: `barge_in_allowed` is
+whether the **human interviewer** may cut the persona off; `may_interrupt` is
+whether the **persona** may cut the human off (`speech.interrupts_interviewer`,
+an archetype trait). Documented side by side in `docs/GO_ENGINE_CONTRACT.md`,
+which was missing `barge_in_allowed` entirely until M1.2.
+
 `min_sentences`/`max_sentences` come from verbosity
 (`terse: 1–3`, `balanced: 3–6`, `verbose: 6–14`);
 `target_sentences_per_answer` comes from answer depth

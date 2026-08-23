@@ -91,6 +91,45 @@ never reveal archetype, traits, verdict, or the scorecard's existence · never
 exceed the ceiling · never volunteer that a resume claim is exaggerated unless
 specifically probed · never end the interview.
 
+## The voice roster — `GEMINI_TTS_VOICES`
+
+`build_engine_contract` picks `tts_voice_id` via `pick_voice(candidate_id,
+voices)`, and as of M1.2 the control plane actually passes a roster:
+`GEMINI_TTS_VOICES`, defined in this module next to `pick_voice`, mirrors the Go
+engine's `defaultTTSVoices` (`engine/internal/config/config.go`) **exactly** —
+same 30 voices, same order. `control_plane/api.py` imports it and passes
+`voices=GEMINI_TTS_VOICES` at both call sites that cast a persona (enrollment
+and lazy session-start casting); before this, `voices` defaulted to `()` and
+every live-cast persona's `tts_voice_id` came back `""`.
+
+The list is append-only, for the reason `pick_voice`'s docstring on the roster
+states: the choice is `hash(candidate_id) % len(voices)`, so it is a function of
+the list's order and length. `tts_voice_id` is computed once at cast time and
+frozen into the stored contract — never recomputed at session time
+(`okf/concepts/determinism.md`) — so reordering the roster would silently
+repoint the voice of every already-cast persona.
+
+`build_engine_contract` also asserts, right after picking the voice, that it is
+non-empty and a member of the offered roster before building the contract —
+defence in depth on top of `pick_voice`'s own by-construction guarantee, since
+`tts_voice_id` is exactly the kind of frozen field a silent regression here
+would corrupt for every future cast until caught.
+
+## The sample fixture is generated, not hand-written
+
+`owner_handover/engine_contract_sample.json` (and its Go-side twin,
+`engine/internal/contract/testdata/engine_contract_sample.json`) are produced by
+`scripts/export_engine_contract_sample.py`, which drives `build_engine_contract`
+and its helpers over a real persona's fields — no live model call, fully
+deterministic (same input, byte-identical output, proven by running it twice
+and diffing). Before M1.2 both files were still on `contract_version: "v1.0"`
+with all five v1.3 fields absent, and nothing caught it:
+`scripts/export_schemas.py --check` validated schemas only. It now also asserts
+the sample's `contract_version` matches `ENGINE_CONTRACT_VERSION` and that
+`precompiled_beliefs`, `stall_phrases`, `pregate_lexicon`, `unlock_spec` and
+`tts_voice_id` are all non-empty — see
+[owner-handover.md](/concepts/subsystems/owner-handover.md).
+
 ## The rule when editing
 
 **Bump `ENGINE_CONTRACT_VERSION` (in `candidate_agent/schema.py`) with any change

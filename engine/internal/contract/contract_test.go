@@ -19,6 +19,21 @@ func sampleBytes(t *testing.T) []byte {
 	return data
 }
 
+// legacySampleBytes is a genuine v1.0 contract, predating precompiled_beliefs,
+// stall_phrases, pregate_lexicon, unlock_spec and tts_voice_id. Kept
+// alongside the current v1.3 sample so the engine's promise to still accept
+// v1.0-v1.2 and degrade to the single-model path is tested against a real
+// fixture, not a v1.3 sample with its version string overwritten (which
+// would leave the v1.3 fields populated and prove nothing about degradation).
+func legacySampleBytes(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "engine_contract_sample_v1_0.json"))
+	if err != nil {
+		t.Fatalf("read legacy sample: %v", err)
+	}
+	return data
+}
+
 func TestParse_SampleRoundTrips(t *testing.T) {
 	data := sampleBytes(t)
 
@@ -27,8 +42,8 @@ func TestParse_SampleRoundTrips(t *testing.T) {
 		t.Fatalf("Parse(sample) returned error: %v", err)
 	}
 
-	if c.ContractVersion != "v1.0" {
-		t.Errorf("ContractVersion = %q, want v1.0", c.ContractVersion)
+	if c.ContractVersion != "v1.3" {
+		t.Errorf("ContractVersion = %q, want v1.3", c.ContractVersion)
 	}
 	if c.CandidateID != "vc-0c4aff82e1cb" {
 		t.Errorf("CandidateID = %q, want vc-0c4aff82e1cb", c.CandidateID)
@@ -340,4 +355,153 @@ func TestParse_AllFailuresAreInvalidContract(t *testing.T) {
 			t.Fatalf("version failure did not match ErrUnsupportedVersion: %v", err)
 		}
 	})
+}
+
+// TestParse_ToleratesAV1_0ContractAndDegradesToTheSingleModelPath pins the
+// backward-compatibility promise docs/GO_ENGINE_CONTRACT.md makes for the
+// v1.3 minor bump: a v1.0-v1.2 contract still parses, and the fields the
+// dual-model runtime needs come back zero-valued rather than causing a
+// rejection. Run against a real v1.0 fixture (not the v1.3 sample with its
+// version string swapped) so the assertion is about actual field absence,
+// not just an accepted version tag.
+func TestParse_ToleratesAV1_0ContractAndDegradesToTheSingleModelPath(t *testing.T) {
+	t.Parallel()
+
+	c, err := contract.Parse(legacySampleBytes(t))
+	if err != nil {
+		t.Fatalf("Parse(v1.0 sample) returned error: %v", err)
+	}
+	if c.ContractVersion != "v1.0" {
+		t.Fatalf("ContractVersion = %q, want v1.0", c.ContractVersion)
+	}
+	if c.MinorVersion() != 0 {
+		t.Fatalf("MinorVersion() = %d, want 0", c.MinorVersion())
+	}
+
+	// The v1.3 runtime fields are absent from this contract entirely, so they
+	// must decode to their zero values rather than fail parsing.
+	if len(c.PrecompiledBeliefs) != 0 {
+		t.Errorf("PrecompiledBeliefs = %v, want empty on a v1.0 contract", c.PrecompiledBeliefs)
+	}
+	if len(c.StallPhrases) != 0 {
+		t.Errorf("StallPhrases = %v, want empty on a v1.0 contract", c.StallPhrases)
+	}
+	if len(c.PregateLexicon) != 0 {
+		t.Errorf("PregateLexicon = %v, want empty on a v1.0 contract", c.PregateLexicon)
+	}
+	if c.TTSVoiceID != "" {
+		t.Errorf("TTSVoiceID = %q, want empty on a v1.0 contract", c.TTSVoiceID)
+	}
+	if c.UnlockSpec.Kind != "" {
+		t.Errorf("UnlockSpec.Kind = %q, want empty on a v1.0 contract", c.UnlockSpec.Kind)
+	}
+
+	// A feature gated on the v1.3 minor must detect the skew rather than run
+	// silently against these zero values.
+	if err := c.RequireMinor(3); err == nil {
+		t.Fatal("v1.0 contract satisfied RequireMinor(3); a skew must fail, not degrade silently")
+	}
+}
+
+// TestSampleContractSeedsANonEmptyPregateLexicon matters because an empty
+// lexicon means the deterministic pre-gate can never match a probe, so every
+// question would fall through to DEFER never firing at all — offline testing
+// and demoing of the pre-gate would be impossible even though the contract
+// parses cleanly.
+func TestSampleContractSeedsANonEmptyPregateLexicon(t *testing.T) {
+	t.Parallel()
+
+	c, err := contract.Parse(sampleBytes(t))
+	if err != nil {
+		t.Fatalf("Parse(sample) returned error: %v", err)
+	}
+
+	if len(c.PregateLexicon) == 0 {
+		t.Fatal("PregateLexicon is empty; DEFER can never fire against this contract")
+	}
+	for skill := range c.KnowledgeCeiling {
+		entry, ok := c.PregateLexicon[skill]
+		if !ok {
+			t.Errorf("PregateLexicon has no entry for knowledge_ceiling skill %q", skill)
+			continue
+		}
+		if len(entry.Aliases) == 0 {
+			t.Errorf("PregateLexicon[%q].Aliases is empty", skill)
+		}
+	}
+}
+
+// TestSampleContractSeedsPrecompiledBeliefsIntoTheLedger matters because the
+// claims ledger seeds from precompiled_beliefs at turn 0 — an empty list here
+// means the ledger starts with nothing to sustain a wrong belief against, the
+// exact non-determinism precompiling beliefs exists to remove (see
+// okf/concepts/determinism.md, "Beliefs are precompiled, never invented at
+// runtime").
+func TestSampleContractSeedsPrecompiledBeliefsIntoTheLedger(t *testing.T) {
+	t.Parallel()
+
+	c, err := contract.Parse(sampleBytes(t))
+	if err != nil {
+		t.Fatalf("Parse(sample) returned error: %v", err)
+	}
+
+	if len(c.PrecompiledBeliefs) == 0 {
+		t.Fatal("PrecompiledBeliefs is empty; the claims ledger would seed with nothing")
+	}
+	for _, b := range c.PrecompiledBeliefs {
+		if b.ClaimID == "" {
+			t.Error("a precompiled belief has an empty ClaimID")
+		}
+		if b.Skill == "" {
+			t.Errorf("belief %s has an empty Skill", b.ClaimID)
+		}
+		if b.Statement == "" {
+			t.Errorf("belief %s has an empty Statement", b.ClaimID)
+		}
+	}
+
+	// At least one belief needs material to sustain it under pressure, or the
+	// "vagueness is a generation target, not an absence of output" promise
+	// has nothing behind it for this sample.
+	var haveElaboration, haveDeflection bool
+	for _, b := range c.PrecompiledBeliefs {
+		if len(b.Elaborations) > 0 {
+			haveElaboration = true
+		}
+		if len(b.VagueDeflections) > 0 {
+			haveDeflection = true
+		}
+	}
+	if !haveElaboration {
+		t.Error("no precompiled belief carries an elaboration")
+	}
+	if !haveDeflection {
+		t.Error("no precompiled belief carries a vague deflection")
+	}
+}
+
+// TestSampleContractCarriesAVoiceAndStallPhrases matters because both are
+// needed for the same guarantee: a defer plays a stall clip synthesized ahead
+// of time in tts_voice_id, and if that voice is empty or the phrase bank is
+// empty there is nothing for the engine to play while the Thinker is still
+// reasoning — the persona would fall silent instead of stalling in character.
+func TestSampleContractCarriesAVoiceAndStallPhrases(t *testing.T) {
+	t.Parallel()
+
+	c, err := contract.Parse(sampleBytes(t))
+	if err != nil {
+		t.Fatalf("Parse(sample) returned error: %v", err)
+	}
+
+	if c.TTSVoiceID == "" {
+		t.Error("TTSVoiceID is empty; the sample should pin a real voice")
+	}
+	if len(c.StallPhrases) < 4 {
+		t.Errorf("StallPhrases has %d entries, want at least 4", len(c.StallPhrases))
+	}
+	for i, phrase := range c.StallPhrases {
+		if phrase == "" {
+			t.Errorf("StallPhrases[%d] is empty", i)
+		}
+	}
 }

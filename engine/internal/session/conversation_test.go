@@ -11,15 +11,6 @@ import (
 	"skillbrew/engine/internal/ports"
 )
 
-// drive runs the actor until it has processed everything queued, by round-
-// tripping a control command through it. The actor is single-threaded, so a
-// command it has handled proves every message queued before it was handled
-// too — no sleeping, no polling, no real time.
-func drive(t *testing.T, a *actor) {
-	t.Helper()
-	a.control <- command{Kind: cmdInterviewerJoined}
-}
-
 // ---------------------------------------------------------------------------
 // Task 15, done-when: "a full fake conversation produces a correct turn table."
 // ---------------------------------------------------------------------------
@@ -44,7 +35,12 @@ func TestAFullFakeConversationProducesACorrectTurnTable(t *testing.T) {
 	if a.state != StateSpeaking {
 		t.Fatalf("after greeting state = %s, want SPEAKING", a.state)
 	}
-	a.handleSpeakerEvent(ctx, ports.ResponseDone{ResponseID: "r0", ItemID: "i0"})
+	// The opening line is pre-synthesized audio, so no ResponseDone will
+	// ever arrive for it — the turn ends on its playout alarm. This test
+	// used to hand-inject a ResponseDone here, which made the greeting look
+	// exercised while the production path had no exit from SPEAKING at all.
+	clock.Advance(time.Minute)
+	a.handleTimer(ctx, <-a.timerFire)
 	if a.state != StateListening {
 		t.Fatalf("after opening line state = %s, want LISTENING", a.state)
 	}

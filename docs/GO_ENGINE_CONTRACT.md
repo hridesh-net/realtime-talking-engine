@@ -99,6 +99,27 @@ every session starts in character.
 sits inside `[min_sentences, max_sentences]`; enforce the bounds and treat the
 target as the aim.
 
+| Field | Use |
+|---|---|
+| `default_answer_depth`, `target_sentences_per_answer`, `min_sentences`, `max_sentences` | Answer length envelope — see above |
+| `on_unknown_question`, `on_pressure`, `on_silence` | Persona-specific fallback behaviour for each situation |
+| `barge_in_allowed` | Whether the **human interviewer** may cut the persona off mid-answer. |
+
+**`barge_in_allowed` and `may_interrupt` name opposite directions of the same
+conversation — do not conflate them:**
+
+| Field | Where | Who interrupts whom |
+|---|---|---|
+| `turn_policy.barge_in_allowed` | this table | The **human interviewer** may interrupt the **persona** mid-answer. |
+| `voice_directives.may_interrupt` | table above | The **persona** may interrupt the **human** — some personas talk over people, some wait. |
+
+If the engine ever wires both into the realtime session's turn-detection
+config (barge-in is what lets the interviewer's audio cut the model off
+mid-response; `may_interrupt` is what lets the model's own turn-taking jump in
+on the human's pauses), keep them on separate settings. Setting one from the
+other's source value would make every persona either always interruptible or
+never, when the two are meant to vary independently.
+
 **`knowledge_ceiling`** — the hard part. `{"Go": 3, "system design": 1}` means
 this persona may never demonstrate more than that level, no matter how the
 interviewer asks. Realtime models drift helpful under pressure, so treat this as
