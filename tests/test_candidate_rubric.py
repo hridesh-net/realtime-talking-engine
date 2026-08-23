@@ -17,11 +17,23 @@ from candidate_agent import archetypes as catalog
 from candidate_agent.agent import VirtualCandidateAgent, derive_traits
 from candidate_agent.archetypes import TRAIT_NAMES, VERDICTS
 from candidate_agent.engine_contract import (
+    DEFER_CEILING,
+    STALL_PHRASE_COUNT,
     UNIVERSAL_FORBIDDEN,
     build_engine_contract,
     casting_realism_note,
+    compile_precompiled_beliefs,
+    compile_pregate_lexicon,
+    compile_stall_phrases,
+    compile_unlock_spec,
+    pick_voice,
 )
-from candidate_agent.schema import AnswerPolicy, AptitudeProfile, SpeechProfile
+from candidate_agent.schema import (
+    AnswerPolicy,
+    AptitudeProfile,
+    SkillKnowledge,
+    SpeechProfile,
+)
 
 ALL = list(catalog.ARCHETYPES.values())
 SKILLS = ["Go", "distributed systems", "Redis"]
@@ -329,7 +341,7 @@ def test_operator_notes_cannot_override_the_archetype():
 # ---------------------------------------------------------------------------
 
 
-def _contract_for(a, language="english_indian"):
+def _contract_for(a, language="english_indian", voices=()):
     speech = SpeechProfile(**a.speech, verbal_tics=["right"], sample_phrases=["so, yeah"])
     aptitude = AptitudeProfile(smartness_ratio=0.5, **derive_traits(a, f"c:{a.key}"))
     policy = AnswerPolicy(
@@ -352,6 +364,7 @@ def _contract_for(a, language="english_indian"):
         policy=policy,
         opening_line="Hi.",
         language=language,
+        voices=voices,
     )
 
 
@@ -405,3 +418,144 @@ def test_resume_claims_reject_bad_truthfulness_values():
     )
     assert [c.truthfulness for c in claims] == ["true", "exaggerated"]
     assert claims[0].probe_that_exposes_it  # default filled in
+
+
+# ---------------------------------------------------------------------------
+# Contract v1.3 — what the Go engine needs compiled at design time
+# ---------------------------------------------------------------------------
+
+
+def _skill(name, level, *, wrong=(), elab=(), vague=(), aliases=()):
+    return SkillKnowledge(
+        skill=name,
+        level=level,
+        stance="bluffs" if level <= 3 else "solid",
+        talking_points=[],
+        breaking_point="pushed one level down",
+        wrong_beliefs=list(wrong),
+        belief_elaborations=list(elab),
+        vague_deflections=list(vague),
+        probe_aliases=list(aliases),
+    )
+
+
+def test_beliefs_compile_to_stable_ledger_ids():
+    """Ids must be stable across casts of the same persona.
+
+    The engine's claims ledger seeds from these at turn 0. A belief whose id
+    moved between casts of the same seed would break the determinism
+    `seed_fingerprint` promises — the whole reason beliefs are precompiled
+    rather than invented at runtime.
+    """
+    km = [
+        _skill(
+            "Redis",
+            2,
+            wrong=["Redis is always faster than Postgres"],
+            elab=["so we cached everything"],
+        ),
+        _skill(
+            "Go", 3, wrong=["goroutines are OS threads", "channels are always faster than mutexes"]
+        ),
+    ]
+    beliefs = compile_precompiled_beliefs(km)
+    assert [b.claim_id for b in beliefs] == ["b1", "b2", "b3"]
+    assert [b.skill for b in beliefs] == ["Redis", "Go", "Go"]
+    assert beliefs[0].elaborations == ["so we cached everything"]
+    # Same input, same ids — every time.
+    assert [b.claim_id for b in compile_precompiled_beliefs(km)] == ["b1", "b2", "b3"]
+
+
+def test_a_persona_with_no_false_beliefs_compiles_an_empty_ledger_seed():
+    assert compile_precompiled_beliefs([_skill("Go", 8)]) == []
+
+
+def test_stall_phrases_come_from_the_personas_own_voice_first():
+    """Persona-voiced filler, not generic filler.
+
+    A stall clip in a different register than the answer is the seam the
+    two-model design exists to hide.
+    """
+    speech = SpeechProfile(
+        pace="measured",
+        verbosity="terse",
+        filler_frequency=3,
+        hesitation_frequency=3,
+        formality="casual",
+        interrupts_interviewer=False,
+        tone="plain",
+        verbal_tics=["matlab", "you know"],
+        sample_phrases=[],
+    )
+    policy = AnswerPolicy(
+        default_answer_depth="adequate",
+        on_unknown_question="admits it",
+        on_pressure="gets short",
+        on_silence="waits it out",
+        reveals_depth_when="never",
+        always_does=[],
+        never_does=[],
+    )
+    phrases = compile_stall_phrases(speech, policy)
+    assert phrases[:3] == ["matlab", "you know", "waits it out"]
+    assert len(phrases) == STALL_PHRASE_COUNT
+    assert len({p.lower() for p in phrases}) == len(phrases)  # no repeats
+
+
+def test_pregate_lexicon_always_matches_the_skill_name_itself():
+    lex = compile_pregate_lexicon(
+        [_skill("System design", 2, aliases=["Walk me through the architecture"])]
+    )
+    entry = lex["System design"]
+    assert "system design" in entry.aliases
+    assert "walk me through the architecture" in entry.aliases
+    assert entry.defer_at_or_below == DEFER_CEILING
+
+
+@pytest.mark.parametrize(
+    ("prose", "kind"),
+    [
+        ("", "never"),
+        ("Never — this persona does not reveal depth.", "never"),
+        ("does not open up regardless of rapport", "never"),
+        # Real model output. The negation is mid-sentence, which a prefix match
+        # missed, sending a plainly-never persona down the per-turn path.
+        ("He never reveals deeper technical depth because it does not occur to him", "never"),
+        ("Under no circumstances does he go deeper", "never"),
+        ("Only after the interviewer asks a specific follow-up about outages", "conditional"),
+        # Negation *qualifying* a trigger, not refusing one.
+        ("does not open up until the interviewer shares something first", "conditional"),
+        ("He will not go deeper unless they ask about a specific outage", "conditional"),
+    ],
+)
+def test_unlock_prose_compiles_to_something_the_engine_can_act_on(prose, kind):
+    """`never` short-circuits per-turn assessment.
+
+    Most personas never unlock, and paying a reasoning call every turn to
+    re-learn that is waste.
+    """
+    spec = compile_unlock_spec(prose)
+    assert spec.kind == kind
+    if kind == "conditional":
+        assert spec.condition == prose
+
+
+def test_the_stall_voice_is_the_speaking_voice():
+    """Stall clips are synthesized ahead of time.
+
+    If the voice differs from the speech model's, the filler and the answer
+    are audibly two different people.
+    """
+    voices = ["alloy", "ash", "ballad", "coral"]
+    assert pick_voice("cand-1", voices) == pick_voice("cand-1", voices)
+    contract = _contract_for(catalog.get("evasive"), voices=voices)
+    assert contract.tts_voice_id == pick_voice(contract.candidate_id, voices)
+
+
+def test_the_contract_carries_everything_the_engine_needs():
+    contract = _contract_for(catalog.get("evasive"))
+    assert contract.contract_version == "v1.3"
+    assert contract.unlock_spec.kind in ("never", "conditional")
+    assert contract.stall_phrases
+    # No voices offered at cast time: the engine resolves it with the same rule.
+    assert contract.tts_voice_id == ""

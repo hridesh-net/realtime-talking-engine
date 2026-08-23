@@ -41,6 +41,19 @@ SYSTEM_GUARDRAILS = """HARD RULES (violations make the output invalid):
 5. "wrong_beliefs" must be SPECIFIC and technically plausible — a real mistaken
    belief an engineer holds, not "misunderstands caching". Leave it empty for
    honest personas with no false beliefs.
+5a. "belief_elaborations" are 2-3 ways this person expands a wrong belief when
+   pushed on it — the confident follow-on, not a retraction. The live engine
+   replays these instead of letting a model invent a wrong answer mid-interview,
+   so write them as things this person would actually say.
+5b. "vague_deflections" are 2-3 things this person says about a skill they
+   cannot really discuss — literal vague material, in their register ("we
+   mostly just… used it, it worked fine"). Vagueness is the target here, not
+   an absence of output. Required for any skill at level 3 or below.
+5c. "probe_aliases" are 4-8 phrases an interviewer would actually say when
+   probing this skill, in their own words rather than yours — "walk me through
+   the architecture", "how would you scale this". They are matched against live
+   speech to spot an incoming hard question, so everyday phrasing beats
+   textbook terminology.
 6. "breaking_point" must name the actual question depth where the persona fails,
    in concrete terms an interviewer could walk into.
 7. "resume_claims" must be consistent with the honesty trait you are given. A

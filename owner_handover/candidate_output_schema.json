@@ -125,7 +125,7 @@
       "description": "Runtime slice consumed by the Go interview-candidate engine.",
       "properties": {
         "contract_version": {
-          "default": "v1.2",
+          "default": "v1.3",
           "title": "Contract Version",
           "type": "string"
         },
@@ -172,6 +172,35 @@
           },
           "title": "Forbidden Behaviors",
           "type": "array"
+        },
+        "precompiled_beliefs": {
+          "items": {
+            "$ref": "#/$defs/PrecompiledBelief"
+          },
+          "title": "Precompiled Beliefs",
+          "type": "array"
+        },
+        "stall_phrases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Stall Phrases",
+          "type": "array"
+        },
+        "pregate_lexicon": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PregateSkill"
+          },
+          "title": "Pregate Lexicon",
+          "type": "object"
+        },
+        "unlock_spec": {
+          "$ref": "#/$defs/UnlockSpec"
+        },
+        "tts_voice_id": {
+          "default": "",
+          "title": "Tts Voice Id",
+          "type": "string"
         }
       },
       "required": [
@@ -449,6 +478,68 @@
       "title": "InterviewerScorecard",
       "type": "object"
     },
+    "PrecompiledBelief": {
+      "description": "One wrong belief, with the material to sustain it, fixed at design time.\n\n`claim_id` is assigned by code in a stable order so the same persona\ncompiles the same ids every time \u2014 the claims ledger seeds from these at\nturn 0, and a runtime-invented belief would break that determinism.",
+      "properties": {
+        "claim_id": {
+          "pattern": "^b[0-9]+$",
+          "title": "Claim Id",
+          "type": "string"
+        },
+        "skill": {
+          "title": "Skill",
+          "type": "string"
+        },
+        "statement": {
+          "title": "Statement",
+          "type": "string"
+        },
+        "elaborations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Elaborations",
+          "type": "array"
+        },
+        "vague_deflections": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Vague Deflections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "claim_id",
+        "skill",
+        "statement"
+      ],
+      "title": "PrecompiledBelief",
+      "type": "object"
+    },
+    "PregateSkill": {
+      "description": "How the engine recognises a probe at this skill, from partial speech.",
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "defer_at_or_below": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Defer At Or Below",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "defer_at_or_below"
+      ],
+      "title": "PregateSkill",
+      "type": "object"
+    },
     "ResumeClaim": {
       "description": "One claim on the persona's resume, and how truthful it is.",
       "properties": {
@@ -540,6 +631,27 @@
           },
           "title": "Wrong Beliefs",
           "type": "array"
+        },
+        "belief_elaborations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Belief Elaborations",
+          "type": "array"
+        },
+        "vague_deflections": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Vague Deflections",
+          "type": "array"
+        },
+        "probe_aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Probe Aliases",
+          "type": "array"
         }
       },
       "required": [
@@ -614,6 +726,33 @@
         "tone"
       ],
       "title": "SpeechProfile",
+      "type": "object"
+    },
+    "UnlockSpec": {
+      "description": "`unlock_condition` prose compiled into something the engine can act on.\n\n`never` short-circuits per-turn assessment entirely \u2014 most personas never\nreveal depth, and paying a reasoning call per turn to re-learn that is\nwaste.",
+      "properties": {
+        "kind": {
+          "pattern": "^(never|conditional)$",
+          "title": "Kind",
+          "type": "string"
+        },
+        "condition": {
+          "default": "",
+          "title": "Condition",
+          "type": "string"
+        },
+        "hints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "UnlockSpec",
       "type": "object"
     }
   },

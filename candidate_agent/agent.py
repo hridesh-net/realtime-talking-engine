@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+from collections.abc import Sequence
 from typing import Any
 
 from candidate_agent import archetypes as catalog
@@ -65,6 +66,18 @@ def _rng(seed: str) -> random.Random:
 
 def _fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _strings(raw: Any, limit: int) -> list[str]:
+    """Coerce a model-supplied list to clean, bounded strings.
+
+    The model can return anything; the engine replays these verbatim, so an
+    empty or malformed entry becomes a stall clip that says nothing.
+    """
+    if not isinstance(raw, list):
+        return []
+    out = [str(item).strip() for item in raw]
+    return [item for item in out if item][:limit]
 
 
 def derive_traits(archetype: Archetype, seed: str) -> dict[str, int]:
@@ -121,6 +134,7 @@ class VirtualCandidateAgent:
         avoid_names: list[str] | None = None,
         human_traits: HumanTraitProfile | None = None,
         archetype: Archetype | None = None,
+        voices: Sequence[str] = (),
     ) -> VirtualCandidate:
         """Cast one persona for this interview and archetype.
 
@@ -143,6 +157,10 @@ class VirtualCandidateAgent:
             human_traits: Optional realism/compliance layer (see
                 `trait_dimensions.compose_human_traits`) — code-derived, never
                 seen or authored by the model.
+            voices: Voice names the realtime provider accepts. When given, the
+                contract pins `tts_voice_id` so the engine synthesizes stall
+                clips in the same voice the persona speaks in. Empty leaves the
+                engine to resolve it with the same deterministic rule.
             archetype: A composed archetype to cast instead of looking
                 `archetype_key` up in the catalog. Personas composed per
                 interview are validated but never registered, so there is
@@ -234,6 +252,7 @@ class VirtualCandidateAgent:
             opening_line=opening_line,
             human_traits=human_traits,
             language=language,
+            voices=voices,
         )
 
         # Reproducibility claim: everything here is derived from the seed alone,
@@ -328,6 +347,9 @@ class VirtualCandidateAgent:
                         raw.get("breaking_point") or "Pushed one level below a textbook definition."
                     ),
                     wrong_beliefs=[str(w) for w in raw.get("wrong_beliefs", [])][:4],
+                    belief_elaborations=_strings(raw.get("belief_elaborations"), 3),
+                    vague_deflections=_strings(raw.get("vague_deflections"), 3),
+                    probe_aliases=_strings(raw.get("probe_aliases"), 8),
                 )
             )
 
@@ -347,6 +369,9 @@ class VirtualCandidateAgent:
                         talking_points=[str(t) for t in raw.get("talking_points", [])][:5],
                         breaking_point=str(raw.get("breaking_point") or "Rarely breaks down here."),
                         wrong_beliefs=[str(w) for w in raw.get("wrong_beliefs", [])][:4],
+                        belief_elaborations=_strings(raw.get("belief_elaborations"), 3),
+                        vague_deflections=_strings(raw.get("vague_deflections"), 3),
+                        probe_aliases=_strings(raw.get("probe_aliases"), 8),
                     )
                 )
         return entries

@@ -154,3 +154,30 @@ otherwise.
 `docs/GO_ENGINE_CONTRACT.md` is the full spec, including the grading procedure ·
 [engine_contract.py](/concepts/modules/candidate-agent-engine-contract.md) ·
 `owner_handover/engine_contract_schema.json`
+
+
+## v1.3 — the dual-model runtime fields
+
+The Go engine runs **two models per session**: a speech model that talks, and a
+reasoning model (the *Thinker*) that thinks alongside it. See
+[the engine subsystem](/concepts/subsystems/engine.md). Four contract fields
+exist so the reasoning half has something deterministic to reason *over*, and
+one so the two halves sound like the same person.
+
+| Field | Owner | Purpose |
+|---|---|---|
+| `precompiled_beliefs[]` | model authors the prose, code assigns `claim_id` in `knowledge_map` order | Seeds the claims ledger at turn 0. Stable ids across casts of the same seed. |
+| `stall_phrases[]` | code, from the persona's own `verbal_tics` / `on_silence` | Filler played within 50 ms of a defer, in the persona's register. |
+| `pregate_lexicon{}` | model authors `probe_aliases`, code owns `defer_at_or_below` | Spot an incoming hard question from partial speech. |
+| `unlock_spec` | code, compiled from `reveals_depth_when` prose | `never` short-circuits per-turn assessment. |
+| `tts_voice_id` | code, `sha256(candidate_id) % len(voices)` | Stall clips must not be a different voice than the answer. |
+
+All optional. A v1.0–v1.2 contract parses with them empty and the engine falls
+back to the single-model path — the engine pins by **major** version.
+
+`compile_unlock_spec` reads model-authored prose, so it is deliberately
+conservative: a negation closes the door **unless** the sentence also names a
+trigger word, in which case the negation was qualifying it. Both misreadings
+cost something — a wrong `never` makes the unlock unreachable, a wrong
+`conditional` burns a reasoning call every turn — so the rule is explicit and
+tested in both directions rather than left to a prefix match.

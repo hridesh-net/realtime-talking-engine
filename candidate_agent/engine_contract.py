@@ -11,14 +11,20 @@ text: the engine pins a version.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Sequence
+
 from candidate_agent.schema import (
     ENGINE_CONTRACT_VERSION,
     AnswerPolicy,
     AptitudeProfile,
     EngineContract,
     HumanTraitProfile,
+    PrecompiledBelief,
+    PregateSkill,
     SkillKnowledge,
     SpeechProfile,
+    UnlockSpec,
 )
 
 #: Behaviours no persona may exhibit, regardless of archetype. The engine
@@ -612,6 +618,161 @@ A convincing bad candidate is the point — do not drift toward being helpful or
 impressive if this persona would not be."""
 
 
+#: A skill at or below this ceiling is one the persona cannot actually discuss,
+#: so a probe at it defers to the reasoning model instead of letting the speech
+#: model answer unaided. Above it, the speech model answers alone — deferring
+#: on everything would make every turn slow and the persona unnaturally hesitant.
+DEFER_CEILING = 3
+
+#: How many stall phrases to compile. Enough that the picker can avoid an
+#: immediate repeat; few enough that the persona does not sound like a loop.
+STALL_PHRASE_COUNT = 6
+
+#: Generic filler, used only to top up a persona whose own speech gives us too
+#: little to work with. Deliberately bland — the persona-voiced ones come first.
+_FALLBACK_STALLS: tuple[str, ...] = (
+    "Hmm, let me think about that for a second.",
+    "That's… that's a good question, actually.",
+    "Okay, so… how do I put this.",
+    "Right, umm…",
+)
+
+
+def pick_voice(candidate_id: str, voices: Sequence[str]) -> str:
+    """Choose this persona's voice, deterministically and stably.
+
+    Lives here rather than in `voice.py` because the choice is part of the
+    compiled contract: the stall clips are synthesized in this voice ahead of
+    time, and if it does not match the speech model's voice the filler and the
+    answer are audibly two different people. One rule, one home, both callers.
+    """
+    if not voices:
+        raise ValueError("no voices offered")
+    digest = hashlib.sha256(candidate_id.encode()).hexdigest()
+    return voices[int(digest[:16], 16) % len(voices)]
+
+
+def compile_precompiled_beliefs(knowledge_map: list[SkillKnowledge]) -> list[PrecompiledBelief]:
+    """Promote the persona's wrong beliefs to ledger-ready structured claims.
+
+    Ids are assigned in `knowledge_map` order, which is itself clamped to the
+    job's required skills, so the same persona always compiles the same ids.
+    The engine's claims ledger seeds from these at turn 0 — a belief invented
+    at runtime instead would void the persona's `seed_fingerprint`.
+    """
+    beliefs: list[PrecompiledBelief] = []
+    for skill in knowledge_map:
+        for statement in skill.wrong_beliefs:
+            beliefs.append(
+                PrecompiledBelief(
+                    claim_id=f"b{len(beliefs) + 1}",
+                    skill=skill.skill,
+                    statement=statement,
+                    elaborations=list(skill.belief_elaborations),
+                    vague_deflections=list(skill.vague_deflections),
+                )
+            )
+    return beliefs
+
+
+def compile_stall_phrases(speech: SpeechProfile, policy: AnswerPolicy) -> list[str]:
+    """Persona-voiced filler for the engine to play while the Thinker thinks.
+
+    Drawn from this persona's own tics and phrases first, because a stall clip
+    in a different register than the answer is the seam the whole two-model
+    design exists to hide. Topped up from generic filler only if the persona
+    gave us too little.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for candidate in (*speech.verbal_tics, policy.on_silence, *_FALLBACK_STALLS):
+        text = candidate.strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) == STALL_PHRASE_COUNT:
+            break
+    return out
+
+
+def compile_pregate_lexicon(knowledge_map: list[SkillKnowledge]) -> dict[str, PregateSkill]:
+    """Per skill, the phrases that mean "the interviewer is probing this".
+
+    The aliases are model-authored at cast time (`probe_aliases`); the skill
+    name itself is always included, and the defer threshold is code-owned. The
+    engine matches these incrementally against partial speech, so it can start
+    stalling before the interviewer has finished the question.
+    """
+    lexicon: dict[str, PregateSkill] = {}
+    for skill in knowledge_map:
+        aliases = {skill.skill.lower()}
+        aliases.update(a.strip().lower() for a in skill.probe_aliases if a.strip())
+        lexicon[skill.skill] = PregateSkill(
+            aliases=sorted(aliases),
+            defer_at_or_below=DEFER_CEILING,
+        )
+    return lexicon
+
+
+#: Words that negate revealing depth. Anchored on word boundaries and searched
+#: anywhere in the prose, not just at the start — the model writes "He never
+#: reveals depth…" as often as "Never.", and matching only the opening word
+#: sent a plainly-never persona down the conditional path.
+_NEVER_MARKERS: tuple[str, ...] = (
+    "never",
+    "does not",
+    "doesn't",
+    "will not",
+    "won't",
+    "no circumstances",
+    "nothing will",
+)
+
+#: Words that introduce a real trigger. Their presence means the negation was
+#: qualifying something ("does not open up *until* …") rather than closing the
+#: door, so the persona is genuinely conditional.
+_UNLOCK_TRIGGERS: tuple[str, ...] = (
+    "until",
+    "unless",
+    "once ",
+    "after ",
+    "if the",
+    "if they",
+    "when the",
+    "when they",
+    "only if",
+    "only when",
+    "only after",
+)
+
+
+def compile_unlock_spec(reveals_depth_when: str) -> UnlockSpec:
+    """Compile `unlock_condition` prose into something the engine can act on.
+
+    Most personas never unlock. Paying a reasoning call every turn to re-learn
+    that is waste, so `never` short-circuits assessment; anything else is
+    assessed per turn and the actor owns the monotonic flip.
+
+    The prose is model-authored, so this reads it conservatively: a negation
+    closes the door **unless** the sentence also names a trigger, in which case
+    the negation was qualifying rather than refusing. Both misreadings cost
+    something — a wrong `never` makes the unlock unreachable, a wrong
+    `conditional` burns a reasoning call per turn — so the rule is explicit and
+    tested in both directions rather than left to a prefix match.
+    """
+    condition = reveals_depth_when.strip()
+    if not condition:
+        return UnlockSpec(kind="never")
+    lowered = condition.lower()
+    negated = any(marker in lowered for marker in _NEVER_MARKERS)
+    triggered = any(trigger in lowered for trigger in _UNLOCK_TRIGGERS)
+    if negated and not triggered:
+        return UnlockSpec(kind="never")
+    return UnlockSpec(kind="conditional", condition=condition, hints=[])
+
+
 def build_engine_contract(
     *,
     candidate_id: str,
@@ -627,6 +788,7 @@ def build_engine_contract(
     opening_line: str,
     human_traits: HumanTraitProfile | None = None,
     language: str = DEFAULT_LANGUAGE,
+    voices: Sequence[str] = (),
 ) -> EngineContract:
     """Compile the runtime contract the Go engine consumes for one persona."""
     return EngineContract(
@@ -650,5 +812,10 @@ def build_engine_contract(
         turn_policy=_turn_policy(policy, speech),
         knowledge_ceiling={k.skill: k.level for k in knowledge_map},
         unlock_condition=policy.reveals_depth_when,
+        precompiled_beliefs=compile_precompiled_beliefs(knowledge_map),
+        stall_phrases=compile_stall_phrases(speech, policy),
+        pregate_lexicon=compile_pregate_lexicon(knowledge_map),
+        unlock_spec=compile_unlock_spec(policy.reveals_depth_when),
+        tts_voice_id=(pick_voice(candidate_id, voices) if voices else ""),
         forbidden_behaviors=UNIVERSAL_FORBIDDEN,
     )

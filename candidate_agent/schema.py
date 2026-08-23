@@ -19,7 +19,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field, StringConstraints
 
 PERSONA_VERSION = "v1.2"
-ENGINE_CONTRACT_VERSION = "v1.2"
+ENGINE_CONTRACT_VERSION = "v1.3"
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +67,16 @@ class SkillKnowledge(BaseModel):
     breaking_point: str
     #: Specific incorrect things they will assert. Empty unless they bluff.
     wrong_beliefs: list[str] = Field(default_factory=list)
+    #: Pre-authored ways this persona expands a wrong belief when pushed. The
+    #: engine replays these; it never lets a model invent competence downward
+    #: at runtime, which would void `seed_fingerprint` determinism.
+    belief_elaborations: list[str] = Field(default_factory=list)
+    #: Literal vague material for a skill the persona cannot actually discuss.
+    #: Vagueness is a generation target, not an absence of output.
+    vague_deflections: list[str] = Field(default_factory=list)
+    #: Phrases an interviewer uses when probing this skill. Feeds the engine's
+    #: deterministic pre-gate, which classifies from partial transcripts.
+    probe_aliases: list[str] = Field(default_factory=list)
 
 
 class ResumeClaim(BaseModel):
@@ -215,6 +225,43 @@ class InterviewerScorecard(BaseModel):
     pass_condition: str
 
 
+class PrecompiledBelief(BaseModel):
+    """One wrong belief, with the material to sustain it, fixed at design time.
+
+    `claim_id` is assigned by code in a stable order so the same persona
+    compiles the same ids every time — the claims ledger seeds from these at
+    turn 0, and a runtime-invented belief would break that determinism.
+    """
+
+    claim_id: str = Field(..., pattern="^b[0-9]+$")
+    skill: str
+    statement: str
+    elaborations: list[str] = Field(default_factory=list)
+    vague_deflections: list[str] = Field(default_factory=list)
+
+
+class PregateSkill(BaseModel):
+    """How the engine recognises a probe at this skill, from partial speech."""
+
+    aliases: list[str] = Field(default_factory=list)
+    #: Probe this skill at or below this ceiling and the engine defers rather
+    #: than letting the speech model answer unaided.
+    defer_at_or_below: int = Field(..., ge=0, le=10)
+
+
+class UnlockSpec(BaseModel):
+    """`unlock_condition` prose compiled into something the engine can act on.
+
+    `never` short-circuits per-turn assessment entirely — most personas never
+    reveal depth, and paying a reasoning call per turn to re-learn that is
+    waste.
+    """
+
+    kind: str = Field(..., pattern="^(never|conditional)$")
+    condition: str = ""
+    hints: list[str] = Field(default_factory=list)
+
+
 class EngineContract(BaseModel):
     """Runtime slice consumed by the Go interview-candidate engine."""
 
@@ -232,6 +279,22 @@ class EngineContract(BaseModel):
     knowledge_ceiling: dict[str, int]
     unlock_condition: str
     forbidden_behaviors: list[str]
+
+    # ---- engine runtime fields (contract v1.3) ----------------------------
+    #: Seeds the engine's claims ledger at turn 0. The persona's false beliefs
+    #: exist before the first question is asked.
+    precompiled_beliefs: list[PrecompiledBelief] = Field(default_factory=list)
+    #: Persona-voiced filler, synthesized to audio at contract load so a defer
+    #: can start playing inside 50 ms while the reasoning model is still
+    #: thinking. Derived from this persona's own tics and phrases.
+    stall_phrases: list[str] = Field(default_factory=list)
+    #: skill -> how to spot a probe at it, for the deterministic pre-gate.
+    pregate_lexicon: dict[str, PregateSkill] = Field(default_factory=dict)
+    unlock_spec: UnlockSpec = Field(default_factory=lambda: UnlockSpec(kind="never"))
+    #: Voice the stall clips are synthesized in. Must equal the speech model's
+    #: voice or the filler and the answer are audibly two different people.
+    #: Empty means the engine resolves it with the same deterministic rule.
+    tts_voice_id: str = ""
 
 
 class VirtualCandidate(BaseModel):
@@ -305,6 +368,9 @@ CANDIDATE_DRAFT_JSON_SCHEMA: dict[str, Any] = {
                     "talking_points": {"type": "array", "items": {"type": "string"}},
                     "breaking_point": {"type": "string"},
                     "wrong_beliefs": {"type": "array", "items": {"type": "string"}},
+                    "belief_elaborations": {"type": "array", "items": {"type": "string"}},
+                    "vague_deflections": {"type": "array", "items": {"type": "string"}},
+                    "probe_aliases": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": [
                     "skill",
@@ -313,6 +379,9 @@ CANDIDATE_DRAFT_JSON_SCHEMA: dict[str, Any] = {
                     "talking_points",
                     "breaking_point",
                     "wrong_beliefs",
+                    "belief_elaborations",
+                    "vague_deflections",
+                    "probe_aliases",
                 ],
             },
         },

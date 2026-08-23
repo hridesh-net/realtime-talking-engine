@@ -42,7 +42,22 @@ Generate Go structs from the schema, or hand-write them to match it.
 **`contract_version`** — pin it. Reject a contract whose major version the
 engine does not implement rather than running a persona you cannot honour.
 
-**Now `v1.2`** (2026-08-24). Two minor bumps landed on separate branches and
+**Now `v1.3`** (2026-08-25). The minor bump adds the fields the dual-model
+runtime needs compiled at design time. All are optional — a v1.0–v1.2 contract
+parses with them zero-valued and the engine degrades to the single-model path
+rather than refusing to run.
+
+| Field | Why the engine needs it |
+|---|---|
+| `precompiled_beliefs[]` | Seeds the claims ledger at turn 0: `{claim_id, skill, statement, elaborations, vague_deflections}`. The persona's false beliefs exist before the first question. Inventing one at runtime would void `seed_fingerprint`. |
+| `stall_phrases[]` | Persona-voiced filler, synthesized at load, so a defer starts playing inside 50 ms while the reasoning model is still thinking. Drawn from this persona's own tics — a stall clip in another register is the seam the two-model design exists to hide. |
+| `pregate_lexicon{}` | Per skill: `{aliases, defer_at_or_below}`. Matched incrementally against partial speech so the engine can start stalling before the question finishes. |
+| `unlock_spec` | `{kind: never\|conditional, condition, hints}`. `never` short-circuits per-turn unlock assessment entirely — most personas never unlock and paying a reasoning call every turn to re-learn that is waste. |
+| `tts_voice_id` | The voice stall clips are synthesized in. **Must equal the speech model's voice.** Empty means the engine resolves it with the same deterministic rule (`sha256(candidate_id) % len(voices)`). |
+
+**Earlier minors** (both still apply):
+
+**`v1.2`** (2026-08-24). Two minor bumps landed on separate branches and
 each called itself `v1.1`; the merge is a third shape, so it takes its own
 number rather than leaving two different prompts sharing one version string.
 

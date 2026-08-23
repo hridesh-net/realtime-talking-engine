@@ -46,6 +46,34 @@ type TurnPolicy struct {
 // owner_handover/engine_contract_schema.json, v1.0 fields only. The v1.1
 // fields described in plan §8.1 (precompiled_beliefs, stall_phrases,
 // pregate_lexicon, unlock_spec, tts_voice_id) are added in a later task.
+// PrecompiledBelief is one wrong belief the persona holds, fixed at design
+// time along with the material to sustain it. The claims ledger seeds from
+// these at turn 0 — the persona's false beliefs exist before the first
+// question, and nothing invents one at runtime.
+type PrecompiledBelief struct {
+	ClaimID          string   `json:"claim_id"`
+	Skill            string   `json:"skill"`
+	Statement        string   `json:"statement"`
+	Elaborations     []string `json:"elaborations,omitempty"`
+	VagueDeflections []string `json:"vague_deflections,omitempty"`
+}
+
+// PregateSkill is how the deterministic pre-gate recognises a probe at one
+// skill from a partial transcript, and the ceiling at or below which such a
+// probe defers to the Thinker instead of being answered unaided.
+type PregateSkill struct {
+	Aliases        []string `json:"aliases"`
+	DeferAtOrBelow int      `json:"defer_at_or_below"`
+}
+
+// UnlockSpec is unlock_condition prose compiled into something the runtime can
+// act on. Kind "never" short-circuits per-turn assessment entirely.
+type UnlockSpec struct {
+	Kind      string   `json:"kind"`
+	Condition string   `json:"condition,omitempty"`
+	Hints     []string `json:"hints,omitempty"`
+}
+
 type EngineContract struct {
 	ContractVersion    string          `json:"contract_version"`
 	CandidateID        string          `json:"candidate_id"`
@@ -57,6 +85,15 @@ type EngineContract struct {
 	KnowledgeCeiling   map[string]int  `json:"knowledge_ceiling"`
 	UnlockCondition    string          `json:"unlock_condition"`
 	ForbiddenBehaviors []string        `json:"forbidden_behaviors"`
+
+	// Runtime fields, contract v1.3. All optional: a v1.0-v1.2 contract
+	// parses with them zero-valued, and the engine degrades to the
+	// single-model path rather than refusing to run.
+	PrecompiledBeliefs []PrecompiledBelief     `json:"precompiled_beliefs,omitempty"`
+	StallPhrases       []string                `json:"stall_phrases,omitempty"`
+	PregateLexicon     map[string]PregateSkill `json:"pregate_lexicon,omitempty"`
+	UnlockSpec         UnlockSpec              `json:"unlock_spec"`
+	TTSVoiceID         string                  `json:"tts_voice_id,omitempty"`
 
 	// minorVersion is parsed from ContractVersion by Parse. Unexported and
 	// untagged so it never round-trips into JSON; read it via MinorVersion.

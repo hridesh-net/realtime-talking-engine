@@ -20,9 +20,9 @@ provider lands, this is the seam to split.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
 
+from candidate_agent.engine_contract import pick_voice
 from candidate_agent.prompts import build_voice_system_prompt
 from candidate_agent.schema import EngineContract
 
@@ -52,19 +52,6 @@ _TRANSCRIBE_LANGUAGE: dict[str, str | None] = {
     "hindi": "hi",
     "hinglish": None,
 }
-
-
-def pick_voice(candidate_id: str, voices: Sequence[str]) -> str:
-    """Choose this persona's voice, deterministically and stably.
-
-    Keyed on ``candidate_id`` — itself ``vc-<sha256(seed)[:12]>`` — so a re-cast
-    of the same ``(interview, archetype)`` keeps the same voice, and two
-    personas in one training set are unlikely to share one.
-    """
-    if not voices:
-        raise ValueError("no voices available for this provider")
-    digest = hashlib.sha256(candidate_id.encode()).hexdigest()
-    return voices[int(digest[:16], 16) % len(voices)]
 
 
 def build_realtime_session(

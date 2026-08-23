@@ -68,6 +68,16 @@ persona told it joined six minutes late had an opening line written as though it
 arrived on time, and one whose profile said `gender presentation: woman` was cast
 under a man's name.
 
+**Beliefs are precompiled, never invented at runtime.** The live engine runs a
+reasoning model alongside the speech model, and the tempting shortcut is to let
+it improvise a wrong answer when the interviewer probes past the ceiling. That
+would void `seed_fingerprint`: two sessions on the same contract would hold
+different false beliefs. So `contract.precompiled_beliefs` fixes them at cast
+time with the material to sustain them — `elaborations` for when the persona is
+pushed, `vague_deflections` for a skill it cannot really discuss — and the
+runtime only retrieves and rephrases. Vagueness is a generation target with
+literal material behind it, not an absence of output.
+
 Enforcement is not by prompt alone — the agent **re-imposes** the code side after
 the call:
 
