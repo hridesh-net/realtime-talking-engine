@@ -78,7 +78,7 @@ turn) can move provider without dragging the once-per-interview calls with it.
 `voice` resolves against the realtime-capable providers **only** — it does not
 fall through to `LLM_PROVIDER`, because the text provider may offer no realtime
 API at all, and a fallback there would fail at mint time with a confusing error.
-Defaults: `gemini` → `gemini-2.5-flash`, `openai` → `gpt-4o-mini`. Model IDs are
+Defaults: `gemini` → `gemini-3.7-flash`, `openai` → `gpt-4o-mini`. Model IDs are
 config, never hardcoded at a call site.
 
 With no `*_PROVIDER` set, the factory picks the first provider whose API key is

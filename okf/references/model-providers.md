@@ -25,7 +25,7 @@ response_schema=schema, system_instruction=system)`.
 
 Native schema-constrained output: the schema goes in the request, not the prompt.
 `system_instruction` is a first-class config field. Default model id:
-`gemini-2.5-flash`.
+`gemini-3.7-flash`.
 
 Worth knowing: the Developer API is strict about JSON Schema features and
 historically rejects `additionalProperties`. The schemas here do not use it, so

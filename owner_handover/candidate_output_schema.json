@@ -620,7 +620,7 @@
   "description": "One virtual candidate persona. Returned by the enrollment endpoint and by GET /api/v1/candidates/{candidate_id}.",
   "properties": {
     "persona_version": {
-      "default": "v1.1",
+      "default": "v1.2",
       "title": "Persona Version",
       "type": "string"
     },

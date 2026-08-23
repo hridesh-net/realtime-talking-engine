@@ -172,6 +172,23 @@ first** and only falls back to the catalog. The UI's "Compose" tab
 (`ui/src/PersonaComposer.jsx`, inside `InterviewDetail.jsx`) is the human-facing
 side of this.
 
+### Why casting sees the realism layer
+
+`human_traits` land in two prompts, not one. The compiled `system_prompt` is the
+persona's own runtime instruction; the **casting** prompt is what the model reads
+while it writes `opening_line`, `sample_phrases`, `verbal_tics` and
+`always_does`. Those are stored and replayed every session, so a casting model
+that cannot see the realism layer bakes a contradiction into the artifact and
+leaves the runtime model to reconcile it — or not, differently each session.
+
+`engine_contract.casting_realism_note(traits)` renders the same directive tables
+for the casting side, plus the profile facts, because the casting model also
+picks the persona's *name*. Verified live: a persona with
+`joins_late_minutes=6`, `volunteers_protected_info` and
+`gender_presentation="woman"` now opens with *"sorry for the six-minute delay …
+I am Pooja, married, living here in Jaipur only"* — lateness, compliance trap and
+profile all in the first stored line.
+
 ## Testing
 
 Offline: `tests/test_candidate_rubric.py` (401 ln) is the real safety net —

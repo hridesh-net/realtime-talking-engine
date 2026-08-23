@@ -17,7 +17,7 @@ sources:
 ---
 # VirtualCandidate
 
-`PERSONA_VERSION = "v1.0"`. Stored as one JSON document per
+`PERSONA_VERSION = "v1.2"`. Stored as one JSON document per
 `(interview_id, archetype)`, with indexed columns alongside.
 
 # Schema
@@ -107,7 +107,7 @@ Everything else is computed. See [the determinism split](/concepts/determinism.m
 * Scorecard items iterate the archetype, so invented ids vanish and weights are always the catalog's.
 * Falsy model output falls back to archetype text rather than empty strings.
 
-## `HumanTraitProfile` — the realism taxonomy layer (`PERSONA_VERSION` "v1.1")
+## `HumanTraitProfile` — the realism taxonomy layer (`PERSONA_VERSION` "v1.2")
 
 Optional, `None` on every persona cast before this layer existed. Orthogonal
 to everything above: the archetype decides whether the candidate can do the

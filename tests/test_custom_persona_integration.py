@@ -485,3 +485,154 @@ async def test_trait_bounds_are_respected_regardless_of_seed():
         for name, value in traits.items():
             lo, hi = archetype.traits[name]
             assert lo <= value <= hi, f"{name}={value} outside [{lo},{hi}] for seed-{i}"
+
+
+async def test_the_realism_layer_reaches_the_casting_prompt_not_only_the_compiled_one():
+    """A persona is compiled once and replayed from the database every session.
+
+    `opening_line`, `sample_phrases`, `verbal_tics` and `always_does` are written
+    by the casting model and stored. If the casting model never sees the realism
+    layer it writes them for a different person — an opening line for a candidate
+    who arrived on time, chatty phrases for a monosyllabic one — and the
+    contradiction is baked into the stored artifact, left for the runtime model
+    to reconcile or not, every session.
+    """
+    captured: dict[str, str] = {}
+
+    class CapturingModel(AdversarialModel):
+        async def generate_json(self, *, system: str, prompt: str, schema: dict) -> dict:
+            captured["prompt"] = prompt
+            return await super().generate_json(system=system, prompt=prompt, schema=schema)
+
+    key = "test-casting-sees-realism"
+    archetype = td.compose_archetype(
+        key=key,
+        label="Casting coherence",
+        verdict="borderline",
+        competence="developing",
+        conscientiousness="adequate",
+        communication="guarded",
+        emotional_stance="defensive",
+        honesty="embellishing",
+    )
+    human_traits = td.compose_human_traits(
+        affect="defensive",
+        verbal_style="monosyllabic",
+        language="hinglish_code_switcher",
+        comprehension="frequent_clarifier",
+        motivation="comp_only",
+        negotiation_stance="refuses_to_disclose_ctc",
+        environment="habitual_latecomer",
+        seniority="junior",
+        function="sales",
+        region="Jaipur",
+        gender_presentation="woman",
+        age_band="25-34",
+        notice_period="30_days",
+    )
+    agent = VirtualCandidateAgent(model=CapturingModel("capturing-1", 0.35))
+    await agent.generate(
+        **dict(JOB, interview_id="iv-test"),
+        archetype_key=key,
+        archetype=archetype,
+        human_traits=human_traits,
+    )
+
+    prompt = captured["prompt"]
+    assert "HOW THIS PERSONA COMES ACROSS" in prompt
+    for value, table in (
+        ("monosyllabic", ec.VERBAL_STYLE_DIRECTIVES),
+        ("comp_only", ec.MOTIVATION_DIRECTIVES),
+        ("refuses_to_disclose_ctc", ec.NEGOTIATION_DIRECTIVES),
+    ):
+        assert table[value] in prompt, value
+    # The lateness is a casting-time fact: the opening line is written once and
+    # replayed, so the model writing it has to know the persona arrived late.
+    assert "joined 6 minutes late" in prompt
+    # And still no raw token, on this side either.
+    for token in ("monosyllabic", "comp_only", "refuses_to_disclose_ctc"):
+        assert token not in prompt.split("=== HOW THIS PERSONA COMES ACROSS")[1]
+
+
+async def test_a_persona_without_a_realism_layer_says_so_rather_than_going_blank():
+    """An empty block reads as "nothing to honour"; a blank one reads as a bug."""
+    assert "none" in ec.casting_realism_note(None).lower()
+
+
+async def test_the_cast_person_agrees_with_the_profile_they_were_given():
+    """The casting model picks the name; it has to know who it is naming.
+
+    Regression: a persona was cast as "Manish Kumawat" while its own compiled
+    instructions read `Gender presentation: "woman"`. Under a bake-once design
+    that contradiction is not a transient glitch — it is stored and replayed.
+    """
+    captured: dict[str, str] = {}
+
+    class CapturingModel(AdversarialModel):
+        async def generate_json(self, *, system: str, prompt: str, schema: dict) -> dict:
+            captured["prompt"] = prompt
+            return await super().generate_json(system=system, prompt=prompt, schema=schema)
+
+    key = "test-profile-in-casting"
+    archetype = td.compose_archetype(
+        key=key,
+        label="Profile coherence",
+        verdict="select",
+        competence="solid",
+        conscientiousness="adequate",
+        communication="direct",
+        emotional_stance="composed",
+        honesty="transparent",
+    )
+    human_traits = td.compose_human_traits(
+        affect="cooperative",
+        verbal_style="rambling",
+        language="native_fluent",
+        comprehension="sharp_listener",
+        motivation="passion_hire",
+        negotiation_stance="anchors_high",
+        environment="clean_professional_setup",
+        seniority="mid",
+        function="sales",
+        region="Jaipur",
+        gender_presentation="woman",
+        age_band="25-34",
+        notice_period="30_days",
+    )
+    await VirtualCandidateAgent(model=CapturingModel("capturing-1", 0.35)).generate(
+        **dict(JOB, interview_id="iv-test"),
+        archetype_key=key,
+        archetype=archetype,
+        human_traits=human_traits,
+    )
+    prompt = captured["prompt"]
+    assert "gender presentation woman" in prompt
+    assert "notice period 30 days" in prompt  # not `30_days`
+    assert "consistent with all of that" in prompt
+
+
+def test_vocabulary_keys_are_never_emitted_with_their_underscores():
+    """`30_days` and `non_binary` are key-space artefacts, not English."""
+    from candidate_agent import trait_dimensions as td_
+    from candidate_agent.engine_contract import _realism_section
+
+    traits = td_.compose_human_traits(
+        affect="cooperative",
+        verbal_style="rambling",
+        language="native_fluent",
+        comprehension="sharp_listener",
+        motivation="passion_hire",
+        negotiation_stance="anchors_high",
+        environment="clean_professional_setup",
+        seniority="mid",
+        function="sales",
+        region="Jaipur",
+        gender_presentation="non_binary",
+        age_band="25-34",
+        notice_period="30_days",
+    )
+    rendered = _realism_section(traits)
+    assert "non_binary" not in rendered
+    assert "30_days" not in rendered
+    assert "non binary" in rendered
+    assert "30 days" in rendered

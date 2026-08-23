@@ -16,7 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from candidate_agent import archetypes as catalog
 from candidate_agent.agent import VirtualCandidateAgent, derive_traits
 from candidate_agent.archetypes import TRAIT_NAMES, VERDICTS
-from candidate_agent.engine_contract import UNIVERSAL_FORBIDDEN, build_engine_contract
+from candidate_agent.engine_contract import (
+    UNIVERSAL_FORBIDDEN,
+    build_engine_contract,
+    casting_realism_note,
+)
 from candidate_agent.schema import AnswerPolicy, AptitudeProfile, SpeechProfile
 
 ALL = list(catalog.ARCHETYPES.values())
@@ -245,6 +249,7 @@ def test_language_reaches_both_prompts(language):
         session_beats=a.session_beats,
         language=language,
         candidate_notes="",
+        realism_directives=casting_realism_note(None),
         traits=derive_traits(a, "seed"),
         speech=a.speech,
         policy=a.answer_policy,
@@ -286,6 +291,7 @@ def test_operator_notes_cannot_override_the_archetype():
         session_beats=a.session_beats,
         language="english_indian",
         candidate_notes=hostile,
+        realism_directives=casting_realism_note(None),
         traits=derive_traits(a, "seed"),
         speech=a.speech,
         policy=a.answer_policy,
