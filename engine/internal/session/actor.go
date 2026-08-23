@@ -39,7 +39,16 @@ type actor struct {
 	turn    int
 	timers  *timerSet
 	playout *playoutTracker
-	drops   drops
+	turns   *turnTable
+	// sentences enforces the response's sentence bound, reset per response.
+	sentences sentenceCounter
+	// probedSkill is the pre-gate's classification for the in-flight turn.
+	probedSkill string
+	// deferred and fallbackUsed describe how the in-flight persona turn was
+	// produced, and ride out in the turn record for the grader.
+	deferred     bool
+	fallbackUsed bool
+	drops        drops
 	// pendingVerdict is the pre-gate result for the utterance in flight.
 	pendingVerdict *pregateVerdict
 	// speaking is the Speaker session, nil until CONNECTING completes.
@@ -75,6 +84,7 @@ func newActor(
 		state:    StateConnecting,
 		timers:   newTimerSet(clock, fires),
 		playout:  newPlayoutTracker(defaultSampleRate),
+		turns:    newTurnTable(clock.Now()),
 
 		control:      make(chan command, controlBufferSize),
 		timerFire:    fires,
@@ -239,19 +249,46 @@ func (a *actor) handleTimer(ctx context.Context, f timerFire) {
 // the turn on the first final.
 func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 	if !p.Final {
+		// The interviewer is still speaking. Open their turn on the first
+		// partial so start_ms reflects when they began, not when they
+		// stopped.
+		if a.state == StateListening && a.turns.open == nil {
+			a.turns.begin(a.turn+1, speakerHuman, a.clock.Now())
+			a.pendingVerdict = nil
+		}
 		return
 	}
 	switch a.state {
 	case StateGreeting:
 		// The interviewer's first utterance has ended: play the
-		// pre-synthesized opening line.
+		// pre-synthesized opening line. Both halves are turns — the
+		// greeting is where a manager either sets the frame or does not,
+		// and "Hiring with Clarity" is scored partly on it.
 		a.turn++
-		a.transition(StateSpeaking, "greeting")
+		if a.turns.open == nil {
+			a.turns.begin(a.turn, speakerHuman, a.clock.Now())
+		}
+		a.turns.appendText(p.Text)
+		a.turns.close(a.clock.Now())
+		if !a.transition(StateSpeaking, "greeting") {
+			return
+		}
+		a.sentences.reset()
+		a.turns.begin(a.turn, speakerPersona, a.clock.Now())
+		a.turns.appendText(a.contract.OpeningLine)
 		a.emit("opening_line", nil)
 	case StateListening:
 		a.turn++
+		if a.turns.open == nil {
+			a.turns.begin(a.turn, speakerHuman, a.clock.Now())
+		}
+		a.turns.appendText(p.Text)
+		a.turns.close(a.clock.Now())
 		a.emit("utterance_end", map[string]any{"text": p.Text})
-		if v := a.pendingVerdict; v != nil && v.Turn == a.turn {
+		// A verdict filed while the interviewer was still speaking belongs
+		// to the utterance that just ended. Comparing turn numbers here is
+		// wrong by construction — it was filed before the increment above.
+		if v := a.pendingVerdict; v != nil {
 			a.applyVerdict(ctx, *v)
 			return
 		}
@@ -261,20 +298,36 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 }
 
 // handlePregate records or applies a pre-gate verdict.
+//
+// The pre-gate classifies from partial transcripts, so a verdict usually
+// arrives *before* the interviewer has finished speaking — that is the whole
+// point of it, since a defer must start stalling within 50 ms of end-of-turn.
+// The signal for "apply it now" is therefore whether end-of-turn has already
+// happened, which is exactly what the pre-gate deadline being armed means.
+// Keying off the state instead was wrong: the actor is still LISTENING at
+// end-of-turn, so a verdict arriving then was filed as pending and never
+// applied, and every turn fell through to the race-lost fallback.
 func (a *actor) handlePregate(ctx context.Context, v pregateVerdict) {
-	if a.state == StateListening {
-		a.pendingVerdict = &v
-		return
-	}
-	if v.Turn == a.turn && a.timers.isArmed(timerPregate) {
+	if a.timers.isArmed(timerPregate) {
 		a.timers.cancel(timerPregate)
 		a.applyVerdict(ctx, v)
+		return
+	}
+	if a.state == StateListening {
+		a.pendingVerdict = &v
 	}
 }
 
 // applyVerdict branches the turn on the pre-gate's classification.
 func (a *actor) applyVerdict(ctx context.Context, v pregateVerdict) {
 	a.pendingVerdict = nil
+	a.probedSkill = v.Skill
+	a.deferred = v.Defer
+	a.fallbackUsed = false
+	// The probed skill belongs to the interviewer's turn that just closed:
+	// "what did the manager ask about" is the question the grader needs
+	// answered, and it is only knowable after the pre-gate has classified.
+	a.turns.tagLast(v.Skill, v.Defer)
 	a.emit("pregate_verdict", map[string]any{
 		"skill": v.Skill, "defer": v.Defer,
 	})
@@ -305,6 +358,8 @@ func (a *actor) createResponse(ctx context.Context, reason string) {
 	if a.speaking == nil {
 		return
 	}
+	a.sentences.reset()
+	a.turns.begin(a.turn, speakerPersona, a.clock.Now())
 	tp := a.contract.TurnPolicy
 	err := a.speaking.CreateResponse(ctx, ports.ResponseDirectives{
 		MinSentences:    tp.MinSentences,
@@ -317,6 +372,45 @@ func (a *actor) createResponse(ctx context.Context, reason string) {
 		a.emit("create_response_failed", map[string]any{"err": err.Error()})
 	}
 }
+
+// trimResponse cuts a response that has run past its sentence allowance.
+//
+// A soft trim: the vendor stops generating, the audio already sent still
+// plays. Length is one of the few ceiling layers that is an actual guarantee
+// rather than best-effort model compliance (plan §6 layer 5), and a persona
+// that monologues is one the interviewer never gets to practise interrupting.
+func (a *actor) trimResponse(ctx context.Context) {
+	if a.state != StateSpeaking || a.speaking == nil {
+		return
+	}
+	if a.turns.open != nil {
+		a.turns.open.Trimmed = true
+	}
+	if err := a.speaking.CancelResponse(ctx); err != nil {
+		a.logger.Warn("sentence-bound trim failed", "err", err)
+	}
+	a.emit("sentence_trim", map[string]any{
+		"sentences": a.sentences.completed,
+		"max":       a.contract.TurnPolicy.MaxSentences,
+	})
+	a.sentences.reset()
+}
+
+// closePersonaTurn finalizes the in-flight persona turn record.
+func (a *actor) closePersonaTurn(bargedIn bool, heardMs int) {
+	if a.turns.open == nil {
+		return
+	}
+	a.turns.open.ProbedSkill = a.probedSkill
+	a.turns.open.Deferred = a.deferred
+	a.turns.open.FallbackUsed = a.fallbackUsed
+	a.turns.open.BargedIn = bargedIn
+	a.turns.open.HeardMs = heardMs
+	a.turns.close(a.clock.Now())
+}
+
+// Turns returns the session's turn table. Read after the actor has stopped.
+func (a *actor) Turns() []TurnRecord { return a.turns.Records() }
 
 // handleMic forwards the interviewer's audio to the Speaker, honouring the
 // mic gate when the persona does not allow barge-in.
@@ -343,10 +437,16 @@ func (a *actor) handleSpeakerEvent(ctx context.Context, ev ports.SpeakerEvent) {
 			a.playout.begin(e.ResponseID, a.clock.Now())
 		}
 		a.playout.sent(len(e.Frame.PCM))
+	case ports.OutputTranscriptDelta:
+		a.turns.appendText(e.Text)
+		if a.sentences.feed(e.Text, a.contract.TurnPolicy.MaxSentences) {
+			a.trimResponse(ctx)
+		}
 	case ports.SpeechStarted:
 		a.bargeIn(ctx)
 	case ports.ResponseDone:
 		a.playout.close(a.clock.Now())
+		a.closePersonaTurn(false, 0)
 		a.transition(StateListening, "response done")
 	}
 }
@@ -390,6 +490,7 @@ func (a *actor) bargeIn(ctx context.Context) {
 			}
 		}
 	}
+	a.closePersonaTurn(true, heardMs)
 	a.emit("barge_in", map[string]any{
 		"item_id": itemID, "heard_ms": heardMs, "sent_ms": sentMs,
 	})
