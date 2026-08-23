@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"skillbrew/engine/internal/contract"
+	"skillbrew/engine/internal/obs"
 	"skillbrew/engine/internal/ports"
 )
 
@@ -47,6 +48,10 @@ type Manager struct {
 	clock     ports.Clock
 	contracts ports.ContractSource
 	logger    *slog.Logger
+	// events is the session event log. Nil is legal and means "discard":
+	// the log is the grader's record, not a runtime dependency, and a
+	// missing sink must never stop an interview.
+	events *obs.EventLog
 
 	mu       sync.RWMutex
 	sessions map[string]*entry
@@ -55,8 +60,14 @@ type Manager struct {
 // NewManager constructs a Manager. clock is the actor's only source of time
 // (plan §4); contracts fetches and validates the engine contract a new
 // session runs.
-func NewManager(clock ports.Clock, contracts ports.ContractSource, logger *slog.Logger) *Manager {
+func NewManager(
+	clock ports.Clock,
+	contracts ports.ContractSource,
+	logger *slog.Logger,
+	events *obs.EventLog,
+) *Manager {
 	return &Manager{
+		events:    events,
 		clock:     clock,
 		contracts: contracts,
 		logger:    logger,
@@ -110,7 +121,8 @@ func (m *Manager) CreateSession(ctx context.Context, candidateID string) (Sessio
 	// The actor's context is rooted independently of ctx (see the type
 	// doc): a session outlives the HTTP request that created it.
 	actorCtx, cancel := context.WithCancel(context.Background())
-	a := newActor(id, c, m.clock, m.logger.With("session_id", id, "candidate_id", candidateID))
+	a := newActor(id, c, m.clock,
+		m.logger.With("session_id", id, "candidate_id", candidateID), m.events)
 	done := make(chan struct{})
 	go a.run(actorCtx, done)
 

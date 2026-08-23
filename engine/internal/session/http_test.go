@@ -104,7 +104,7 @@ func TestHTTPCreateSession_UnsupportedContractVersionIs4xx(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	badCS := fakes.NewContractSource([]byte(`{"contract_version": "v2.0"}`))
-	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger())
+	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger(), nil)
 	mux := http.NewServeMux()
 	session.NewHandler(mgr, testLogger()).Register(mux)
 
@@ -127,7 +127,7 @@ func TestHTTPCreateSession_UnparseableContractIs4xx(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	badCS := fakes.NewContractSource([]byte(`not json at all`))
-	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger())
+	mgr := session.NewManager(fakes.NewFakeClock(fixedNow), badCS, testLogger(), nil)
 	mux := http.NewServeMux()
 	session.NewHandler(mgr, testLogger()).Register(mux)
 

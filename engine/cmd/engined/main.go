@@ -19,6 +19,7 @@ import (
 
 	"skillbrew/engine/internal/config"
 	"skillbrew/engine/internal/fakes"
+	"skillbrew/engine/internal/obs"
 	"skillbrew/engine/internal/session"
 )
 
@@ -80,7 +81,10 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("engined: load sample contract source: %w", err)
 	}
 
-	manager := session.NewManager(realClock{}, contractSource, logger)
+	// Session events go to stdout for now. Phase 5 routes them to the
+	// per-session JSONL artifact that ships to S3 with the recording.
+	events := obs.NewEventLog(os.Stdout)
+	manager := session.NewManager(realClock{}, contractSource, logger, events)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", handleHealthz)
