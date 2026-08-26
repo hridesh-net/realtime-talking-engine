@@ -19,6 +19,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from candidate_agent.schema import VirtualCandidate
 from control_plane.schemas import (
+    AnalysisMeta,
     InterviewCreateRequest,
     InterviewResponse,
     RecordingMeta,
@@ -155,6 +156,31 @@ class RecordingStore(Protocol):
 
 @runtime_checkable
 @runtime_checkable
+class AnalysisStore(Protocol):
+    """Persistence for one session's audio analysis."""
+
+    def begin_analysis(self, session_id: str) -> AnalysisMeta:
+        """Mark analysis as running, replacing any previous attempt."""
+        ...
+
+    def complete_analysis(self, session_id: str, analysis: dict[str, Any]) -> AnalysisMeta:
+        """Store a finished analysis."""
+        ...
+
+    def fail_analysis(self, session_id: str, error: str) -> AnalysisMeta:
+        """Record that analysis failed, and why."""
+        ...
+
+    def get_analysis(self, session_id: str) -> dict[str, Any] | None:
+        """The stored analysis body, or None when there is none."""
+        ...
+
+    def get_analysis_meta(self, session_id: str) -> AnalysisMeta | None:
+        """State and provenance without the body."""
+        ...
+
+
+@runtime_checkable
 class ReportStore(Protocol):
     """Persistence for one session's generated report."""
 
@@ -207,13 +233,29 @@ class RecordingWorkflowStore(SessionStore, RecordingStore, Protocol):
     """For the chunk handler, which must check the session's modality first."""
 
 
-class ReportWorkflowStore(InterviewStore, CandidateStore, SessionStore, ReportStore, Protocol):
+class AnalysisWorkflowStore(
+    InterviewStore, CandidateStore, SessionStore, AnalysisStore, RecordingStore, Protocol
+):
+    """What running an analysis needs: the expectation, the session, the audio.
+
+    It reads the interview and the cast candidate to build the brief, the
+    session for the persona faced, the recording for the audio itself, and
+    writes the analysis. It does **not** get the report store: analysis and
+    report generation are separate actions, and a handler that can do both is a
+    handler that will eventually do both by accident.
+    """
+
+
+class ReportWorkflowStore(
+    InterviewStore, CandidateStore, SessionStore, AnalysisStore, ReportStore, Protocol
+):
     """The ports report generation needs, and no more.
 
     Generating a report reads the interview (the job card and its clarity
-    facts), the session (the transcript and the persona faced), and the cast
+    facts), the session (the transcript and the persona faced), the cast
     candidate - because a *composed* persona has no catalog entry, and its
-    `must_discover` scorecard lives on the candidate rather than in code. Then
-    it writes the report. Composed from the narrow ports rather than handing the
+    `must_discover` scorecard lives on the candidate rather than in code - and
+    the stored analysis, which the report is built from. Then it writes the
+    report. Composed from the narrow ports rather than handing the
     handler the whole repository.
     """

@@ -58,6 +58,7 @@ run "trait composition (offline)"   $PY -m pytest tests/test_trait_dimensions.py
 run "custom personas (offline)"     $PY -m pytest tests/test_custom_persona_integration.py -q
 run "candidates API (offline)"      $PY -m pytest tests/test_control_plane_candidates_api.py -q
 run "provider errors (offline)"     $PY -m pytest tests/test_model_error_surfacing.py -q
+run "analysis agent (offline)"     $PY -m pytest tests/test_analysis_agent.py -q
 run "report engine (offline)"      $PY -m pytest tests/test_report_engine.py -q
 run "full pipeline (offline)"       $PY -m pytest tests/test_full_interview_pipeline_integration.py -q
 

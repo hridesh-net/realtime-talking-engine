@@ -196,3 +196,38 @@ COACHING: dict[str, Coaching] = {
 def for_signal(signal_id: str) -> Coaching:
     """Coaching for a signal, with a safe fallback for anything unmapped."""
     return COACHING.get(signal_id, Coaching(strength="", gap="", alternative=""))
+
+
+#: How each audience is addressed. Perspective changes the *person* the sentence
+#: is written in, never how hard it lands: the finding and its evidence are the
+#: same in all three. Kluger & DeNisi's task-versus-self split is what makes the
+#: second person safe here - "you asked two things at once" is about the
+#: question, where "you are unclear" would be about the person, and the lines in
+#: COACHING are already written as the former.
+_ADDRESS: dict[str, tuple[str, str]] = {
+    "manager": ("You ", "you "),
+    "coach": ("They ", "they "),
+    "reviewer": ("The manager ", "the manager "),
+}
+
+
+def in_perspective(text: str, perspective: str) -> str:
+    """Rewrite a coaching line for its audience.
+
+    Deliberately a small substitution rather than a second set of hand-written
+    lines: one wording per finding means the manager, their coach and a reviewer
+    are all reading the same claim, which is the point of an evidenced report.
+    """
+    if perspective == "manager" or not text:
+        return text
+    start, mid = _ADDRESS.get(perspective, _ADDRESS["manager"])
+    out = text
+    if out.startswith("You "):
+        out = start + out[4:]
+    elif out.startswith("Your "):
+        out = (
+            start.strip() + "'s " + out[5:]
+            if perspective == "coach"
+            else "The manager's " + out[5:]
+        )
+    return out.replace(" you ", f" {mid.strip()} ").replace(" your ", f" {mid.strip()}'s ")

@@ -16,8 +16,8 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
-from llm.base import ChatModel, ModelError, RealtimeBroker, StructuredModel
-from llm.gemini import GeminiChatModel, GeminiModel
+from llm.base import AudioModel, ChatModel, ModelError, RealtimeBroker, StructuredModel
+from llm.gemini import GeminiAudioModel, GeminiChatModel, GeminiModel
 from llm.openai_model import OpenAIChatModel, OpenAIModel
 from llm.openai_realtime import OpenAIRealtimeBroker
 
@@ -32,6 +32,14 @@ PROVIDERS: dict[str, Callable[[str, float, str], StructuredModel]] = {
 CHAT_PROVIDERS: dict[str, Callable[[str, float, str], ChatModel]] = {
     "gemini": GeminiChatModel,
     "openai": OpenAIChatModel,
+}
+
+#: Provider name -> audio-analysis constructor. **Deliberately partial**, for the
+#: same reason as the realtime table: reading audio natively is not something
+#: every provider offers, and a missing row means analysis is simply unavailable
+#: on that provider rather than silently degraded to a text model.
+AUDIO_PROVIDERS: dict[str, Callable[[str, float, str], AudioModel]] = {
+    "gemini": GeminiAudioModel,
 }
 
 #: Provider name -> realtime-voice broker. **Deliberately partial.** Realtime
@@ -77,6 +85,7 @@ ROLE_PREFIXES: dict[str, str] = {
     "session": "SESSION",
     "judge": "JUDGE",
     "role_facts": "ROLE_FACTS",
+    "analysis": "ANALYSIS",
     "voice": "VOICE",
 }
 
@@ -151,6 +160,36 @@ def build_chat_model(role: str, temperature: float) -> ChatModel:
     return CHAT_PROVIDERS[provider](
         resolve_model_id(role, provider), temperature, _credential(provider)
     )
+
+
+def build_audio_model(role: str, temperature: float) -> AudioModel:
+    """Construct the configured audio-analysis model for ``role``.
+
+    Raises:
+        ModelError: No usable provider is configured, or the configured one
+            cannot read audio.
+    """
+    provider = resolve_provider(role)
+    if provider not in AUDIO_PROVIDERS:
+        raise ModelError(
+            f"provider {provider!r} cannot analyse audio; "
+            f"set ANALYSIS_PROVIDER to one of {sorted(AUDIO_PROVIDERS)}"
+        )
+    return AUDIO_PROVIDERS[provider](
+        resolve_model_id(role, provider), temperature, _credential(provider)
+    )
+
+
+def audio_analysis_available() -> bool:
+    """Whether this deployment can analyse audio at all.
+
+    The UI asks before offering an Analyse button, the same way it asks about
+    voice: an unavailable feature should be absent, not a button that errors.
+    """
+    try:
+        return resolve_provider("analysis") in AUDIO_PROVIDERS
+    except ModelError:
+        return False
 
 
 def realtime_providers_available() -> list[str]:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from analysis_agent import AnalysisContext
 from candidate_agent import archetypes
 from candidate_agent.schema import VirtualCandidate
 from control_plane.schemas import InterviewResponse, SessionResponse
@@ -103,10 +104,12 @@ def build_bundle(
     interview: InterviewResponse,
     session: SessionResponse,
     candidate: VirtualCandidate | None = None,
+    analysis: dict[str, Any] | None = None,
     *,
     jurisdiction: str = "IN",
     english_weight: float | None = None,
     language_gate: bool = True,
+    report_config: dict[str, Any] | None = None,
 ) -> SessionBundle:
     """Everything the engine needs for one session, as one validated object."""
     return SessionBundle.model_validate(
@@ -149,6 +152,8 @@ def build_bundle(
                 if session.recording
                 else None
             ),
+            "analysis": analysis,
+            "report_config": report_config or {},
             "scoring_options": {
                 "english_weight": english_weight,
                 "language_gate": language_gate,
@@ -161,20 +166,72 @@ def generate(
     interview: InterviewResponse,
     session: SessionResponse,
     candidate: VirtualCandidate | None = None,
+    analysis: dict[str, Any] | None = None,
     *,
     jurisdiction: str = "IN",
     english_weight: float | None = None,
     language_gate: bool = True,
+    report_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the bundle, run the engine, and return the report as plain JSON."""
     bundle = build_bundle(
         interview,
         session,
         candidate,
+        analysis,
         jurisdiction=jurisdiction,
         english_weight=english_weight,
         language_gate=language_gate,
+        report_config=report_config,
     )
     report = build_report(bundle)
     dumped: dict[str, Any] = report.model_dump(mode="json")
     return dumped
+
+
+def build_analysis_context(
+    interview: InterviewResponse,
+    session: SessionResponse,
+    candidate: VirtualCandidate | None = None,
+    expectation: dict[str, Any] | None = None,
+) -> AnalysisContext:
+    """The brief the analysis agent works from.
+
+    Assembled from what already exists rather than generated: the job card, the
+    rubric, and — the part that carries most of the weight — *who the manager
+    was actually facing*. Adaptation cannot be assessed without the persona's
+    traits, speech profile and answer policy, so those go in the brief rather
+    than being inferred from the audio.
+    """
+    persona = persona_block(session, candidate)
+    archetype = (
+        archetypes.get(session.persona_key)
+        if session.persona_key in archetypes.ARCHETYPES
+        else None
+    )
+    return AnalysisContext(
+        job_title=interview.job_title,
+        job_description=interview.jd,
+        skills_required=list(interview.skills_required),
+        clarity_facts=[
+            {"key": f.key, "statement": f.statement}
+            for f in interview.clarity_facts
+            if f.statement.strip()
+        ],
+        language_setting=getattr(interview, "language", ""),
+        persona_label=persona["label"],
+        persona_description=archetype.description if archetype else "",
+        interviewer_challenge=archetype.interviewer_challenge if archetype else "",
+        persona_traits=archetype.trait_bounds_json if archetype else {},
+        persona_speech=dict(archetype.speech) if archetype else {},
+        persona_answer_policy=dict(archetype.answer_policy) if archetype else {},
+        persona_knowledge_band=list(archetype.knowledge_band) if archetype else [],
+        must_discover=persona["must_discover"],
+        session_beats=persona["session_beats"],
+        interviewer_failure_modes=(list(archetype.interviewer_failure_modes) if archetype else []),
+        rubric=[
+            {"id": c.id, "label": c.label, "weight": c.weight, "covers": c.covers}
+            for c in DEFAULT_RUBRIC.criteria
+        ],
+        interview_expectation=expectation,
+    )

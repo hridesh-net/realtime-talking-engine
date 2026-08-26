@@ -39,6 +39,7 @@ PACKAGES = [
     "expectation_agent",
     "candidate_agent",
     "evaluation_agent",
+    "analysis_agent",
     "report_engine",
     "control_plane",
 ]
@@ -50,6 +51,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
     "expectation_agent": {"llm"},
     "candidate_agent": {"llm"},
     "evaluation_agent": {"llm"},
+    "analysis_agent": {"llm"},
     # The report engine is standalone: the rubric travels in its input bundle
     # rather than being imported, so it depends on no first-party package at
     # all. See docs/REPORT_ENGINE_SCORING_SPEC.md section 2.
@@ -59,6 +61,7 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
         "expectation_agent",
         "candidate_agent",
         "evaluation_agent",
+        "analysis_agent",
         "report_engine",
     },
 }

@@ -414,3 +414,117 @@ def test_role_family_is_derived_deterministically_from_the_title(title, family):
     from control_plane.reporting import role_family_for
 
     assert role_family_for(title) == family
+
+
+# ------------------------------------------------------- report config ------
+
+
+def test_perspective_changes_who_the_finding_addresses_not_what_it_says():
+    """One wording per finding, so all three audiences read the same claim."""
+    from report_engine.coach import for_signal, in_perspective
+
+    line = for_signal("manager_talk_share").gap
+    assert in_perspective(line, "manager").startswith("You did most")
+    assert in_perspective(line, "coach").startswith("They did most")
+    assert in_perspective(line, "reviewer").startswith("The manager did most")
+    for perspective in ("manager", "coach", "reviewer"):
+        assert "most of the talking" in in_perspective(line, perspective)
+
+
+def test_configured_skills_replace_the_shipped_role_family_list():
+    report = build_report(_bundle(report_config={"skills": ["Upselling", "Escalation handling"]}))
+    coverage = next(s for c in report.criteria for s in c.signals if s.id == "competency_coverage")
+    assert "of 2 competencies" in coverage.display
+
+
+def test_the_development_area_count_is_configurable():
+    many = build_report(_bundle(report_config={"max_development_areas": 1}))
+    assert len(many.development_areas) <= 1
+
+
+def test_a_report_without_an_analysis_says_so_on_its_face():
+    report = build_report(_bundle())
+    assert any("No audio analysis has been run" in line for line in report.basis.lines)
+    assert any("asked in Hindi does not match one" in c for c in report.basis.cautions)
+
+
+def test_an_assessed_signal_is_labelled_as_heard_not_counted():
+    """A reader is owed the difference between a count and a reading."""
+    analysis = {
+        "instructions_version": "v1.1",
+        "model_used": "test-model",
+        "windows": 1,
+        "delivery": {"question_clarity": 7, "explanation_quality": 4},
+        "topic_flags": [
+            {
+                "at_ms": 1000,
+                "category": "salary history",
+                "raised_by": "manager",
+                "pursued_by_manager": True,
+                "quote": "what was your last CTC",
+            }
+        ],
+        "persona_response": {
+            "rating": 6,
+            "read_the_candidate": 6,
+            "adapted_approach": 6,
+            "handled_the_hard_moment": 6,
+        },
+        "expectation_coverage": {"rating": 5, "reachable_items": 2, "covered_items": 1},
+        "early_end": {"ended_early": False},
+    }
+    report = build_report(_bundle(analysis=analysis))
+    heard = [s for c in report.criteria for s in c.signals if s.source == "assessed"]
+    assert heard, "the analysis produced no assessed signals"
+    assert all(s.source == "assessed" for s in heard)
+    assert report.provenance.analysis_model == "test-model"
+    assert any("assessed signals" in line for line in report.basis.lines)
+
+
+def test_a_protected_topic_heard_in_the_audio_lowers_fairness():
+    """The case the counted detector cannot reach: the question was in Hindi."""
+    analysis = {
+        "topic_flags": [
+            {
+                "at_ms": 1000,
+                "category": "family",
+                "raised_by": "manager",
+                "pursued_by_manager": True,
+                "quote": "aapke ghar mein kaun kaun hai",
+            },
+            {
+                "at_ms": 2000,
+                "category": "salary history",
+                "raised_by": "manager",
+                "pursued_by_manager": True,
+                "quote": "last CTC kitna tha",
+            },
+        ],
+        "delivery": {"question_clarity": 5, "explanation_quality": 5},
+    }
+    clean = build_report(_bundle())
+    heard = build_report(_bundle(analysis=analysis))
+    clean_fair = next(c for c in clean.criteria if c.id == "fairness").score
+    heard_fair = next(c for c in heard.criteria if c.id == "fairness").score
+    assert heard_fair < clean_fair, "protected topics heard in audio must lower fairness"
+
+
+def test_the_language_downgrade_does_not_weaken_assessed_signals():
+    """They heard the language actually spoken; only the counted half is English-bound."""
+    turns = [
+        {
+            "index": i,
+            "speaker": "manager" if i % 2 == 0 else "candidate",
+            "text": "Aap apne bare mein kuch bataiye, aapko kya lagta hai yeh role kaise hai",
+            "elapsed_ms": i * 1000,
+        }
+        for i in range(8)
+    ]
+    report = build_report(
+        _bundle(
+            turns=turns, analysis={"delivery": {"question_clarity": 8, "explanation_quality": 8}}
+        )
+    )
+    comms = next(c for c in report.criteria if c.id == "communication")
+    heard = [s for s in comms.signals if s.source == "assessed" and s.measurable]
+    assert heard, "assessed communication signals should survive a non-English session"

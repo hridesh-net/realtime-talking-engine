@@ -274,22 +274,42 @@ def _competency_coverage(ctx: Context) -> SignalResult:
         weight=1.5,
         basis="SOURCED (Campion, Palmer & Campion 1997, component 1: job-analysis-based content)",
     )
-    pack = load_pack("competencies")
-    family = pack["families"].get(ctx.bundle.job_card.role_family)
+    configured = [s for s in ctx.bundle.report_config.skills if s.strip()]
+    if configured:
+        # An org that named its own competencies knows the role better than a
+        # shipped role-family list does. Cues are derived from the skill name
+        # itself, which is cruder than the curated pack and is why the pack
+        # remains the default rather than the fallback of last resort.
+        family = [
+            {"id": s.lower().replace(" ", "_"), "label": s, "cues": _cues_for(s)}
+            for s in configured
+        ]
+    else:
+        pack = load_pack("competencies")
+        family = pack["families"].get(ctx.bundle.job_card.role_family)
     if not family:
         out.reason = f"no competency list for role family '{ctx.bundle.job_card.role_family}'"
         return out
 
     asked = " ".join(a.text for a in ctx.acts).lower()
-    covered = [c for c in family if any(cue in asked for cue in c["cues"])]
+    covered = [c for c in family if any(str(cue) in asked for cue in c["cues"])]
     value = len(covered) / len(family)
     out.value = round(value, 3)
-    missed = [c["label"] for c in family if c not in covered]
+    missed = [str(c["label"]) for c in family if c not in covered]
     out.display = f"{len(covered)} of {len(family)} competencies touched"
     if missed:
         out.display += f" — missed: {', '.join(missed)}"
     out.sub_score = transfer.linear_up(value, 0.4, 1.0)
     return out
+
+
+def _cues_for(skill: str) -> list[str]:
+    """Match cues for a skill the org named itself.
+
+    Stopwords are dropped so "Target orientation" matches a question about
+    targets without also matching every sentence containing "orientation".
+    """
+    return [w for w in content_words(skill) if len(w) > 3]
 
 
 def _question_count(ctx: Context) -> SignalResult:

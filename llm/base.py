@@ -126,6 +126,33 @@ class ChatModel(ModelClient):
         """
 
 
+class AudioModel(ModelClient):
+    """A model that reads audio and answers against a JSON schema.
+
+    Separate from :class:`StructuredModel` for the same reason `ChatModel` is
+    separate: the payload differs. A caller that needs schema-constrained JSON
+    from *text* must not be handed a port that requires bytes and a MIME type,
+    and an adapter for a text-only model must not be forced to pretend it can
+    hear.
+    """
+
+    async def analyze_audio(
+        self,
+        *,
+        audio: bytes,
+        mime_type: str,
+        system: str,
+        prompt: str,
+        schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Analyse one span of audio, returning JSON matching `schema`.
+
+        Implementations raise :class:`ModelError` on transport or parse failure
+        so callers never see a vendor exception type.
+        """
+        raise NotImplementedError
+
+
 @dataclass(frozen=True)
 class RealtimeCredential:
     """A short-lived secret a browser may use to open a realtime voice session.

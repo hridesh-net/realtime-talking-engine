@@ -65,6 +65,11 @@
       "default": false,
       "title": "Has Report",
       "type": "boolean"
+    },
+    "analysis_status": {
+      "default": "",
+      "title": "Analysis Status",
+      "type": "string"
     }
   },
   "required": [

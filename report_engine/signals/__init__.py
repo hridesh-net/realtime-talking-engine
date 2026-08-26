@@ -8,7 +8,7 @@ manager for the modality they were given.
 from __future__ import annotations
 
 from report_engine.schema import SignalResult
-from report_engine.signals import clarity, communication, fairness, structure
+from report_engine.signals import assessed, clarity, communication, fairness, structure
 from report_engine.signals.context import Context
 
 #: Signals computed from English lexicons or English syntax. On a code-mixed or
@@ -56,6 +56,8 @@ def extract_all(ctx: Context) -> list[SignalResult]:
         *clarity.extract(ctx),
         *fairness.extract(ctx),
         *communication.extract(ctx),
+        # Assessed last so the counted evidence reads first in every criterion.
+        *assessed.extract(ctx.bundle.analysis),
     ]
     for signal in signals:
         signal.language_sensitive = signal.id in LANGUAGE_SENSITIVE

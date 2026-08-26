@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 
+from analysis_agent import AnalysisContext, AudioAnalysisAgent
 from candidate_agent import archetypes as archetype_catalog
 from candidate_agent import trait_dimensions
 from candidate_agent.agent import VirtualCandidateAgent
@@ -22,6 +33,7 @@ from candidate_agent.voice import build_realtime_session
 from control_plane import reporting
 from control_plane.database import init_db
 from control_plane.ports import (
+    AnalysisWorkflowStore,
     CandidateStore,
     EnrollmentStore,
     ExpectationStore,
@@ -36,6 +48,7 @@ from control_plane.ports import (
 )
 from control_plane.repository import InterviewRepository
 from control_plane.schemas import (
+    AnalysisMeta,
     CandidateEnrollRequest,
     ClarityFact,
     CustomPersonaSpec,
@@ -56,7 +69,7 @@ from evaluation_agent.role_facts import RoleFactsAgent
 from expectation_agent.agent import InterviewExpectationAgent
 from expectation_agent.schema import InterviewExpectation
 from llm.base import ModelError, RealtimeBroker
-from llm.factory import build_realtime_broker, realtime_providers_available
+from llm.factory import build_audio_model, build_realtime_broker, realtime_providers_available
 from report_engine import render
 from report_engine.schema import AssessmentReport
 
@@ -71,6 +84,9 @@ def get_expectation_agent() -> InterviewExpectationAgent:
     """Build the expectation agent from environment configuration."""
     return InterviewExpectationAgent()
 
+
+#: Observation is extraction, not composition. Warmth here invents turns.
+ANALYSIS_TEMPERATURE = 0.0
 
 router = APIRouter(prefix="/api/v1", tags=["interviews"])
 
@@ -160,6 +176,11 @@ def get_candidate_agent() -> VirtualCandidateAgent:
 def get_role_facts_agent() -> RoleFactsAgent:
     """Build the role-facts agent from environment configuration."""
     return RoleFactsAgent()
+
+
+def get_analysis_agent() -> AudioAnalysisAgent:
+    """Build the audio analysis agent from environment configuration."""
+    return AudioAnalysisAgent(build_audio_model("analysis", ANALYSIS_TEMPERATURE))
 
 
 @router.post("/role-facts", response_model=list[ClarityFact])
@@ -707,6 +728,103 @@ def get_recording(session_id: str, repo: RecordingStore = Depends(get_repo)) -> 
 
 
 # ---------------------------------------------------------------------------
+# Session analysis
+# ---------------------------------------------------------------------------
+# Analysis reads the audio and takes about a minute, so it cannot be the same
+# request that returns a report. It runs as a background task against a row
+# created up front, and the caller polls. Report generation is gated on it
+# having finished: a report built from a half-written analysis would be worse
+# than no report.
+
+
+async def _run_analysis(
+    repo: AnalysisWorkflowStore,
+    agent: AudioAnalysisAgent,
+    session_id: str,
+    recording_path: Path,
+    context: AnalysisContext,
+) -> None:
+    """Run one analysis and record the outcome, whatever it is."""
+    try:
+        analysis = await agent.analyze(recording_path, context)
+    except Exception as exc:  # the reason is stored on the row, not swallowed
+        repo.fail_analysis(session_id, f"{type(exc).__name__}: {exc}")
+        return
+    repo.complete_analysis(session_id, analysis.model_dump(mode="json"))
+
+
+@router.post(
+    "/sessions/{session_id}/analyze",
+    response_model=AnalysisMeta,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_analysis(
+    session_id: str,
+    background: BackgroundTasks,
+    repo: AnalysisWorkflowStore = Depends(get_repo),
+    agent: AudioAnalysisAgent = Depends(get_analysis_agent),
+) -> AnalysisMeta:
+    """Begin analysing this session's recording. Returns immediately."""
+    session = repo.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    interview = repo.get(session.interview_id)
+    if interview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+
+    found = repo.read_recording(session_id)
+    if found is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="this session has no recording, and the analysis reads the audio",
+        )
+
+    existing = repo.get_analysis_meta(session_id)
+    if existing and existing.status == "running":
+        return existing
+
+    # The recording lives outside SQLite; hand the agent a real file rather than
+    # bytes, so a long recording is not held in memory while it is windowed.
+    _, data = found
+    scratch = Path(tempfile.gettempdir()) / f"analysis-{session_id}.webm"
+    scratch.write_bytes(data)
+
+    context = reporting.build_analysis_context(
+        interview, session, repo.get_candidate(session.candidate_id)
+    )
+    started = repo.begin_analysis(session_id)
+    background.add_task(_run_analysis, repo, agent, session_id, scratch, context)
+    return started
+
+
+@router.get("/sessions/{session_id}/analysis", response_model=AnalysisMeta)
+def get_analysis_status(
+    session_id: str, repo: AnalysisWorkflowStore = Depends(get_repo)
+) -> AnalysisMeta:
+    """State and provenance of this session's analysis."""
+    meta = repo.get_analysis_meta(session_id)
+    if meta is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="this session has not been analysed"
+        )
+    return meta
+
+
+@router.get("/sessions/{session_id}/analysis/full")
+def get_analysis_body(
+    session_id: str, repo: AnalysisWorkflowStore = Depends(get_repo)
+) -> dict[str, Any]:
+    """The analysis itself — transcript, observations and assessments."""
+    body = repo.get_analysis(session_id)
+    if body is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no completed analysis for this session",
+        )
+    return body
+
+
+# ---------------------------------------------------------------------------
 # Session reports
 # ---------------------------------------------------------------------------
 # The report is **stored**, not recomputed on read. A threshold change must not
@@ -734,13 +852,18 @@ def generate_session_report(
     session_id: str,
     english_weight: float | None = None,
     language_gate: bool = False,
+    perspective: str = "manager",
+    skills: str = "",
+    max_development_areas: int = 3,
     repo: ReportWorkflowStore = Depends(get_repo),
 ) -> dict[str, Any]:
     """Generate (or regenerate) this session's report and store it.
 
-    The two query parameters are the operator toggles from the scoring spec.
-    They are stamped into the report's provenance because a report scored with
-    English weighted in is not comparable to one without it.
+    The query parameters are the operator's configuration: the two scoring
+    toggles from the spec, plus who the report is written for and which
+    competencies it is scored against. The toggles are stamped into the
+    report's provenance because a report scored with English weighted in is not
+    comparable to one without it.
     """
     session = repo.get_session(session_id)
     if session is None:
@@ -754,6 +877,16 @@ def generate_session_report(
             detail="nothing was said in this session, so there is nothing to report on",
         )
 
+    # A report is composed from the analysis. Building one before the analysis
+    # finishes would quietly produce the deterministic half alone and present it
+    # as the whole thing, which is the failure mode this gate exists to stop.
+    analysis_meta = repo.get_analysis_meta(session_id)
+    if analysis_meta is not None and analysis_meta.status == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="analysis is still running for this session",
+        )
+
     # A composed persona keeps its scorecard on the candidate, not in the
     # catalog, so the ground truth is fetched rather than assumed.
     candidate = repo.get_candidate(session.candidate_id)
@@ -762,8 +895,16 @@ def generate_session_report(
         interview,
         session,
         candidate,
+        repo.get_analysis(session_id),
         english_weight=english_weight,
         language_gate=language_gate,
+        report_config={
+            "perspective": perspective,
+            # Comma-separated so the whole configuration fits in a link an
+            # operator can share, rather than needing a request body.
+            "skills": [s.strip() for s in skills.split(",") if s.strip()],
+            "max_development_areas": max_development_areas,
+        },
     )
     repo.save_report(session_id, report)
     return report

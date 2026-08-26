@@ -41,6 +41,27 @@ CREATE TABLE IF NOT EXISTS interviews (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS session_analyses (
+    -- One analysis per session. The row is created the moment analysis starts
+    -- rather than when it finishes, so a caller can tell "running" from "never
+    -- asked for" - the analysis takes about a minute and the UI has to show
+    -- something in between.
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'complete', 'failed')),
+    analysis_json TEXT,
+    error TEXT NOT NULL DEFAULT '',
+    -- Denormalised for the list view and for cohort segmentation. Two analyses
+    -- are only comparable when the instructions and the model match.
+    instructions_version TEXT NOT NULL DEFAULT '',
+    model_used TEXT NOT NULL DEFAULT '',
+    session_judgement REAL,
+    dropped_anchors INTEGER NOT NULL DEFAULT 0,
+    windows INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS session_reports (
     -- One report per session, keyed by the session, for the same reason the
     -- recording is: the stable identity is "this session's report", whatever

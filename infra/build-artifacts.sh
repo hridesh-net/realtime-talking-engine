@@ -11,7 +11,7 @@
 #   2. Cross-compiles engined for linux/arm64   -> engined
 #      (the instance is Graviton/t4g by default; see infra/terraform/variables.tf)
 #   3. Packs the Python source packages control_plane/, candidate_agent/,
-#      expectation_agent/, evaluation_agent/, report_engine/, llm/ (the same set
+#      expectation_agent/, evaluation_agent/, analysis_agent/, report_engine/, llm/ (the set
 #      pyproject.toml's dependency graph pulls in — see CLAUDE.md's
 #      "llm ← agents ← control_plane" rule) plus requirements.txt, the UI
 #      build (as ui_dist/) and the engined binary into one tarball.
@@ -78,7 +78,7 @@ mkdir -p "${STAGE}"
 
 # Python source the control plane needs at runtime — the same set the
 # dependency-direction rule in CLAUDE.md names (llm <- agents <- control_plane).
-for pkg in control_plane candidate_agent expectation_agent evaluation_agent report_engine llm; do
+for pkg in control_plane candidate_agent expectation_agent evaluation_agent analysis_agent report_engine llm; do
   cp -R "${REPO_ROOT}/${pkg}" "${STAGE}/${pkg}"
 done
 # Compiled caches are machine-specific and just inflate the tarball.

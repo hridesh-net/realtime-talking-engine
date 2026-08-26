@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from llm.base import ChatMessage, ChatModel, ModelError, StructuredModel
+from llm.base import AudioModel, ChatMessage, ChatModel, ModelError, StructuredModel
 
 #: Port role name -> Gemini role name. Gemini calls the assistant "model".
 _ROLES = {"user": "user", "assistant": "model"}
@@ -126,3 +126,54 @@ def _require_text(text: str | None) -> str:
     if not stripped:
         raise ModelError("model returned an empty reply")
     return stripped
+
+
+class GeminiAudioModel(AudioModel):
+    """Gemini backend for audio analysis with schema-constrained JSON output.
+
+    Audio rides as an inline `Part`, which caps the payload at the request size
+    limit rather than the model's context window. The analysis harness windows
+    long recordings before they reach here, so this adapter never has to decide
+    what to do with an hour of audio.
+    """
+
+    def __init__(self, model_id: str, temperature: float, api_key: str) -> None:
+        super().__init__(model_id, temperature)
+        self._client = _client(api_key)
+
+    @property
+    def provider(self) -> str:
+        """Provider name."""
+        return "gemini"
+
+    async def analyze_audio(
+        self,
+        *,
+        audio: bytes,
+        mime_type: str,
+        system: str,
+        prompt: str,
+        schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Send one span of audio and a prompt, and return validated JSON."""
+        from google.genai import types
+
+        config = types.GenerateContentConfig(
+            temperature=self.temperature,
+            response_mime_type="application/json",
+            response_schema=schema,
+            system_instruction=system,
+        )
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=self.model_id,
+                contents=[
+                    types.Part.from_bytes(data=audio, mime_type=mime_type),
+                    types.Part.from_text(text=prompt),
+                ],
+                config=config,
+            )
+        except Exception as exc:
+            raise ModelError(f"gemini audio call failed: {exc}") from exc
+
+        return _parse(response.text)

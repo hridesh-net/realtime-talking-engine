@@ -12,9 +12,10 @@ from typing import Any
 
 from report_engine import acts as acts_module
 from report_engine import language, segment
-from report_engine.coach import for_signal
+from report_engine.coach import for_signal, in_perspective
 from report_engine.schema import (
     AssessmentReport,
+    Basis,
     CriterionScore,
     Finding,
     Provenance,
@@ -31,8 +32,9 @@ from report_engine.signals.context import load_pack
 CONFIDENCE_FLOOR = 0.5
 
 #: Kluger & DeNisi's mechanism argues against volume: diffuse feedback shifts
-#: attention from the task to the self. Three is convention, not a finding.
-MAX_DEVELOPMENT_AREAS = 3
+#: attention from the task to the self. Three is convention, not a finding, and
+#: it is now the default of `ReportConfig.max_development_areas` rather than a
+#: constant here - an org running longer coaching sessions may want more.
 
 
 def build_report(bundle: SessionBundle) -> AssessmentReport:
@@ -47,6 +49,10 @@ def build_report(bundle: SessionBundle) -> AssessmentReport:
         job_title=bundle.job_card.job_title,
         modality=bundle.session.modality,
         provenance=Provenance(
+            analysis_instructions_version=(
+                bundle.analysis.instructions_version if bundle.analysis else ""
+            ),
+            analysis_model=bundle.analysis.model_used if bundle.analysis else "",
             rubric_version=bundle.rubric.version,
             english_weight=options.english_weight,
             language_gate=options.language_gate,
@@ -92,10 +98,77 @@ def build_report(bundle: SessionBundle) -> AssessmentReport:
     if report.readiness_index is not None:
         report.band = bundle.rubric.band_for(report.readiness_index)
 
-    report.strengths, report.gaps = _findings(signals)
-    report.development_areas = report.gaps[:MAX_DEVELOPMENT_AREAS]
+    report.basis = _basis(bundle, report, signals)
+    report.strengths, report.gaps = _findings(signals, bundle.report_config.perspective)
+    report.development_areas = report.gaps[: bundle.report_config.max_development_areas]
     report.next_practice, report.next_practice_reason = _next_practice(bundle, report.criteria)
     return report
+
+
+def _basis(bundle: SessionBundle, report: AssessmentReport, signals: list[SignalResult]) -> Basis:
+    """A plain statement of what produced this report and what it could not see.
+
+    Printed on the report itself. A trainer acting on a number is owed the
+    difference between a count and a reading, and owed the limits in the reader's
+    language rather than in a design document they will never open.
+    """
+    measured = [s for s in signals if s.measurable and s.source == "measured"]
+    assessed = [s for s in signals if s.measurable and s.source == "assessed"]
+    lines = [
+        f"**{len(measured)} measured signals** — counted from the stored transcript by code. "
+        "Re-running produces the same numbers.",
+    ]
+    cautions: list[str] = []
+
+    if bundle.analysis:
+        a = bundle.analysis
+        lines.append(
+            f"**{len(assessed)} assessed signals** — from listening to the recording "
+            f"({a.model_used or 'a model'}, instructions {a.instructions_version}), "
+            f"analysed in {a.windows} window(s)."
+        )
+        lines.append(
+            "The analysis weighs **how the manager handled this particular candidate "
+            "above how much of the plan they covered** — reading the person is harder "
+            "and worth more, and closing early on a candidate who is plainly "
+            "unsuited is a good decision, not an unfinished interview."
+        )
+        if a.spoken_languages:
+            lines.append(
+                "Languages heard: " + ", ".join(a.spoken_languages) + ". "
+                "The assessed signals read the language actually spoken; the "
+                "measured ones read English patterns only."
+            )
+        if a.dropped_anchors:
+            cautions.append(
+                f"{a.dropped_anchors} timestamps the analysis produced fell outside the "
+                "recording and were discarded. Models lose track of elapsed time over long "
+                "audio; anchors that survive have been checked against the recording's length."
+            )
+        if a.quality_notes:
+            cautions.append(a.quality_notes)
+    else:
+        lines.append(
+            "**No audio analysis has been run.** This report is the counted half "
+            "alone: tone, delivery, and anything said in a language other than "
+            "English are not represented in it."
+        )
+        cautions.append(
+            "Counted detectors read English patterns. A protected-topic question "
+            "asked in Hindi does not match one, so a clean fairness result here is "
+            "not evidence that nothing was asked."
+        )
+
+    cautions.append(
+        "Every number is an analytical estimate of how the manager interviewed. "
+        "There is no pass, no fail, and no criterion that caps another."
+    )
+    if report.readiness_index is not None:
+        cautions.append(
+            "Managers who know a trainer will read this interview more defensively "
+            "than they otherwise would; that is a real limit on what these numbers mean."
+        )
+    return Basis(lines=lines, cautions=cautions)
 
 
 def _label_protected(question_acts: list[QuestionAct], pack: dict[str, Any]) -> None:
@@ -181,7 +254,9 @@ def _downgrade_for_language(criteria: list[CriterionScore], detected: str) -> No
         scored = [s for s in entry.signals if s.measurable and s.weight > 0]
         if not scored:
             continue
-        affected = [s for s in scored if s.language_sensitive]
+        # An assessed signal heard the language actually spoken, so it is not
+        # weakened by the session being code-mixed - only the counted half is.
+        affected = [s for s in scored if s.language_sensitive and s.source == "measured"]
         if not affected:
             continue
         share = sum(s.weight for s in affected) / sum(s.weight for s in scored)
@@ -204,7 +279,9 @@ def _readiness(criteria: list[CriterionScore]) -> int | None:
     return round(10.0 * sum(score * c.weight for c, score in scored) / total)
 
 
-def _findings(signals: list[SignalResult]) -> tuple[list[Finding], list[Finding]]:
+def _findings(
+    signals: list[SignalResult], perspective: str = "manager"
+) -> tuple[list[Finding], list[Finding]]:
     """Strengths and gaps, selected by score and phrased at behaviour level."""
     scored = [s for s in signals if s.measurable and s.weight > 0]
     ranked = sorted(scored, key=lambda s: (s.sub_score or 0.0, s.weight), reverse=True)
@@ -219,7 +296,7 @@ def _findings(signals: list[SignalResult]) -> tuple[list[Finding], list[Finding]
         strengths.append(
             Finding(
                 signal_id=signal.id,
-                headline=coaching.strength,
+                headline=in_perspective(coaching.strength, perspective),
                 detail=signal.display,
                 evidence=signal.evidence[:2],
             )
@@ -235,7 +312,7 @@ def _findings(signals: list[SignalResult]) -> tuple[list[Finding], list[Finding]
         gaps.append(
             Finding(
                 signal_id=signal.id,
-                headline=coaching.gap,
+                headline=in_perspective(coaching.gap, perspective),
                 detail=signal.display,
                 alternative=coaching.alternative,
                 evidence=signal.evidence[:2],

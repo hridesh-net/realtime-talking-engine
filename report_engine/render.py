@@ -43,6 +43,12 @@ background:var(--bg);color:var(--ink2);font-size:13px;border-radius:0 6px 6px 0}
 font-weight:600;border:1px solid var(--line);color:var(--ink2);background:#fff}
 .pill.bad{color:var(--r);border-color:#fecdca;background:#fef3f2}
 .pill.good{color:var(--g);border-color:#abefc6;background:#ecfdf3}
+.pill.heard{color:#5925dc;border-color:#d9d6fe;background:#f4f3ff}
+.basis{background:#f8f9fc;border:1px solid var(--line);border-radius:10px;
+padding:14px 18px;margin-bottom:14px;font-size:13px;color:var(--ink2);line-height:1.65}
+.basis b{color:var(--ink)}
+.basis ul{margin:8px 0 0;padding-left:18px}
+.basis li{margin-bottom:6px}
 .warn{background:#fffaeb;border:1px solid #fedf89;color:#93370d;padding:12px 16px;
 border-radius:10px;margin-bottom:14px;font-size:14px}
 .alt{margin-top:8px;font-size:13px;color:var(--ink);background:#eff8ff;
@@ -74,6 +80,14 @@ def _e(text: str) -> str:
     return html.escape(str(text), quote=True)
 
 
+def _md(text: str) -> str:
+    """Escape, then honour the one bit of markup the basis lines use."""
+    escaped = _e(text)
+    while "**" in escaped:
+        escaped = escaped.replace("**", "<b>", 1).replace("**", "</b>", 1)
+    return escaped
+
+
 def _tone(score: float | None) -> str:
     if score is None:
         return ""
@@ -98,7 +112,10 @@ def _criterion(entry: CriterionScore) -> str:
         else ""
     )
     rows = "".join(
-        f"<tr><td>{_e(s.label)}</td><td>{_e(s.display)}</td>"
+        f"<tr><td>{_e(s.label)} "
+        f'<span class="pill {"heard" if s.source == "assessed" else ""}">'
+        f"{'heard' if s.source == 'assessed' else 'counted'}</span></td>"
+        f"<td>{_e(s.display)}</td>"
         f"<td>{'—' if s.sub_score is None else f'{s.sub_score:.1f}'}</td></tr>"
         for s in entry.signals
     )
@@ -113,7 +130,7 @@ def _criterion(entry: CriterionScore) -> str:
 <b class="{_tone(entry.score)}">{score}</b> {conf}</span></div>
 <div class="bar"><i style="width:{pct}%"></i></div>{reason}
 <div class="scroll"><table style="margin-top:12px">
-<tr><th>Signal</th><th>Measured</th><th>Score</th></tr>{rows}</table></div></div>"""
+<tr><th>Signal</th><th>Finding</th><th>Score</th></tr>{rows}</table></div></div>"""
 
 
 def _findings(title: str, items: list[Finding], *, with_alt: bool) -> str:
@@ -189,6 +206,21 @@ def to_html(report: AssessmentReport) -> str:
             f"{_evidence(bias_signal)}</div>"
         )
 
+    basis = ""
+    if report.basis.lines or report.basis.cautions:
+        items = "".join(f"<li>{_md(line)}</li>" for line in report.basis.lines)
+        cautions = "".join(f"<li>{_e(c)}</li>" for c in report.basis.cautions)
+        basis = (
+            '<h2>How this report was produced</h2><div class="basis">'
+            f"<ul>{items}</ul>"
+            + (
+                f'<div style="margin-top:10px"><b>Worth knowing</b><ul>{cautions}</ul></div>'
+                if cautions
+                else ""
+            )
+            + "</div>"
+        )
+
     lang = ""
     if report.language:
         lang = (
@@ -209,6 +241,7 @@ def to_html(report: AssessmentReport) -> str:
     body = (
         warnings
         + head
+        + basis
         + _findings("What went well", report.strengths, with_alt=False)
         + _findings("Focus areas", report.development_areas, with_alt=True)
         + criteria
@@ -225,7 +258,13 @@ def _page(report: AssessmentReport, body: str) -> str:
     prov = (
         f"scoring {p.scoring_version} · bundle {p.bundle_version} · rubric {p.rubric_version} · "
         f"english_weight {p.english_weight if p.english_weight is not None else 'advisory'} · "
-        f"language_gate {p.language_gate} · pack {p.pack_version} · judge {p.judge}<br>"
+        f"language_gate {p.language_gate} · pack {p.pack_version}"
+        + (
+            f" · analysis {p.analysis_instructions_version} ({p.analysis_model})"
+            if p.analysis_instructions_version
+            else " · no audio analysis"
+        )
+        + "<br>"
         "Reports are only comparable when every value above matches. "
         "This is an analytical estimate of how the manager interviewed - "
         "no pass, no fail, no gate. "

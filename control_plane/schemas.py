@@ -335,6 +335,24 @@ class SessionResponse(BaseModel):
     recording: RecordingMeta | None = None
 
 
+class AnalysisMeta(BaseModel):
+    """An analysis run's state and provenance, without the analysis itself.
+
+    The body is large; a caller polling for completion does not need it.
+    """
+
+    session_id: str
+    status: str = Field(..., pattern="^(running|complete|failed)$")
+    error: str = ""
+    instructions_version: str = ""
+    model_used: str = ""
+    session_judgement: float | None = None
+    dropped_anchors: int = 0
+    windows: int = 0
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
 class ReportMeta(BaseModel):
     """A generated report's headline and provenance, without its body.
 
@@ -375,6 +393,7 @@ class SessionSummary(BaseModel):
     turn_count: int = Field(..., ge=0, description="Turns stored so far, both speakers.")
     has_recording: bool = False
     has_report: bool = False
+    analysis_status: str = ""
 
 
 class TranscriptAppendRequest(BaseModel):

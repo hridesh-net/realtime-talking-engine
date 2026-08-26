@@ -15,6 +15,7 @@ from control_plane.database import recordings_dir_from_env
 from control_plane.persona import generate_persona
 from control_plane.schemas import (
     REPORT_SECTIONS,
+    AnalysisMeta,
     CandidatePersona,
     ClarityFact,
     InterviewConfigInput,
@@ -422,7 +423,10 @@ class InterviewRepository:
                    ) AS has_recording,
                    EXISTS(
                        SELECT 1 FROM session_reports p WHERE p.session_id = s.id
-                   ) AS has_report
+                   ) AS has_report,
+                   COALESCE(
+                       (SELECT a.status FROM session_analyses a WHERE a.session_id = s.id), ''
+                   ) AS analysis_status
             FROM sessions s
             LEFT JOIN virtual_candidates v ON v.candidate_id = s.candidate_id
             WHERE s.interview_id = ?
@@ -444,6 +448,7 @@ class InterviewRepository:
                 turn_count=int(r["turn_count"]),
                 has_recording=bool(r["has_recording"]),
                 has_report=bool(r["has_report"]),
+                analysis_status=r["analysis_status"],
             )
             for r in rows
         ]
@@ -583,6 +588,105 @@ class InterviewRepository:
         if not row:
             return None
         return self._row_to_recording_meta(row)
+
+    # ----------------------------------------------------------- analyses ----
+
+    def begin_analysis(self, session_id: str) -> AnalysisMeta:
+        """Mark analysis as running, replacing any previous attempt.
+
+        Replacing rather than refusing: a failed or stale analysis should not
+        stop the operator asking for a fresh one, and there is only ever one
+        analysis per session.
+        """
+        now = _utcnow()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO session_analyses (session_id, status, started_at)
+                VALUES (?, 'running', ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    status = 'running', analysis_json = NULL, error = '',
+                    session_judgement = NULL, dropped_anchors = 0, windows = 0,
+                    started_at = excluded.started_at, finished_at = NULL
+                """,
+                (session_id, now),
+            )
+        return self._analysis_meta_or_raise(session_id)
+
+    def complete_analysis(self, session_id: str, analysis: dict[str, Any]) -> AnalysisMeta:
+        """Store a finished analysis."""
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE session_analyses
+                   SET status = 'complete', analysis_json = ?, error = '',
+                       instructions_version = ?, model_used = ?,
+                       session_judgement = ?, dropped_anchors = ?, windows = ?,
+                       finished_at = ?
+                 WHERE session_id = ?
+                """,
+                (
+                    json.dumps(analysis),
+                    analysis.get("instructions_version", ""),
+                    analysis.get("model_used", ""),
+                    analysis.get("session_judgement"),
+                    int(analysis.get("dropped_anchors", 0)),
+                    int(analysis.get("windows", 0)),
+                    _utcnow(),
+                    session_id,
+                ),
+            )
+        return self._analysis_meta_or_raise(session_id)
+
+    def fail_analysis(self, session_id: str, error: str) -> AnalysisMeta:
+        """Record that analysis failed, and why.
+
+        The reason is kept rather than reduced to a status: "failed" alone sends
+        an operator to the logs, and the logs are on the instance.
+        """
+        with self.conn:
+            self.conn.execute(
+                "UPDATE session_analyses SET status = 'failed', error = ?, finished_at = ? "
+                "WHERE session_id = ?",
+                (error[:2000], _utcnow(), session_id),
+            )
+        return self._analysis_meta_or_raise(session_id)
+
+    def get_analysis(self, session_id: str) -> dict[str, Any] | None:
+        """The stored analysis body, or None when there is none."""
+        row = self.conn.execute(
+            "SELECT analysis_json FROM session_analyses WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if not row or not row["analysis_json"]:
+            return None
+        loaded: dict[str, Any] = json.loads(row["analysis_json"])
+        return loaded
+
+    def get_analysis_meta(self, session_id: str) -> AnalysisMeta | None:
+        """State and provenance without the body."""
+        row = self.conn.execute(
+            "SELECT * FROM session_analyses WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return AnalysisMeta(
+            session_id=row["session_id"],
+            status=row["status"],
+            error=row["error"],
+            instructions_version=row["instructions_version"],
+            model_used=row["model_used"],
+            session_judgement=row["session_judgement"],
+            dropped_anchors=int(row["dropped_anchors"]),
+            windows=int(row["windows"]),
+            started_at=_parse_ts(row["started_at"]),
+            finished_at=_parse_ts(row["finished_at"]) if row["finished_at"] else None,
+        )
+
+    def _analysis_meta_or_raise(self, session_id: str) -> AnalysisMeta:
+        meta = self.get_analysis_meta(session_id)
+        if meta is None:  # pragma: no cover - written in the transaction above
+            raise RuntimeError(f"analysis row for {session_id} vanished after write")
+        return meta
 
     # ------------------------------------------------------------ reports ----
 

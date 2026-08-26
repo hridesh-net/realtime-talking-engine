@@ -7,8 +7,9 @@ architecture suite checks.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 BUNDLE_VERSION = "v1"
 
@@ -133,6 +134,89 @@ class Rubric(BaseModel):
         return self.bands[0].label if self.bands else "unbanded"
 
 
+class AnalysisInput(BaseModel):
+    """The audio analysis, as data.
+
+    Mirrors what `analysis_agent` produces without importing it: the report
+    engine depends on no first-party package, so the analysis travels in the
+    bundle the same way the rubric does. Only the fields the report uses are
+    declared; anything else in the payload is ignored rather than rejected, so
+    the analysis schema can grow without breaking report generation.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    instructions_version: str = ""
+    model_used: str = ""
+    windows: int = 0
+    dropped_anchors: int = 0
+    audio_duration_ms: int = 0
+    spoken_languages: list[str] = Field(default_factory=list)
+    quality_notes: str = ""
+
+    transcript: list[dict[str, Any]] = Field(default_factory=list)
+    questions: list[dict[str, Any]] = Field(default_factory=list)
+    topic_flags: list[dict[str, Any]] = Field(default_factory=list)
+    silences: list[dict[str, Any]] = Field(default_factory=list)
+    interruptions: list[dict[str, Any]] = Field(default_factory=list)
+    discovery: list[dict[str, Any]] = Field(default_factory=list)
+    delivery: dict[str, Any] = Field(default_factory=dict)
+    criteria: list[dict[str, Any]] = Field(default_factory=list)
+    persona_response: dict[str, Any] = Field(default_factory=dict)
+    expectation_coverage: dict[str, Any] = Field(default_factory=dict)
+    early_end: dict[str, Any] = Field(default_factory=dict)
+    session_judgement: float = 0.0
+
+
+class ReportConfig(BaseModel):
+    """Who this report is written for, and what it should score against.
+
+    Two things are configurable, and both are grounded in what the feedback
+    research actually supports rather than in taste:
+
+    **Perspective.** Kluger & DeNisi (1996, 607 effect sizes) found feedback
+    raises performance by d = .41 on average while **over a third of feedback
+    interventions made performance worse** — the split being whether attention
+    lands on the task or on the person. Perspective therefore changes how the
+    report addresses its reader, never how harsh it is: the same evidence reads
+    differently to the manager who gave the interview, to the coach preparing
+    their next session, and to a reviewer who needs the evidence first.
+
+    **Skills.** The competency checklist a role is scored against. Job-analysis-
+    based content is the first of Campion, Palmer & Campion's (1997) fifteen
+    structure components, and a generic role-family list is a stand-in for it.
+    An org that knows its own competencies should be able to say so.
+    """
+
+    #: `manager` addresses the interviewer directly ("you asked"), which is the
+    #: task-focused second person the feedback literature supports for
+    #: self-review. `coach` writes about them for someone preparing their next
+    #: practice session. `reviewer` leads with evidence for someone auditing.
+    perspective: str = Field("manager", pattern="^(manager|coach|reviewer)$")
+
+    #: Competencies this role is scored against. Empty falls back to the shipped
+    #: role-family pack.
+    skills: list[str] = Field(default_factory=list)
+
+    #: No study gives an optimal number. The default of 3 follows Kluger &
+    #: DeNisi's mechanism — diffuse, high-volume feedback shifts attention from
+    #: the task to the self — plus cognitive-load-based coaching practice that
+    #: focused feedback beats comprehensive lists. Stated as convention.
+    max_development_areas: int = Field(3, ge=1, le=8)
+
+
+class Basis(BaseModel):
+    """How this report was produced, in the reader's language.
+
+    Printed on the report itself rather than kept in a design document: a
+    trainer acting on a number is owed a plain statement of what produced it and
+    what it could not see.
+    """
+
+    lines: list[str] = Field(default_factory=list)
+    cautions: list[str] = Field(default_factory=list)
+
+
 class SessionBundle(BaseModel):
     """Everything the engine needs. One file, no database."""
 
@@ -144,6 +228,10 @@ class SessionBundle(BaseModel):
     rubric: Rubric
     jurisdiction: str = "IN"
     recording: RecordingRef | None = None
+    #: The audio analysis, when one has been run. Absent means the report is the
+    #: deterministic half alone, and says so.
+    analysis: AnalysisInput | None = None
+    report_config: ReportConfig = Field(default_factory=ReportConfig)
     scoring_options: ScoringOptions = Field(default_factory=ScoringOptions)
 
 
@@ -179,6 +267,11 @@ class SignalResult(BaseModel):
     weight: float = 1.0
     basis: str = ""
     reason: str = ""
+    #: Where the number came from. `measured` is counted from the transcript by
+    #: code and is reproducible; `assessed` came from the audio analysis and
+    #: rests on a model's reading. The report shows which is which, because a
+    #: reader is owed the difference.
+    source: str = Field("measured", pattern="^(measured|assessed)$")
     #: Whether this measurement rests on English lexicons or English syntax. It
     #: still produces a number on a code-mixed session; that number is just
     #: worth less, and the criterion's confidence says so.
@@ -268,7 +361,9 @@ class Provenance(BaseModel):
     language_gate: bool = False
     jurisdiction: str = "IN"
     pack_version: str = ""
-    judge: str = "none"
+    #: The analysis that fed this report, when there was one.
+    analysis_instructions_version: str = ""
+    analysis_model: str = ""
 
 
 class AssessmentReport(BaseModel):
@@ -296,4 +391,6 @@ class AssessmentReport(BaseModel):
 
     question_acts: list[QuestionAct] = Field(default_factory=list)
     language: LanguageCheck | None = None
+    #: How the report was produced. Always populated.
+    basis: Basis = Field(default_factory=Basis)
     provenance: Provenance = Field(default_factory=Provenance)

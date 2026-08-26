@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import AnalysisPanel from './AnalysisPanel'
 import { generateReport, getReport, reportHtmlUrl } from './api'
 
 /**
@@ -13,6 +14,8 @@ import { generateReport, getReport, reportHtmlUrl } from './api'
 export default function ReportView({ session, onClose, onGenerated }) {
   const [report, setReport] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Bumped when an analysis finishes, so the report offers to pick it up.
+  const [analysed, setAnalysed] = useState(0)
   const [error, setError] = useState(null)
   const frame = useRef(null)
 
@@ -69,13 +72,22 @@ export default function ReportView({ session, onClose, onGenerated }) {
           {report && (
             <>
               <button className="btn sm" onClick={onPrint}>📄 Download PDF</button>
-              <button className="btn sm" disabled={busy} onClick={onGenerate}>
-                {busy ? 'Regenerating…' : '↻ Regenerate'}
+              <button
+                className={`btn sm ${analysed ? 'primary' : ''}`}
+                disabled={busy}
+                onClick={onGenerate}
+                title={analysed ? 'A newer analysis is available — rebuild to include it' : ''}
+              >
+                {busy ? 'Regenerating…' : analysed ? '↻ Rebuild with analysis' : '↻ Regenerate'}
               </button>
             </>
           )}
           <button className="btn sm" onClick={onClose}>← Back to sessions</button>
         </div>
+      </div>
+
+      <div style={{ padding: '14px 18px 0' }}>
+        <AnalysisPanel session={session} onComplete={() => setAnalysed((n) => n + 1)} />
       </div>
 
       {error && <div className="banner warn" style={{ margin: 16 }}><span>{error}</span></div>}
@@ -84,8 +96,8 @@ export default function ReportView({ session, onClose, onGenerated }) {
         <div style={{ padding: 28, textAlign: 'center' }}>
           <div className="h2">No report yet</div>
           <div className="sub" style={{ marginBottom: 16 }}>
-            Scored from the stored transcript. Nothing is sent anywhere — the
-            deterministic pass runs locally and cites the turn behind every claim.
+            Built from the stored transcript, and from the audio analysis when one
+            has been run. Every claim cites the moment it came from.
           </div>
           <button className="btn primary" disabled={busy} onClick={onGenerate}>
             {busy ? 'Scoring…' : '⚡ Generate report'}
