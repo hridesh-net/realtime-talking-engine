@@ -22,6 +22,15 @@ sources:
 ---
 # LLM port
 
+> **`AudioModel`** is the fourth port — audio in, schema-constrained JSON out,
+> for the [analysis agent](/concepts/subsystems/analysis-agent.md). Separate from
+> `StructuredModel` because the payload differs: a caller wanting JSON from
+> *text* must not be handed a port requiring bytes and a MIME type.
+>
+> `AUDIO_PROVIDERS` is **deliberately partial**, like `REALTIME_PROVIDERS`. Only
+> Gemini reads audio natively, so `audio_analysis_available()` lets the UI hide
+> the Analyse button rather than show one that errors.
+
 `llm/` — the bottom of the stack. Imports nothing first-party. **The only
 package allowed to import `google`, `openai`, or `google.genai`**, enforced by
 an AST scan in `tests/test_architecture.py`.

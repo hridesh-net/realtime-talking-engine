@@ -9,8 +9,18 @@ Interview control plane. Four things, all in Python:
    that a human interviewer practises against. Each persona carries a
    ground-truth answer key used to grade the interviewer afterwards.
 4. **Run the interview** — a live session against one of those personas,
-   **typed or spoken**, stored as a timestamped transcript. Open the UI, pick a
-   persona, hit **Chat** or **🎙 Voice**, and conduct it.
+   **typed or spoken**, stored as a timestamped transcript and, for voice
+   sessions, a stereo recording. Open the UI, pick a persona, hit **Chat** or
+   **🎙 Voice**, and conduct it.
+5. **Analyse the recording** — an audio-native pass that listens to the session
+   against the expectation it was held against, and stores structured
+   observations. Not a report: observations.
+6. **Generate the report** — the manager's development report, composed in code
+   from the transcript and the analysis. Free and instant; the analysis is the
+   paid step and it runs once.
+
+**The hiring manager is the one assessed, not the candidate.** The candidate is
+a scripted persona; the manager is the learner.
 
 This project is **separate from `smart-Interview`** (the real-time voice
 interviewer engine). Nothing here imports from it. The runtime engine stays in
@@ -22,13 +32,17 @@ Go/Rust; this service owns the "what" of an interview.
 llm/                 Provider port + Gemini/OpenAI adapters (the only vendor SDKs)
 expectation_agent/   Expectation agent — persona, guardrails, fixed rubric
 candidate_agent/     Virtual candidate agent — archetype catalog, engine contract, live session
+evaluation_agent/    The manager rubric and the role-fact checklist
+analysis_agent/      Audio analysis — INSTRUCTIONS.md, windowing harness, observations
+report_engine/       Standalone: session bundle in, report out. Imports nothing first-party
 control_plane/       FastAPI service, storage ports, SQLite adapter
 owner_handover/      JSON Schemas + samples for the API contract (deliverables)
 ui/                  React + Vite test UI
 tests/               Offline checks (fast) + live scenario scripts
 scripts/             check.sh, export_schemas.py
 engine/              Go live-session engine (voice) — skeleton, parked
-docs/                BRDs, pivot plan, engine contract spec
+docs/                BRDs, pivot plan, engine contract, scoring spec, pricing
+okf/                 The knowledge bundle — read this before the source
 ```
 
 Dependencies point one way: `llm` ← agents ← `control_plane`. Nothing outside
@@ -199,6 +213,52 @@ persona is easier to argue past its ceiling than a text one; reproduce in Chat t
 tell a persona problem from a modality one.
 
 There is no report yet. Ending a session stores the transcript and stops.
+
+## Reports
+
+A report has two halves, and says which is which on every row.
+
+**Counted** signals are computed from the stored transcript by code. Re-running
+produces byte-identical numbers, and a test asserts it.
+
+**Heard** signals come from the audio analysis. They exist because the counted
+half cannot read what it was not written for: on a real session the counted
+fairness detector returned **10/10, "no protected topics detected"**, on an
+interview containing questions about household composition and salary history —
+asked in Hindi, which an English lexicon does not match. Hearing the audio
+brought that criterion to 6.24.
+
+Every report carries a **basis panel**: how many signals were counted versus
+heard, which model and instruction version produced the analysis, the languages
+heard, and how many timestamps were discarded for falling outside the recording.
+
+```bash
+# analyse (background, ~40s for a six-minute recording), then report
+curl -X POST localhost:8081/api/v1/sessions/$SID/analyze
+curl        localhost:8081/api/v1/sessions/$SID/analysis      # poll until complete
+curl -X POST localhost:8081/api/v1/sessions/$SID/report
+```
+
+The report engine also runs standalone, with no database and no network:
+
+```bash
+python scripts/make_bundle.py --session $SID -o bundle.json
+python -m report_engine bundle.json -o report.html
+```
+
+Design and provenance for every threshold:
+[`docs/REPORT_ENGINE_SCORING_SPEC.md`](docs/REPORT_ENGINE_SCORING_SPEC.md).
+The analysis agent's rules are a shipped, versioned document:
+[`analysis_agent/INSTRUCTIONS.md`](analysis_agent/INSTRUCTIONS.md) — changing it
+changes what every report is built from.
+
+## What a session costs
+
+About **$1.06** marginal for a 20-minute voice session. The live voice call is
+roughly four times the analysis (~$0.85 against $0.19); report generation calls
+no model and is free. Measured token counts, quoted vendor rates and the levers
+that actually move the number are in
+[`docs/PRICING_PER_SESSION.md`](docs/PRICING_PER_SESSION.md).
 
 ## Determinism
 

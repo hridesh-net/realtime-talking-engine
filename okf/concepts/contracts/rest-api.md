@@ -22,6 +22,15 @@ sources:
 ---
 # REST API
 
+> **Session analysis.** `POST /sessions/{id}/analyze` returns **202** and runs in
+> the background (~40 s for a six-minute recording; 409 when the session has no
+> recording). `GET .../analysis` polls the status; `GET .../analysis/full`
+> returns the body. `POST .../report` **409s while analysis is running** —
+> building a report then would quietly produce the counted half alone and
+> present it as the whole thing. Report generation also takes `perspective`,
+> `skills` and `max_development_areas` as query parameters, so a whole report
+> configuration fits in a shareable link.
+
 > **Session reports.** `POST /sessions/{id}/report` generates or regenerates
 > (409 when nothing was said; `english_weight` and `language_gate` ride as query
 > parameters and are stamped into the report's provenance),

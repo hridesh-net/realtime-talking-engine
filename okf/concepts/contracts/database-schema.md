@@ -21,6 +21,13 @@ sources:
 ---
 # Database schema
 
+> **`session_analyses`** — one row per session, written **when analysis starts**
+> rather than when it finishes, so a caller can tell "running" from "never
+> asked": the job takes about a minute and the UI has to show something in
+> between. A failure stores its reason rather than reducing to a status, because
+> the logs live on the instance. See
+> [Audio analysis agent](/concepts/subsystems/analysis-agent.md).
+
 > **`session_reports`** — one row per session, `session_id` as the primary key,
 > holding the report JSON plus denormalised headline and provenance columns
 > (`readiness_index`, `band`, `scoring_version`, `rubric_version`,

@@ -46,6 +46,26 @@ file and writes a report, touching no database and no network.
 assembling a bundle from `control_plane.db`, from a plain turn list, or from the
 worked example in `tests/fixtures/demo_turns.json`.
 
+## Two halves: counted and heard
+
+A report is built from two kinds of signal, and it says which is which on every
+row. **Counted** signals are computed from the stored transcript by code and are
+reproducible. **Heard** signals come from the
+[audio analysis](/concepts/subsystems/analysis-agent.md) and rest on a model's
+reading of the recording.
+
+The distinction is not cosmetic. On a real session the counted fairness detector
+returned **10/10, "no protected topics detected"**, on an interview containing
+questions about household composition and salary history — asked in Hindi, which
+an English lexicon cannot match. The heard signals brought that criterion to
+6.24. The language downgrade deliberately does not weaken heard signals: they
+read the language actually spoken.
+
+Every report carries a **basis panel** stating how many signals were counted
+versus heard, which model and instruction version produced the analysis, the
+languages heard, and how many anchors were discarded. A trainer acting on a
+number is owed that in the reader's language.
+
 ## The determinism split, restated
 
 Code owns every count, ratio, threshold comparison, sub-score, criterion score
@@ -100,6 +120,16 @@ a diarisation guess — the payoff of `manager_left_candidate_right`.
 * **Nothing caps or fails.** A protected-topic hit lowers Fair & Inclusive and
   raises a flag; it does not touch the other criteria or the index. This is the
   same standing rule `test_the_rubric_has_no_critical_fail_gate` guards.
+
+## Configurable perspective and skills
+
+`ReportConfig` carries two org-owned settings. **Perspective**
+(`manager`/`coach`/`reviewer`) changes the person a finding is written in and
+never how hard it lands — Kluger & DeNisi's task-versus-self split is what makes
+the second person safe, and the coaching lines are already written about the
+question rather than the person. **Skills** replace the shipped role-family
+competency pack, which is only a stand-in for the job-analysis-based content
+that is the first of Campion, Palmer & Campion's fifteen structure components.
 
 ## The two operator toggles
 

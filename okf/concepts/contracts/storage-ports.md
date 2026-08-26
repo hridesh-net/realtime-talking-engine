@@ -19,6 +19,11 @@ sources:
 ---
 # Storage ports
 
+> **Seven narrow ports now.** `AnalysisStore` joined them with the audio
+> analysis; `AnalysisWorkflowStore` deliberately does **not** compose the report
+> store, because a handler that can both analyse and report will eventually do
+> both by accident.
+>
 > **Six narrow ports now, not five.** `ReportStore` joined them with the
 > session report — see [Report engine](/concepts/subsystems/report-engine.md).
 

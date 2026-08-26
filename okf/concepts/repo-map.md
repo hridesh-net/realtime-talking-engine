@@ -44,6 +44,12 @@ status: stable
 | `evaluation_agent/role_facts.py`, `prompts.py`, `schema.py` | [evaluation_agent/role_facts.py](/concepts/modules/evaluation-agent-role-facts.md) — the fixed role-fact checklist and its drafting agent |
 | `control_plane/reporting.py` | [Report engine](/concepts/subsystems/report-engine.md) — the seam that assembles a bundle from stored rows; resolves catalog **and** composed personas |
 | `ui/src/ReportView.jsx` | [Test UI](/concepts/subsystems/ui.md) — embeds the engine's own report HTML; print is the PDF path |
+| `analysis_agent/INSTRUCTIONS.md` | [Analysis agent instructions](/references/analysis-instructions.md) — the shipped rules; changing it changes every report |
+| `analysis_agent/agent.py`, `harness.py` | [Audio analysis agent](/concepts/subsystems/analysis-agent.md) — the windowed run and the merge that owns every number |
+| `analysis_agent/audio.py` | [Audio analysis agent](/concepts/subsystems/analysis-agent.md) — windowing; also why timestamps stay in range |
+| `analysis_agent/schema.py` | [Audio analysis agent](/concepts/subsystems/analysis-agent.md) — `SessionAnalysis`, and the 60/40 weights |
+| `report_engine/signals/assessed.py` | [Report engine](/concepts/subsystems/report-engine.md) — the heard half, from the analysis |
+| `llm/base.py` `AudioModel` | [LLM port](/concepts/subsystems/llm-port.md) — the audio port; `AUDIO_PROVIDERS` is deliberately partial |
 | `report_engine/score.py`, `transfer.py` | [Report engine](/concepts/subsystems/report-engine.md) — aggregation and the raw-to-score transfer functions |
 | `report_engine/acts.py`, `segment.py` | [Report engine](/concepts/subsystems/report-engine.md) — the question act and the four segments |
 | `report_engine/signals/` | [Report engine](/concepts/subsystems/report-engine.md) — one module per rubric criterion |

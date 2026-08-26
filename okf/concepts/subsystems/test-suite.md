@@ -26,6 +26,12 @@ sources:
 ---
 # Test suite
 
+> **`tests/test_analysis_agent.py`** (19 tests) covers the analysis harness
+> without a model or an API key: where a window's timestamps land, which anchors
+> are rejected, and the 60/40 weighting — including the case the design exists
+> for, that a manager who read the room and closed early is not marked down for
+> coverage.
+>
 > **`tests/test_report_engine.py`** (38 tests) covers the report engine and the
 > control-plane seam: determinism on both JSON and HTML, question typing
 > including the unpunctuated shapes ASR produces, the restraint-persona rule,

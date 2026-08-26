@@ -36,7 +36,15 @@ concept and append to [log.md](/log.md) — see
 Curated 2026-08-21 against commit `802c8426` by reading every documented source
 file, and kept current since — see [log.md](/log.md) for what has changed.
 
-Most recent substantive change: the **Phase 0 MVP milestone M1** — the interview
+Most recent substantive change: the **audio analysis agent** and the report
+built from it. `analysis_agent/` listens to a session's recording against the
+expectation it was held against and stores observations; `report_engine/`
+composes a report with two clearly-separated halves, **counted** and **heard**.
+See [Audio analysis agent](/concepts/subsystems/analysis-agent.md),
+[Report engine](/concepts/subsystems/report-engine.md) and
+[What a session costs](/references/pricing.md).
+
+Previous substantive change: the **Phase 0 MVP milestone M1** — the interview
 configuration the training-wizard specification asks for, including a `language`
 setting that genuinely reaches the persona's prompt and the speech-to-text hint,
 operator notes that cannot override an archetype, and the fixed role-fact

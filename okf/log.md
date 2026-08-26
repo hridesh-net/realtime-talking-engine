@@ -383,3 +383,15 @@
 * **Addition**: `ReportConfig` — configurable **perspective** (`manager` / `coach` / `reviewer`) and **skills**. Perspective changes the person the sentence is written in and never how hard it lands; Kluger & DeNisi's task-versus-self split is what makes the second person safe, and the coaching lines are already written about the question rather than the person. Configured skills replace the shipped role-family competency pack, which is a stand-in for the job-analysis-based content that is the first of Campion, Palmer & Campion's fifteen structure components.
 
   Verified end to end against a running server with a real recording attached: 404 before asking, 202 to start, 409 on report while running, complete at 38s with `instructions_version` and `model_used` stamped. 30 new tests (`tests/test_analysis_agent.py`, plus report-engine coverage of the assessed half), wired into `scripts/check.sh`. `analysis_agent` added to `PACKAGES`, `ALLOWED_IMPORTS`, mypy, `pyproject`, and **`infra/build-artifacts.sh`** — the omission that took the site down once already.
+
+## 2026-08-26 (documentation: okf, README, and what a session costs)
+
+* **Addition**: [`docs/PRICING_PER_SESSION.md`](/references/pricing.md) — what one session actually costs, measured rather than estimated where measurement was possible. Token counts come from instrumenting a real 346-second recording through the real windowing path and reading `usage_metadata` off each response; they fit a straight line, which gives a model rather than a single data point: **5,592 prompt tokens per window + 31.9 per second of audio**, and **2,137 output + 17.8 per second**. Vendor rates are quoted from the pricing pages with links and the date, and the Gemini figures are flagged as introductory (they rise on 2027-01-01).
+
+  The finding worth acting on: **the live voice call costs roughly four times what analysing it does** — ~$0.85 against $0.19 for a twenty-minute session — so the largest lever is the realtime model, not the analysis. Report generation calls no model and is free.
+
+  The voice-call figure is the one estimate in the document and it says so, showing its working: OpenAI publishes a token price but not a tokens-per-second rate for realtime audio, so the conversion is inferred from the previous generation's reported per-minute cost. Treated as a floor, with a budgeting range.
+
+* **Addition**: `subsystems/analysis-agent.md`, `references/analysis-instructions.md`, `references/pricing.md`. Updated: `subsystems/{index,report-engine,llm-port,test-suite}`, `contracts/{database-schema,rest-api,storage-ports}`, `references/index`, `repo-map` (six routing rows), `index` (freshness).
+
+* **Change**: `README.md` — the pipeline is now six steps rather than four, opening with the fact the rest of the repo assumes and the README did not say: **the hiring manager is the one assessed, not the candidate**. New sections on the two-halves report and on session cost, and `analysis_agent/`, `evaluation_agent/`, `report_engine/` and `okf/` added to the layout, which had gone stale.
