@@ -16,7 +16,7 @@ import re
 from report_engine import transfer
 from report_engine.schema import SignalResult
 from report_engine.signals.context import Context, load_pack
-from report_engine.text import sentences
+from report_engine.text import content_words, jaccard, sentences
 
 CRITERION = "fairness"
 
@@ -54,6 +54,7 @@ def extract(ctx: Context) -> list[SignalResult]:
     """Every fairness signal for this session."""
     return [
         _protected_topics(ctx),
+        _volunteered_detail_handling(ctx),
         _confirmatory_ratio(ctx),
         _framing_balance(ctx),
         _accommodation(ctx),
@@ -101,6 +102,76 @@ def _protected_topics(ctx: Context) -> SignalResult:
     return out
 
 
+def _volunteered_detail_handling(ctx: Context) -> SignalResult:
+    """When the candidate volunteers a protected detail, was it left alone?
+
+    A candidate may say anything about themselves; the rule constrains the
+    interviewer, not them. The failure mode is the *well-meant* follow-up -
+    `cooperative_trap` names it explicitly ("Asks a warm, well-meant follow-up
+    about the personal detail"), and it is the single heaviest thing that
+    persona is testing.
+
+    Countable because both halves are: the volunteering is a protected-topic
+    pattern on a candidate turn, and pursuing it is a manager question in the
+    next two turns that returns to the same topic.
+    """
+    pack = load_pack(ctx.bundle.jurisdiction.lower())
+    out = _base(
+        "volunteered_detail_handling",
+        "Handling of a volunteered personal detail",
+        weight=2.0,
+        basis="Persona ground truth (`session_beats`) crossed with the "
+        f"jurisdiction pack {pack['pack_version']}. The candidate may volunteer "
+        "anything; the rule constrains the interviewer",
+    )
+    compiled = [
+        (c["id"], c["label"], re.compile(p, re.IGNORECASE))
+        for c in pack["categories"]
+        for p in c["patterns"]
+    ]
+
+    volunteered: list[tuple[int, str, str, str]] = []
+    for turn in ctx.candidate_turns:
+        for sentence in sentences(turn.text):
+            for cat_id, label, pattern in compiled:
+                if pattern.search(sentence):
+                    volunteered.append((turn.index, cat_id, label, sentence))
+                    break
+
+    if not volunteered:
+        out.reason = "the candidate volunteered no protected personal detail"
+        return out
+
+    handled = 0
+    for turn_index, cat_id, label, sentence in volunteered:
+        follow_ups = [t for t in ctx.manager_turns if t.index > turn_index][:2]
+        indexes = {t.index for t in follow_ups}
+        pursued = any(
+            act.turn_index in indexes
+            and (
+                act.protected_topic == cat_id
+                or jaccard(content_words(act.text), content_words(sentence)) >= 0.20
+            )
+            for act in ctx.acts
+        )
+        if pursued:
+            offending = next(a for a in ctx.acts if a.turn_index in indexes)
+            out.evidence.append(
+                ctx.evidence(offending.turn_index, f"[pursued {label}] {offending.text}")
+            )
+        else:
+            handled += 1
+            out.evidence.append(ctx.evidence(turn_index, f"[{label}, left alone] {sentence}"))
+
+    value = handled / len(volunteered)
+    out.value = round(value, 3)
+    out.display = (
+        f"{handled} of {len(volunteered)} volunteered detail(s) acknowledged and left alone"
+    )
+    out.sub_score = transfer.hit_rate(value)
+    return out
+
+
 def _confirmatory_ratio(ctx: Context) -> SignalResult:
     """Leading questions as a share of all questions."""
     out = _base(
@@ -127,7 +198,7 @@ def _framing_balance(ctx: Context) -> SignalResult:
     out = _base(
         "promotion_prevention_balance",
         "Question framing (promotion vs prevention)",
-        weight=0.5,
+        weight=0.0,
         basis="SOURCED metric (Kanze, Huang, Conley & Higgins 2018). "
         "DESCRIPTIVE per session — differential framing is only a bias claim "
         "across two or more candidates",
@@ -141,11 +212,13 @@ def _framing_balance(ctx: Context) -> SignalResult:
     if total == 0:
         out.reason = "no framed questions to compare"
         return out
-    value = promotion / total
-    out.value = round(value, 3)
+    out.value = round(promotion / total, 3)
     out.display = f"{promotion} promotion-framed, {prevention} prevention-framed"
-    # Balance is the neutral point; the score is descriptive, weighted low.
-    out.sub_score = transfer.plateau(value, 0.35, 0.65, 1.0)
+    # Deliberately never scored. One session cannot distinguish a manager who
+    # frames questions differently for different candidates - which is the
+    # actual bias finding - from one who simply asked about risk today. Scoring
+    # it per session manufactures a gap out of a single question.
+    out.reason = "descriptive only - differential framing is a cohort measure, not a session one"
     return out
 
 

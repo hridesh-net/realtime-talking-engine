@@ -77,6 +77,10 @@ bundle -> language gate -> question acts -> segments -> signals -> scores -> ren
 | `render.py` | JSON and a self-contained HTML page |
 | `packs/` | dated jurisdiction and competency packs |
 
+`scripts/transcribe_recording.py` turns a stereo recording into a turn list.
+Each channel is transcribed separately, so speaker labels are exact rather than
+a diarisation guess — the payoff of `manager_left_candidate_right`.
+
 ## Three rules the tests enforce
 
 * **An unmeasurable signal is never a zero.** It carries `value=None` and a
@@ -84,6 +88,15 @@ bundle -> language gate -> question acts -> segments -> signals -> scores -> ren
 * **Positive-only markers never penalise absence.** Offering an adjustment or
   checking name pronunciation earns points; not doing so costs none, because no
   effect-size research supports a penalty.
+* **A restraint item is not scored like a question.** Some `must_discover`
+  signals are "do not ask" (`cooperative_trap`'s heaviest is *"Move back to the
+  role without asking a single follow-up"*). Counting those by question-overlap
+  inverts the measurement, so they are excluded and left to the judge.
+* **Some signals are reported and never scored.** Pace and fillers, by
+  specification; promotion/prevention framing, because one session cannot
+  distinguish differential framing from a single risk-framed question.
+* **Question detection does not trust the question mark.** On a voice session
+  the punctuation is the transcriber's guess.
 * **Nothing caps or fails.** A protected-topic hit lowers Fair & Inclusive and
   raises a flag; it does not touch the other criteria or the index. This is the
   same standing rule `test_the_rubric_has_no_critical_fail_gate` guards.

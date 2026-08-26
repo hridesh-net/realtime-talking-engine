@@ -14,7 +14,7 @@ import pytest
 
 from candidate_agent import archetypes
 from evaluation_agent.rubric import DEFAULT_RUBRIC
-from report_engine.acts import classify, extract
+from report_engine.acts import classify, extract, is_question
 from report_engine.render import to_html, to_json
 from report_engine.schema import SessionBundle, Turn
 from report_engine.score import build_report
@@ -79,6 +79,64 @@ def test_question_types_are_classified_by_rule(text, expected):
 def test_leading_beats_behavioural_in_precedence():
     """A leading behavioural question is still leading — it manufactures its answer."""
     assert classify("Tell me about a time you smashed a target, you must have, right?") == "leading"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Can you help me with a brief introduction of yours and give me your background",
+        "Like, let's say if you had a difficult customer, how did you deal with that",
+        "And how does the, like, network related, what all type of complaints",
+    ],
+)
+def test_questions_are_found_without_a_question_mark(text):
+    """ASR drops the punctuation; on a voice session it is the transcriber's guess."""
+    assert is_question(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Okay, that sounds about great.",
+        "We will definitely come back to you on the next steps.",
+        "But, like, I would like to end the interview right now.",
+        "Let me know if my window is visible to you.",
+    ],
+)
+def test_statements_are_not_mistaken_for_questions(text):
+    assert not is_question(text)
+
+
+def test_framing_balance_is_reported_but_never_scored():
+    """One session cannot tell differential framing from a single risk question."""
+    report = build_report(_bundle())
+    signal = next(
+        s for c in report.criteria for s in c.signals if s.id == "promotion_prevention_balance"
+    )
+    assert signal.sub_score is None
+    assert signal.weight == 0.0
+
+
+def test_a_restraint_signal_is_not_scored_as_though_it_were_a_question():
+    """`cooperative_trap` is mostly "do not ask" items; crediting a question inverts it."""
+    persona = {
+        "archetype_key": "cooperative_trap",
+        "label": "The cooperative candidate",
+        "must_discover": [
+            {
+                "id": "protected_detail_not_pursued",
+                "signal": "The volunteered personal detail was acknowledged and left alone",
+                "weight": 1.0,
+                "how_to_surface": "Move back to the role without asking a single follow-up on it",
+            }
+        ],
+        "session_beats": [],
+        "stresses": {"fairness": 4},
+    }
+    report = build_report(_bundle(persona=persona))
+    signal = next(s for c in report.criteria for s in c.signals if s.id == "discovery_attempted")
+    assert signal.sub_score is None
+    assert "restraint" in signal.reason
 
 
 def test_a_probe_references_the_answer_before_it():

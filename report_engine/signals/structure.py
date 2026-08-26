@@ -52,27 +52,72 @@ def _base(signal_id: str, label: str, weight: float, basis: str) -> SignalResult
     return SignalResult(id=signal_id, label=label, criterion=CRITERION, weight=weight, basis=basis)
 
 
+#: `must_discover` items are not all "surface it by asking". Some are restraint
+#: ("Move back to the role without asking a single follow-up on it") and some are
+#: statement ("State the process for requests rather than granting or refusing").
+#: Scoring those by question-overlap would credit the manager for doing exactly
+#: the wrong thing, so they are excluded here and left to the judge.
+_RESTRAINT_CUES = compile_all(
+    [
+        r"\bwithout\b",
+        r"\brather than\b",
+        r"\binstead of\b",
+        r"\bnot\b",
+        r"\bnever\b",
+        r"\bleave it\b",
+        r"\bmove (back|on)\b",
+    ]
+)
+_ASK_CUES = compile_all([r"^\s*(ask|probe|compare|request|push|challenge)\b"])
+
+
+def _is_ask_item(how_to_surface: str) -> bool:
+    """Whether this item can be measured by looking at the questions asked."""
+    if any(p.search(how_to_surface) for p in _RESTRAINT_CUES):
+        return False
+    return bool(any(p.search(how_to_surface) for p in _ASK_CUES))
+
+
 def _discovery_attempted(ctx: Context) -> SignalResult:
     """Did the manager aim a question at each thing the persona is hiding?
 
     The persona's `must_discover` list is the fixed denominator that makes two
-    managers comparable (spec section 1). Whether a signal was actually
-    *surfaced* needs reading comprehension and belongs to the judge; whether it
-    was *asked about* is countable here.
+    managers comparable (spec section 1). Two honest limits on what is counted
+    here:
+
+    * Whether a signal was actually *surfaced* needs reading comprehension and
+      belongs to the judge. Whether it was *asked about* is countable.
+    * Only the items whose `how_to_surface` describes asking are counted at all.
+      A persona like `cooperative_trap` is mostly restraint items - the correct
+      behaviour is to *not* ask - and crediting a question there would invert
+      the measurement. The display says how much of the persona's weight this
+      signal could actually reach.
     """
     out = _base(
         "discovery_attempted",
         "Aimed at what the candidate was hiding",
         weight=2.0,
-        basis="Persona ground truth — fixed denominator, spec section 1",
+        basis="Persona ground truth - fixed denominator, spec section 1. "
+        "Counts only the ask-shaped items; restraint and statement items are "
+        "judge-only",
     )
     targets = ctx.bundle.persona.must_discover
     if not targets:
         out.reason = "the bundle carried no persona must-discover list"
         return out
 
+    askable = [t for t in targets if _is_ask_item(t.how_to_surface)]
+    total_weight = sum(t.weight for t in targets)
+    ask_weight = sum(t.weight for t in askable)
+    if not askable:
+        out.reason = (
+            f"this persona has no ask-shaped signals - all {len(targets)} are "
+            "restraint or statement items, which only the judge can assess"
+        )
+        return out
+
     hit_weight = 0.0
-    for target in targets:
+    for target in askable:
         cues = content_words(f"{target.signal} {target.how_to_surface}")
         for act in ctx.acts:
             if jaccard(content_words(act.text), cues) >= 0.08:
@@ -80,10 +125,15 @@ def _discovery_attempted(ctx: Context) -> SignalResult:
                 out.evidence.append(ctx.evidence(act.turn_index, act.text))
                 break
 
-    total = sum(t.weight for t in targets)
-    value = hit_weight / total if total else 0.0
+    value = hit_weight / ask_weight
     out.value = round(value, 3)
-    out.display = f"{hit_weight / total:.0%} of the persona's hidden signals were asked about"
+    coverage = ask_weight / total_weight if total_weight else 0.0
+    out.display = f"{value:.0%} of the ask-shaped signals were asked about"
+    if coverage < 1.0:
+        out.display += (
+            f" (only {coverage:.0%} of this persona's weight is ask-shaped; "
+            "the rest is restraint, judged separately)"
+        )
     out.sub_score = transfer.hit_rate(value)
     return out
 

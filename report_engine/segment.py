@@ -48,10 +48,10 @@ def assign(turns: list[Turn], acts: list[QuestionAct]) -> dict[int, str]:
     if not manager_turns:
         return {t.index: OPEN for t in turns}
 
-    first_probe_turn = next(
-        (a.turn_index for a in acts if a.type in {"behavioural", "situational", "open_other"}),
-        None,
-    )
+    # Assessment starts at the first question of any type. Restricting this to
+    # open questions once left two real closed questions sitting in OPEN, which
+    # then escaped the talk-share measurement entirely.
+    first_probe_turn = acts[0].turn_index if acts else None
     invite_turn = _first_cue(manager_turns, INVITE_CUES)
     close_turn = _first_cue(manager_turns, CLOSE_CUES, after=invite_turn)
 

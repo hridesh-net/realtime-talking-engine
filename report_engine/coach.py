@@ -133,6 +133,15 @@ COACHING: dict[str, Coaching] = {
             "gives the exact replacement for each line."
         ),
     ),
+    "volunteered_detail_handling": Coaching(
+        strength="You let a volunteered personal detail go by without probing it.",
+        gap="A personal detail the candidate volunteered drew a follow-up question.",
+        alternative=(
+            "Acknowledge it in four words and return to the role. A warm, "
+            "well-meant follow-up on a protected topic is still a question on a "
+            "protected topic."
+        ),
+    ),
     "confirmatory_ratio": Coaching(
         strength="You tested your read rather than confirming it.",
         gap="Questions were shaped to confirm an impression already formed.",

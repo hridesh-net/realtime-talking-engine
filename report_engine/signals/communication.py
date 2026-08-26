@@ -55,7 +55,7 @@ def _base(signal_id: str, label: str, weight: float, basis: str) -> SignalResult
 
 
 def _talk_share(ctx: Context) -> SignalResult:
-    """Manager share of words during assessment."""
+    """Manager share of the assessment segment, by speaking time where the audio allows."""
     out = _base(
         "manager_talk_share",
         "Talk-to-listen ratio (assessment only)",
@@ -66,16 +66,35 @@ def _talk_share(ctx: Context) -> SignalResult:
         "CALIBRATION bands 20-40%, decaying to 65%",
     )
     assess = [t for t in ctx.turns if ctx.segments.get(t.index) == ASSESS]
-    manager = sum(len(words(t.text)) for t in assess if t.speaker == "manager")
-    candidate = sum(len(words(t.text)) for t in assess if t.speaker == "candidate")
+    if not assess:
+        out.reason = "no assessment segment was detected"
+        return out
+
+    # Speaking time when the recording gave us spans, word share otherwise.
+    # These are different measurements and the report must not blur them: a
+    # manager who speaks slowly uses more time than words, so word share alone
+    # overstates how much room the candidate was actually given.
+    spans = [
+        (t.speaker, t.end_ms - t.start_ms)
+        for t in assess
+        if t.start_ms is not None and t.end_ms is not None
+    ]
+    if spans and len(spans) == len(assess):
+        manager = sum(d for speaker, d in spans if speaker == "manager")
+        candidate = sum(d for speaker, d in spans if speaker == "candidate")
+        unit = "speaking time"
+    else:
+        manager = sum(len(words(t.text)) for t in assess if t.speaker == "manager")
+        candidate = sum(len(words(t.text)) for t in assess if t.speaker == "candidate")
+        unit = "words (no audio timings, so word share rather than time)"
+
     total = manager + candidate
     if total == 0:
-        out.reason = "no assessment segment was detected"
+        out.reason = "nobody spoke during the assessment segment"
         return out
 
     value = manager / total
     out.value = round(value, 3)
-    unit = "speaking time" if ctx.is_voice else "words (text session — word share, not time)"
     out.display = f"manager {value:.0%} / candidate {1 - value:.0%} of {unit}"
     out.sub_score = transfer.plateau(value, 0.20, 0.40, 0.65)
     return out

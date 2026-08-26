@@ -27,6 +27,8 @@ _ELICIT = compile_all(
         r"^\s*explain\b",
         r"^\s*give me (an example|a sense)\b",
         r"^\s*talk me through\b",
+        r"^\s*(can|could|would) you (tell|help|walk|explain|describe|give)\b",
+        r"^\s*help me understand\b",
     ]
 )
 
@@ -68,6 +70,20 @@ _SITUATIONAL = compile_all(
     ]
 )
 
+#: ASR routinely drops the question mark off spoken questions, so punctuation
+#: alone under-counts on any voice session. These recover the two shapes that
+#: are unambiguous without it: an auxiliary-fronted clause ("can you tell me"),
+#: and a wh-word followed closely by an auxiliary or pronoun ("how did you deal",
+#: "what all type of complaints"). Both were missed on a real recording before
+#: this existed, including a behavioural question, which moved the score.
+_UNPUNCTUATED_QUESTION = compile_all(
+    [
+        r"^\s*(do|did|does|are|is|was|were|have|has|had|can|could|will|would|should)\s+(you|your|we)\b",
+        r"\b(what|when|where|who|whom|why|how|which|whose)\b[^.?!]{0,40}?"
+        r"\b(do|did|does|are|is|was|were|have|has|had|can|could|will|would|should|you|your)\b",
+    ]
+)
+
 _PROBE_CUES = compile_all(
     [
         r"\byou (said|mentioned|told me)\b",
@@ -99,14 +115,20 @@ def _strip_filler_opener(text: str) -> str:
 
 
 def is_question(text: str) -> bool:
-    """Whether a sentence functions as a question or an elicitation."""
+    """Whether a sentence functions as a question or an elicitation.
+
+    Deliberately does not rely on the question mark: on a voice session the
+    punctuation is the transcriber's guess, not the speaker's.
+    """
     stripped = text.strip()
     if not stripped:
         return False
     if stripped.endswith("?"):
         return True
     core = _strip_filler_opener(stripped)
-    return any(p.search(core) for p in _ELICIT)
+    if any(p.search(core) for p in _ELICIT):
+        return True
+    return any(p.search(core) for p in _UNPUNCTUATED_QUESTION)
 
 
 def classify(text: str) -> str:
