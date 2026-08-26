@@ -7,8 +7,10 @@ import json
 import sqlite3
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from candidate_agent.schema import VirtualCandidate
+from control_plane.database import recordings_dir_from_env
 from control_plane.persona import generate_persona
 from control_plane.schemas import (
     REPORT_SECTIONS,
@@ -17,6 +19,7 @@ from control_plane.schemas import (
     InterviewConfigInput,
     InterviewCreateRequest,
     InterviewResponse,
+    RecordingMeta,
     SessionResponse,
     SessionSummary,
     Turn,
@@ -40,8 +43,11 @@ def _parse_ts(value: str) -> datetime:
 class InterviewRepository:
     """SQLite adapter implementing every storage port in `control_plane.ports`."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, recordings_dir: str | Path | None = None) -> None:
         self.conn = conn
+        self._recordings_dir = (
+            Path(recordings_dir) if recordings_dir else Path(recordings_dir_from_env())
+        )
 
     def create(self, req: InterviewCreateRequest) -> InterviewResponse:
         """Persist a new interview request (job spec)."""
@@ -374,6 +380,9 @@ class InterviewRepository:
             "SELECT * FROM session_turns WHERE session_id = ? ORDER BY idx ASC",
             (session_id,),
         ).fetchall()
+        recording_row = self.conn.execute(
+            "SELECT * FROM session_recordings WHERE session_id = ?", (session_id,)
+        ).fetchone()
         return SessionResponse(
             id=row["id"],
             interview_id=row["interview_id"],
@@ -396,6 +405,7 @@ class InterviewRepository:
                 )
                 for t in turns
             ],
+            recording=(self._row_to_recording_meta(recording_row) if recording_row else None),
         )
 
     def list_sessions(self, interview_id: str) -> builtins.list[SessionSummary]:
@@ -404,7 +414,10 @@ class InterviewRepository:
             """
             SELECT s.*,
                    COALESCE(v.name, '(deleted persona)') AS candidate_name,
-                   (SELECT COUNT(*) FROM session_turns t WHERE t.session_id = s.id) AS turn_count
+                   (SELECT COUNT(*) FROM session_turns t WHERE t.session_id = s.id) AS turn_count,
+                   EXISTS(
+                       SELECT 1 FROM session_recordings r WHERE r.session_id = s.id
+                   ) AS has_recording
             FROM sessions s
             LEFT JOIN virtual_candidates v ON v.candidate_id = s.candidate_id
             WHERE s.interview_id = ?
@@ -424,6 +437,7 @@ class InterviewRepository:
                 started_at=_parse_ts(r["started_at"]),
                 ended_at=(_parse_ts(r["ended_at"]) if r["ended_at"] else None),
                 turn_count=int(r["turn_count"]),
+                has_recording=bool(r["has_recording"]),
             )
             for r in rows
         ]
@@ -463,3 +477,113 @@ class InterviewRepository:
         if cur.rowcount == 0 and self.get_session(session_id) is None:
             return None
         return self.get_session(session_id)
+
+    # ------------------------------------------------------------------
+    # Session recordings
+    #
+    # Session existence and modality ('voice' vs 'text') are the handler's
+    # job, the same way `/transcript` checks them before calling `append_turn`
+    # -- these methods do not re-check them. What they do own, the way
+    # `append_turn` owns turn indexing, is chunk ordering and the finalize
+    # guard: `seq` must equal the recording's `next_seq`, and no chunk lands
+    # once `status = 'complete'`.
+    # ------------------------------------------------------------------
+
+    def _row_to_recording_meta(self, row: sqlite3.Row) -> RecordingMeta:
+        return RecordingMeta(
+            session_id=row["session_id"],
+            status=row["status"],
+            producer=row["producer"],
+            mime_type=row["mime_type"],
+            byte_size=row["byte_size"],
+            next_seq=row["next_seq"],
+            channel_layout=row["channel_layout"],
+            created_at=_parse_ts(row["created_at"]),
+            updated_at=_parse_ts(row["updated_at"]),
+        )
+
+    def append_recording_chunk(
+        self, session_id: str, seq: int, mime_type: str, data: bytes
+    ) -> RecordingMeta:
+        """Append one chunk, enforcing `seq == next_seq` and disk-then-row order.
+
+        Same single-writer race caveat as `append_turn`: two chunks appended to
+        one session at the same instant race on `next_seq` the same way two
+        turns race on `MAX(idx)` -- one write commits first, and the loser's
+        `seq` no longer matches what actually landed and raises. That is the
+        correct failure for a single browser tab uploading its own recording,
+        not a queue for multiple concurrent uploaders.
+        """
+        now = _utcnow()
+        with self.conn:
+            row = self.conn.execute(
+                "SELECT * FROM session_recordings WHERE session_id = ?", (session_id,)
+            ).fetchone()
+
+            if row is None:
+                if seq != 0:
+                    raise ValueError(f"expected seq 0 to start a new recording, got {seq}")
+                storage_key = f"{session_id}.webm"
+                self._recordings_dir.mkdir(parents=True, exist_ok=True)
+                with (self._recordings_dir / storage_key).open("wb") as f:
+                    f.write(data)
+                self.conn.execute(
+                    """
+                    INSERT INTO session_recordings (
+                        session_id, status, producer, mime_type, storage_key,
+                        byte_size, next_seq, created_at, updated_at
+                    ) VALUES (?, 'recording', 'browser', ?, ?, ?, 1, ?, ?)
+                    """,
+                    (session_id, mime_type, storage_key, len(data), now, now),
+                )
+            else:
+                if row["status"] == "complete":
+                    raise ValueError(f"recording for session {session_id} is already finalized")
+                if seq != row["next_seq"]:
+                    raise ValueError(f"expected seq {row['next_seq']}, got {seq}")
+                with (self._recordings_dir / row["storage_key"]).open("ab") as f:
+                    f.write(data)
+                self.conn.execute(
+                    """
+                    UPDATE session_recordings
+                    SET byte_size = byte_size + ?, next_seq = next_seq + 1, updated_at = ?
+                    WHERE session_id = ?
+                    """,
+                    (len(data), now, session_id),
+                )
+
+        meta = self.get_recording_meta(session_id)
+        if meta is None:  # pragma: no cover - the write above just succeeded
+            raise RuntimeError(f"recording for session {session_id} vanished after append")
+        return meta
+
+    def finalize_recording(self, session_id: str) -> RecordingMeta | None:
+        """Mark the recording complete. Idempotent; None when there is no recording."""
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE session_recordings SET status = 'complete', updated_at = ?
+                WHERE session_id = ? AND status = 'recording'
+                """,
+                (_utcnow(), session_id),
+            )
+        return self.get_recording_meta(session_id)
+
+    def get_recording_meta(self, session_id: str) -> RecordingMeta | None:
+        """Return the recording's metadata, or None when it does not exist."""
+        row = self.conn.execute(
+            "SELECT * FROM session_recordings WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return self._row_to_recording_meta(row)
+
+    def read_recording(self, session_id: str) -> tuple[RecordingMeta, bytes] | None:
+        """Return the recording's metadata and its bytes, or None."""
+        row = self.conn.execute(
+            "SELECT * FROM session_recordings WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if not row:
+            return None
+        data = (self._recordings_dir / row["storage_key"]).read_bytes()
+        return self._row_to_recording_meta(row), data

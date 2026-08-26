@@ -1,0 +1,26 @@
+[Unit]
+Description=interview-watcher Go engine (engined)
+Documentation=https://github.com/hridesh-net/interview-watcher
+After=network-online.target
+Wants=network-online.target
+# The engine writes in-flight session artifacts under SPOOL_DIR before
+# upload to S3 — it must not start before that path is actually mounted.
+RequiresMountsFor=${data_mount_path}
+
+[Service]
+Type=simple
+User=${service_user}
+Group=${service_user}
+EnvironmentFile=${env_file}
+WorkingDirectory=${app_dir}
+# -dev-sample-contract is var.engine_dev_sample_contract (default true) —
+# see its description in variables.tf: the control-plane ContractSource
+# doesn't exist yet, engined refuses to boot without this flag, and every
+# session gets the one checked-in sample persona until that lands.
+ExecStart=${app_dir}/engined -addr=:${engine_port}%{ if dev_sample_contract } -dev-sample-contract%{ endif }
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

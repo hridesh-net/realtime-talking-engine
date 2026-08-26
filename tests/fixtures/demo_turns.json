@@ -1,0 +1,53 @@
+{
+  "persona_key": "inflated_resume",
+  "session": {
+    "session_id": "demo-0001",
+    "manager_name": "Rahul Khandelwal",
+    "modality": "text",
+    "planned_minutes": 25,
+    "started_at": "2026-08-26T09:00:00+00:00",
+    "ended_at": "2026-08-26T09:23:40+00:00"
+  },
+  "job_card": {
+    "job_title": "Assistant Store Manager — Jaipur",
+    "summary": "Sell SIM and broadband plans at retail touchpoints. Handle walk-in customers, pitch and close upgrades. Daily targets, rotational shifts.",
+    "role_family": "sales",
+    "clarity_facts": [
+      {"key": "targets", "statement": "Daily target of 12 activations and 4 broadband upgrades per store day."},
+      {"key": "shifts", "statement": "Rotational shifts across a six-day week, including weekends."},
+      {"key": "location", "statement": "Based at the Vaishali Nagar store with cover across three Jaipur touchpoints."},
+      {"key": "comp_band", "statement": "Fixed band of 4.2 to 5.1 lakh plus a monthly incentive tied to activations."},
+      {"key": "next_steps", "statement": "A second round with the cluster head within a week."}
+    ]
+  },
+  "recording": null,
+  "turns": [
+    {"index": 0, "speaker": "manager", "text": "Good morning, thanks for making the time. I'm Rahul, I run the Jaipur cluster for Airtel retail.", "elapsed_ms": 0},
+    {"index": 1, "speaker": "candidate", "text": "Morning Rahul, pleasure to connect. I've been looking forward to this.", "elapsed_ms": 18000},
+    {"index": 2, "speaker": "manager", "text": "So tell me about yourself.", "elapsed_ms": 34000},
+    {"index": 3, "speaker": "candidate", "text": "Sure. I've spent the last four years driving go-to-market execution for telecom retail. At my current company we transformed the entire funnel, drove significant uplift in conversion, and built a high-performance culture across the region. I was central to that whole motion.", "elapsed_ms": 52000},
+    {"index": 4, "speaker": "manager", "text": "That sounds impressive. What would you say is your biggest strength?", "elapsed_ms": 88000},
+    {"index": 5, "speaker": "candidate", "text": "Ownership, definitely. We took a territory that was underperforming and turned it around through relentless focus on the fundamentals and a data-led approach to the whole customer journey.", "elapsed_ms": 104000},
+    {"index": 6, "speaker": "manager", "text": "You said you turned the territory around. What was your part in that, specifically?", "elapsed_ms": 138000},
+    {"index": 7, "speaker": "candidate", "text": "I was driving the strategic layer of it — aligning stakeholders, setting the cadence, making sure the frontline had what they needed to execute against the plan.", "elapsed_ms": 156000},
+    {"index": 8, "speaker": "manager", "text": "Right. And you're comfortable with daily targets, right?", "elapsed_ms": 196000},
+    {"index": 9, "speaker": "candidate", "text": "Absolutely, targets are just a scoreboard. I've always operated in high-accountability environments.", "elapsed_ms": 210000},
+    {"index": 10, "speaker": "manager", "text": "Tell me about a time a customer walked out and you got them back.", "elapsed_ms": 240000},
+    {"index": 11, "speaker": "candidate", "text": "There was a situation where a customer was dissatisfied with the value proposition. I engaged them, understood their pain points, and repositioned the offering in a way that landed. It was a good outcome for everyone.", "elapsed_ms": 258000},
+    {"index": 12, "speaker": "manager", "text": "Okay. And what was your current CTC, and what are you looking for?", "elapsed_ms": 300000},
+    {"index": 13, "speaker": "candidate", "text": "I'm at around 6.8 fixed at the moment. I'd be looking for a reasonable step up on that.", "elapsed_ms": 316000},
+    {"index": 14, "speaker": "manager", "text": "Got it. This role runs rotational shifts, six days, including weekends — will your family allow that kind of schedule?", "elapsed_ms": 352000},
+    {"index": 15, "speaker": "candidate", "text": "That won't be a problem at all.", "elapsed_ms": 372000},
+    {"index": 16, "speaker": "manager", "text": "Good. Let me tell you about the role. It's based at Vaishali Nagar and you'd cover three Jaipur touchpoints. The daily target is twelve activations and four broadband upgrades per store day, and honestly the first two months are hard — most people find the walk-in volume relentless and the attrition on this role is high. The fixed band is 4.2 to 5.1 lakh plus a monthly incentive tied to activations.", "elapsed_ms": 400000},
+    {"index": 17, "speaker": "candidate", "text": "Understood. I should mention I'm fairly deep in another process at the moment, so my timelines are a bit compressed.", "elapsed_ms": 452000},
+    {"index": 18, "speaker": "manager", "text": "Noted. Before we finish — what does a typical week look like for you today, and how do you handle a bad month?", "elapsed_ms": 480000},
+    {"index": 19, "speaker": "candidate", "text": "A typical week is a lot of stakeholder cadence and reviewing the numbers. On a bad month you just double down on the fundamentals and drive the activity metrics harder.", "elapsed_ms": 502000},
+    {"index": 20, "speaker": "manager", "text": "You mentioned uplift in conversion earlier. What was the number?", "elapsed_ms": 540000},
+    {"index": 21, "speaker": "candidate", "text": "It moved from roughly 9 percent to about 11 percent over the year. Not enormous in isolation, but as a result the region cleared its annual plan for the first time.", "elapsed_ms": 558000},
+    {"index": 22, "speaker": "manager", "text": "Any questions for me?", "elapsed_ms": 596000},
+    {"index": 23, "speaker": "candidate", "text": "Yes — how is the incentive actually calculated? And who would I report into day to day?", "elapsed_ms": 612000},
+    {"index": 24, "speaker": "manager", "text": "The incentive is monthly, tied to activations against your target, and it pays from the first activation over eighty percent attainment. You'd report to me directly.", "elapsed_ms": 634000},
+    {"index": 25, "speaker": "candidate", "text": "That's clear, thank you.", "elapsed_ms": 668000},
+    {"index": 26, "speaker": "manager", "text": "Great, thanks for your time. We'll be in touch.", "elapsed_ms": 690000}
+  ]
+}

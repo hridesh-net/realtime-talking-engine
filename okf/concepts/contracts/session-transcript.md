@@ -6,8 +6,10 @@ resource: /control_plane/schemas.py
 tags: [contract, session, transcript, turn, evaluation]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-22T17:05:00Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
 status: stable
@@ -52,11 +54,20 @@ class SessionResponse(BaseModel):
     ended_at: datetime | None
     opening_line: str
     turns: list[Turn]
+    recording: RecordingMeta | None      # None unless modality == "voice" and a chunk landed
 ```
 
 Exported to `owner_handover/session_create_schema.json`,
 `session_output_schema.json`, `session_realtime_schema.json`, and
 `session_transcript_append_schema.json`.
+
+`recording` is [`RecordingMeta`](/concepts/contracts/session-recording.md) —
+the session's audio artifact, when one exists. It rides on `SessionResponse`
+rather than needing a separate fetch because `GET /sessions/{id}` is already
+the "everything about this session" read. `SessionSummary` (the list-view
+sibling, [Storage ports](/concepts/contracts/storage-ports.md)) carries only
+`has_recording: bool` — shipping the full recording metadata to render a table
+row would be the same over-fetch `list_sessions` already avoids for `turns`.
 
 ## `manager`, not `interviewer`
 
@@ -120,6 +131,7 @@ idempotent and does not move `ended_at`.
 
 [REST API § Sessions](/concepts/contracts/rest-api.md) ·
 [Realtime voice](/concepts/contracts/realtime-voice.md) ·
+[Session recording](/concepts/contracts/session-recording.md) ·
 [Storage ports](/concepts/contracts/storage-ports.md) ·
 [Database schema](/concepts/contracts/database-schema.md) ·
 [Run an interview](/concepts/runbooks/run-an-interview.md)

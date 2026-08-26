@@ -30,6 +30,7 @@ from control_plane.schemas import (
     CandidateEnrollRequest,
     InterviewResponse,
     RealtimeCredentialResponse,
+    RecordingMeta,
     SessionCreateRequest,
     SessionResponse,
     SessionSummary,
@@ -97,6 +98,14 @@ EXPORTS = [
         TranscriptAppendRequest,
         "Body for POST /api/v1/sessions/{session_id}/transcript. Records a turn "
         "that was spoken elsewhere (a voice session) without generating a reply.",
+    ),
+    (
+        "session_recording_schema.json",
+        RecordingMeta,
+        "A session's audio artifact. Returned by the recording endpoints and "
+        "embedded in SessionResponse. Bytes are served separately by "
+        "GET /api/v1/sessions/{session_id}/recording; storage_key is "
+        "server-internal and deliberately not part of this shape.",
     ),
     (
         "expectation_output_schema.json",

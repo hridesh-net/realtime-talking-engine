@@ -299,6 +299,20 @@ class TurnRequest(BaseModel):
     text: str = Field(..., min_length=1)
 
 
+class RecordingMeta(BaseModel):
+    """The session's audio artifact. Bytes via GET /sessions/{id}/recording."""
+
+    session_id: str
+    status: str = Field(..., pattern="^(recording|complete)$")
+    producer: str = Field("browser", pattern="^(browser|engine)$")
+    mime_type: str
+    byte_size: int = Field(..., ge=0)
+    next_seq: int = Field(..., ge=0)
+    channel_layout: str = "manager_left_candidate_right"
+    created_at: datetime
+    updated_at: datetime
+
+
 class SessionResponse(BaseModel):
     """A live or finished interview session with its full transcript."""
 
@@ -318,6 +332,7 @@ class SessionResponse(BaseModel):
     ended_at: datetime | None = None
     opening_line: str
     turns: list[Turn] = Field(default_factory=list)
+    recording: RecordingMeta | None = None
 
 
 class SessionSummary(BaseModel):
@@ -338,6 +353,7 @@ class SessionSummary(BaseModel):
     started_at: datetime
     ended_at: datetime | None = None
     turn_count: int = Field(..., ge=0, description="Turns stored so far, both speakers.")
+    has_recording: bool = False
 
 
 class TranscriptAppendRequest(BaseModel):

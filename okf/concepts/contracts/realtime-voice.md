@@ -6,8 +6,10 @@ resource: /llm/base.py
 tags: [contract, voice, realtime, webrtc, openai, security]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-22T18:20:00Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T18:20:00Z"
 status: stable
@@ -40,10 +42,21 @@ class RealtimeBroker(ABC):
 
 ## The shape of the thing
 
-**The audio never touches this service.** The browser holds a WebRTC session
-with the vendor directly. Routing 24 kHz PCM through Python would add hundreds
-of milliseconds to a budget measured in hundreds of milliseconds, and a spoken
-interview that lags is not a spoken interview.
+**The live call never touches this service.** The browser holds a WebRTC
+session with the vendor directly. Routing 24 kHz PCM through Python would add
+hundreds of milliseconds to a budget measured in hundreds of milliseconds, and
+a spoken interview that lags is not a spoken interview. This is still exactly
+true of the real-time path — nothing here changed it.
+
+What did change: the browser now also **records** the call — both the
+manager's mic and the persona's remote track, merged to stereo — and uploads
+it to this service in 10-second chunks, *out of band* from the WebRTC media
+path and off the latency budget above. That upload is not part of the live
+call; it happens after each chunk is already captured, on its own queue, and a
+slow or failed upload never touches the conversation itself. See
+[Session recording](/concepts/contracts/session-recording.md) for the chunk
+protocol, the channel layout, and why the browser — not this service, not the
+Go engine — is the one holding the audio to record it from.
 
 ```
 browser ──── WebRTC audio ────► OpenAI Realtime
@@ -139,5 +152,6 @@ neutral schema — not before.
 
 [candidate_agent/voice.py](/concepts/modules/candidate-agent-voice.md) ·
 [Session transcript](/concepts/contracts/session-transcript.md) ·
+[Session recording](/concepts/contracts/session-recording.md) ·
 [Run an interview](/concepts/runbooks/run-an-interview.md) ·
 [Live-session engine](/concepts/subsystems/engine.md)

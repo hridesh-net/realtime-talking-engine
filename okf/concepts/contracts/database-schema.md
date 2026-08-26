@@ -6,8 +6,10 @@ resource: /control_plane/database.py
 tags: [contract, sqlite, storage, schema]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
   - by: kimi-code/okf-curator
@@ -95,6 +97,26 @@ same instant race on that `MAX(idx)`; the loser hits the primary-key constraint
 and raises. That is the correct failure for a single-manager interview, but it
 is not a queue — a multi-writer session would need one.
 
+## `session_recordings`
+`session_id` **PK**, FK → `sessions(id)` (CASCADE, unenforced like every other
+FK here), `status` CHECK `(recording,complete)` default `recording`, `producer`
+CHECK `(browser,engine)` default `browser`, `mime_type`, `storage_key`,
+`byte_size` default `0`, `next_seq` default `0`, `channel_layout` default
+`manager_left_candidate_right`, `created_at`, `updated_at`.
+
+`session_id` as the primary key, not a surrogate id, is the design: there is
+exactly one recording per session, ever, whoever produces it — see
+[Session recording](/concepts/contracts/session-recording.md) for the full
+chunk protocol, why `producer` exists, and why `storage_key` never reaches the
+`RecordingMeta` Pydantic model that clients see. The row is written by the
+browser today (`POST /sessions/{id}/recording/chunks`); no code path sets
+`producer='engine'` yet — that is the seam the Go engine's `Recorder`/
+`Finalizer` will use once it exists.
+
+Bytes are **not** in SQLite. `storage_key` (today, `"{session_id}.webm"`)
+names a file under `RECORDINGS_DIR` (default `recordings`, gitignored, see
+[Dev setup](/concepts/runbooks/dev-setup.md)).
+
 ## `ai_personas` (legacy)
 `candidate_id` PK, `interview_id` FK, `name`, `background`, `attributes` JSON,
 `fingerprint`, `created_at`. Written only at creation when `mode ==
@@ -117,4 +139,5 @@ that does not exist yet. Nothing writes to it.
 ## Related
 
 [repository.py](/concepts/modules/control-plane-repository.md) ·
-[Storage ports](/concepts/contracts/storage-ports.md)
+[Storage ports](/concepts/contracts/storage-ports.md) ·
+[Session recording](/concepts/contracts/session-recording.md)

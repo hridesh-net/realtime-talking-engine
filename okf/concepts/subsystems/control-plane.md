@@ -6,8 +6,10 @@ resource: /control_plane
 tags: [control-plane, fastapi, sqlite, api]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
   - by: kimi-code/okf-curator
@@ -32,7 +34,7 @@ storage. The only package allowed to import `sqlite3`.
 |---|---|
 | `main.py` | `build_app(db_path=None)` factory + `main()` uvicorn runner; `GET /healthz` |
 | `api.py` | [Routes and DI](/concepts/modules/control-plane-api.md) — the `/api/v1` router |
-| `ports.py` | [Four storage protocols + four compositions](/concepts/contracts/storage-ports.md) |
+| `ports.py` | [Five storage protocols + five compositions](/concepts/contracts/storage-ports.md) |
 | `repository.py` | [`InterviewRepository`](/concepts/modules/control-plane-repository.md) — the SQLite adapter |
 | `database.py` | [Schema and connection](/concepts/contracts/database-schema.md) |
 | `schemas.py` | [Interview record](/concepts/contracts/interview-record.md) + [session transcript](/concepts/contracts/session-transcript.md) models |
@@ -67,6 +69,10 @@ refuses to: the session record, the transcript, turn indexes, timestamps, and
 when a turn happens. The agent is handed a contract and a list of turns and
 returns a string. See [Session transcript](/concepts/contracts/session-transcript.md)
 and [Run an interview](/concepts/runbooks/run-an-interview.md).
+
+For a `voice` session it also owns the recorded audio artifact — chunk
+ordering, finalization, and where the bytes land on disk — uploaded by the
+browser, not generated here. See [Session recording](/concepts/contracts/session-recording.md).
 
 ## Legacy: `persona.py`
 

@@ -1,0 +1,46 @@
+{
+%{ if letsencrypt_email != "" ~}
+	email ${letsencrypt_email}
+%{ endif ~}
+}
+
+# TLS is mandatory here, not a nicety: the UI calls
+# navigator.mediaDevices.getUserMedia for voice sessions, and browsers only
+# allow microphone access from a secure context. Caddy auto-provisions and
+# renews a Let's Encrypt cert for this block the moment ${domain_name}
+# resolves to this instance's IP (see infra/README.md — until DNS points
+# here, this cert issuance fails and the site has no working TLS).
+${domain_name} {
+	encode gzip
+
+	@healthz path /healthz
+	handle @healthz {
+		reverse_proxy 127.0.0.1:${control_plane_port}
+	}
+
+	handle /api/* {
+		# Recording chunk uploads are POST bodies of ~10s of Opus audio
+		# (tens of KB). Caddy's reverse_proxy has no default body-size
+		# cap, but the limit is made explicit here rather than left
+		# implicit so a future Caddy default change can't silently
+		# start rejecting uploads.
+		request_body {
+			max_size 20MB
+		}
+		reverse_proxy 127.0.0.1:${control_plane_port}
+	}
+
+	# handle_path strips the /engine prefix before proxying, per the
+	# routing contract in the deployment design. Caddy's reverse_proxy
+	# transparently passes through the Upgrade/Connection headers, so
+	# the WebSocket at /engine/v1/media/ws works with no extra config.
+	handle_path /engine/* {
+		reverse_proxy 127.0.0.1:${engine_port}
+	}
+
+	handle {
+		root * ${ui_dist_dir}
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -1,0 +1,61 @@
+{
+  "description": "A session's audio artifact. Returned by the recording endpoints and embedded in SessionResponse. Bytes are served separately by GET /api/v1/sessions/{session_id}/recording; storage_key is server-internal and deliberately not part of this shape.",
+  "properties": {
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "status": {
+      "pattern": "^(recording|complete)$",
+      "title": "Status",
+      "type": "string"
+    },
+    "producer": {
+      "default": "browser",
+      "pattern": "^(browser|engine)$",
+      "title": "Producer",
+      "type": "string"
+    },
+    "mime_type": {
+      "title": "Mime Type",
+      "type": "string"
+    },
+    "byte_size": {
+      "minimum": 0,
+      "title": "Byte Size",
+      "type": "integer"
+    },
+    "next_seq": {
+      "minimum": 0,
+      "title": "Next Seq",
+      "type": "integer"
+    },
+    "channel_layout": {
+      "default": "manager_left_candidate_right",
+      "title": "Channel Layout",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "status",
+    "mime_type",
+    "byte_size",
+    "next_seq",
+    "created_at",
+    "updated_at"
+  ],
+  "title": "RecordingMeta",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

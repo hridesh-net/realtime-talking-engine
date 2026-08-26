@@ -95,3 +95,21 @@ export const appendTranscript = (sessionId, speaker, text) =>
     method: 'POST',
     body: JSON.stringify({ speaker, text }),
   })
+
+// --- Session recording -------------------------------------------------------
+
+// Raw bytes, not JSON — bypasses request()'s JSON header.
+export const appendRecordingChunk = async (sessionId, seq, blob) => {
+  const res = await fetch(`/api/v1/sessions/${sessionId}/recording/chunks?seq=${seq}`, {
+    method: 'POST',
+    body: blob,
+    headers: { 'Content-Type': blob.type || 'audio/webm' },
+  })
+  if (!res.ok) throw new Error(`recording chunk ${seq} rejected (${res.status})`)
+  return res.json()
+}
+
+export const finalizeRecording = (sessionId) =>
+  request(`/sessions/${sessionId}/recording/finalize`, { method: 'POST' })
+
+export const recordingUrl = (sessionId) => `/api/v1/sessions/${sessionId}/recording`

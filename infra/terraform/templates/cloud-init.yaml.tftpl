@@ -1,0 +1,84 @@
+#cloud-config
+# Provisions the interview-watcher host: creates the service users, mounts
+# the data volume, installs the runtime, pulls the build artifact from S3,
+# writes secrets-derived env files, and starts Caddy + the two app
+# services. The heavy lifting is in bootstrap.sh (templates/bootstrap.sh.tftpl)
+# rather than inline runcmd, so it's reviewable/testable as an ordinary
+# shell script. The systemd units and Caddyfile are written with
+# `encoding: b64` so their literal shell/systemd syntax never has to survive
+# being embedded in this YAML document.
+
+users:
+  - name: ${service_user}
+    system: true
+    shell: /usr/sbin/nologin
+    lock_passwd: true
+  - name: caddy
+    system: true
+    homedir: /var/lib/caddy
+    shell: /usr/sbin/nologin
+    lock_passwd: true
+
+package_update: true
+
+packages:
+  - python3.11
+  - python3.11-pip
+  - tar
+  - gzip
+
+write_files:
+  - path: /etc/systemd/system/caddy.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Caddy web server
+      Documentation=https://caddyserver.com/docs/
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=notify
+      User=caddy
+      Group=caddy
+      ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
+      ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --force
+      TimeoutStopSec=5s
+      LimitNOFILE=1048576
+      PrivateTmp=true
+      ProtectSystem=full
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/caddy/Caddyfile
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: ${caddyfile_b64}
+
+  - path: /etc/systemd/system/control-plane.service
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: ${control_plane_service_b64}
+
+  - path: /etc/systemd/system/engined.service
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: ${engined_service_b64}
+
+  - path: ${bootstrap_path}
+    owner: root:root
+    permissions: '0755'
+    encoding: b64
+    content: ${bootstrap_script_b64}
+
+runcmd:
+  - [ mkdir, -p, /etc/caddy ]
+  - [ mkdir, -p, /var/lib/caddy ]
+  - [ chown, -R, "caddy:caddy", /var/lib/caddy ]
+  - [ bash, ${bootstrap_path} ]

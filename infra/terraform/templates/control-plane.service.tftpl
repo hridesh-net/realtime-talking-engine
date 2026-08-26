@@ -1,0 +1,22 @@
+[Unit]
+Description=interview-watcher control plane (FastAPI/uvicorn)
+Documentation=https://github.com/hridesh-net/interview-watcher
+After=network-online.target
+Wants=network-online.target
+# Refuses to start until the data volume is actually mounted, so it never
+# writes CONTROL_PLANE_DB or RECORDINGS_DIR onto the root volume by accident.
+RequiresMountsFor=${data_mount_path}
+
+[Service]
+Type=simple
+User=${service_user}
+Group=${service_user}
+EnvironmentFile=${env_file}
+WorkingDirectory=${app_dir}
+ExecStart=${app_dir}/venv/bin/python -m control_plane.main
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

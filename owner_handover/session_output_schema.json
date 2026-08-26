@@ -1,5 +1,65 @@
 {
   "$defs": {
+    "RecordingMeta": {
+      "description": "The session's audio artifact. Bytes via GET /sessions/{id}/recording.",
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "status": {
+          "pattern": "^(recording|complete)$",
+          "title": "Status",
+          "type": "string"
+        },
+        "producer": {
+          "default": "browser",
+          "pattern": "^(browser|engine)$",
+          "title": "Producer",
+          "type": "string"
+        },
+        "mime_type": {
+          "title": "Mime Type",
+          "type": "string"
+        },
+        "byte_size": {
+          "minimum": 0,
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "next_seq": {
+          "minimum": 0,
+          "title": "Next Seq",
+          "type": "integer"
+        },
+        "channel_layout": {
+          "default": "manager_left_candidate_right",
+          "title": "Channel Layout",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "status",
+        "mime_type",
+        "byte_size",
+        "next_seq",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "RecordingMeta",
+      "type": "object"
+    },
     "Turn": {
       "description": "One line of the transcript.\n\n``at`` and ``elapsed_ms`` are stamped server-side, never by the client: they\nare the evaluation layer's time base, and a client clock would make two\nsessions incomparable.",
       "properties": {
@@ -107,6 +167,17 @@
       },
       "title": "Turns",
       "type": "array"
+    },
+    "recording": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecordingMeta"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

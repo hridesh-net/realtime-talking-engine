@@ -6,8 +6,10 @@ resource: /control_plane/api.py
 tags: [contract, api, fastapi, rest]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
   - by: kimi-code/okf-curator
@@ -116,9 +118,25 @@ The live text interview. See
 | `POST` | `/api/v1/sessions/{id}/realtime` | `TurnWorkflowStore` | **201** / 404 / 409 / 410 / **502** | Mints the browser's ephemeral credential. 502 when the *vendor* refuses — that is their answer, not a bug here. |
 | `POST` | `/api/v1/sessions/{id}/transcript` | `SessionStore` | **201** / 404 / 409 / 422 | Records a turn **without** generating a reply. `{speaker, text}`. |
 
-The audio never passes through this service — see
-[Realtime voice](/concepts/contracts/realtime-voice.md). Two consequences visible
-in the API:
+### Recording
+
+| Method | Path | Port used | Status | Notes |
+|---|---|---|---|---|
+| `POST` | `/api/v1/sessions/{id}/recording/chunks?seq=N` | `RecordingWorkflowStore` | **201** / 404 / 409 / 422 | Body: raw bytes. `seq` must equal the recording's `next_seq` → 409 otherwise. `seq=0` creates the row and its `Content-Type` becomes the stored `mime_type`. 409 on a non-`voice` session, or once the recording is `complete`. 422 on an empty body. |
+| `POST` | `/api/v1/sessions/{id}/recording/finalize` | `RecordingStore` | 200 / 404 | No body. Idempotent — a second call returns the same record, `updated_at` unmoved. 404 when there is no recording for the session. |
+| `GET` | `/api/v1/sessions/{id}/recording` | `RecordingStore` | 200 / 404 | Serves the audio bytes, `Content-Type` from the stored `mime_type`. Serves a **partial** recording too (`status='recording'`) — a crashed session's partial file is the honest artifact, not a 404. |
+
+Browser-produced, `voice` sessions only — see
+[Session recording](/concepts/contracts/session-recording.md) for the chunk
+protocol, the channel layout, and why the browser (not this service, not the
+Go engine) is the one recording. `SessionResponse.recording` carries the same
+[`RecordingMeta`](/concepts/contracts/session-recording.md) shape when one
+exists; `SessionSummary.has_recording` is a cheaper boolean for the list view.
+
+The live call never passes through this service — see
+[Realtime voice](/concepts/contracts/realtime-voice.md). (The recorded *copy*
+does, via the chunk endpoints above — out of band from the live call, off its
+latency path.) Two more consequences visible in the API:
 
 * **A voice session has no pre-written turn 0.** `POST /sessions` with `modality: "voice"` returns `turns: []`; the persona *speaks* its opening line and the browser reports it back through `/transcript` like any other turn. Writing it server-side too would duplicate turn 0 and shift every `elapsed_ms` the report reads.
 * **`/transcript` still stamps the clock here.** The browser knows when it *received* a transcript, which is not when it was said and is not comparable across two managers on two networks.
@@ -161,4 +179,5 @@ say — see [Evaluation agent](/concepts/subsystems/evaluation-agent.md).
 
 [Create an interview](/concepts/runbooks/create-an-interview.md) — worked
 end-to-end example · [Run an interview](/concepts/runbooks/run-an-interview.md) —
-the session loop · [api.py module card](/concepts/modules/control-plane-api.md)
+the session loop · [api.py module card](/concepts/modules/control-plane-api.md) ·
+[Session recording](/concepts/contracts/session-recording.md)

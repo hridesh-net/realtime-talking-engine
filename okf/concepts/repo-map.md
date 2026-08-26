@@ -6,8 +6,10 @@ resource: /
 tags: [navigation, index]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5
     at: "2026-08-23T18:00:00Z"
   - by: claude-opus-5/okf-curator
@@ -37,13 +39,19 @@ status: stable
 | `control_plane/api.py` | [control_plane/api.py](/concepts/modules/control-plane-api.md), [REST API](/concepts/contracts/rest-api.md) |
 | `control_plane/ports.py` | [Storage ports](/concepts/contracts/storage-ports.md) |
 | `control_plane/repository.py` | [control_plane/repository.py](/concepts/modules/control-plane-repository.md) |
-| `control_plane/database.py` | [Database schema](/concepts/contracts/database-schema.md) |
+| `control_plane/database.py` | [Database schema](/concepts/contracts/database-schema.md), [Session recording](/concepts/contracts/session-recording.md) — `session_recordings`, `RECORDINGS_DIR` |
 | `evaluation_agent/rubric.py` | [evaluation_agent/rubric.py](/concepts/modules/evaluation-agent-rubric.md) — the fixed manager rubric |
 | `evaluation_agent/role_facts.py`, `prompts.py`, `schema.py` | [evaluation_agent/role_facts.py](/concepts/modules/evaluation-agent-role-facts.md) — the fixed role-fact checklist and its drafting agent |
-| `control_plane/schemas.py` | [Interview record](/concepts/contracts/interview-record.md), [Session transcript](/concepts/contracts/session-transcript.md) |
+| `report_engine/score.py`, `transfer.py` | [Report engine](/concepts/subsystems/report-engine.md) — aggregation and the raw-to-score transfer functions |
+| `report_engine/acts.py`, `segment.py` | [Report engine](/concepts/subsystems/report-engine.md) — the question act and the four segments |
+| `report_engine/signals/` | [Report engine](/concepts/subsystems/report-engine.md) — one module per rubric criterion |
+| `report_engine/packs/` | [Report engine](/concepts/subsystems/report-engine.md) — dated jurisdiction and competency packs |
+| `report_engine/schema.py` | [Report engine](/concepts/subsystems/report-engine.md) — `SessionBundle` in, `AssessmentReport` out |
+| `scripts/make_bundle.py` | [Report engine](/concepts/subsystems/report-engine.md) — builds a bundle from the DB, a turn list, or the demo fixture |
+| `control_plane/schemas.py` | [Interview record](/concepts/contracts/interview-record.md), [Session transcript](/concepts/contracts/session-transcript.md), [Session recording](/concepts/contracts/session-recording.md) — `RecordingMeta` |
 | `control_plane/persona.py` | [Control plane subsystem § legacy persona](/concepts/subsystems/control-plane.md) |
 | `control_plane/main.py` | [Dev setup](/concepts/runbooks/dev-setup.md) |
-| `ui/src/SessionView.jsx`, `ui/src/VoiceSessionView.jsx` | [Test UI § conducting an interview](/concepts/subsystems/ui.md), [Run an interview](/concepts/runbooks/run-an-interview.md) |
+| `ui/src/SessionView.jsx`, `ui/src/VoiceSessionView.jsx` | [Test UI § conducting an interview](/concepts/subsystems/ui.md), [Run an interview](/concepts/runbooks/run-an-interview.md), [Session recording](/concepts/contracts/session-recording.md) — the browser-side capture and upload |
 | `ui/src/PersonaPicker.jsx` | [Test UI § the persona picker](/concepts/subsystems/ui.md), [archetypes.py](/concepts/modules/candidate-agent-archetypes.md) |
 | `ui/src/{Shell,InterviewList,Wizard,InterviewDetail}.jsx` | [Test UI](/concepts/subsystems/ui.md) |
 | `ui/src/index.css`, `interview_training_wizard (1).html` | [Test UI](/concepts/subsystems/ui.md) — the mockup is the design source of truth |
@@ -65,6 +73,7 @@ status: stable
 | `engine/internal/vendors/gemini/` | [Live-session engine](/concepts/subsystems/engine.md) — the Speaker, over the Gemini **Live** API. Read its live-verified facts before changing it |
 | `engine/internal/vendors/` (others) | [Live-session engine](/concepts/subsystems/engine.md) — reasoning adapters and TTS; only `cmd/engined` may import any of them |
 | `engine/internal/stall/` | [Live-session engine](/concepts/subsystems/engine.md) — pre-synthesized opening line and stall clips |
+| `engine/internal/ports/record.go`, `finalize.go` | [Session recording § the forward seam](/concepts/contracts/session-recording.md) — the `Recorder`/`Finalizer` ports the browser-side recording is designed to hand off to; `engine/internal/record/` and `engine/internal/store/s3/` are still `doc.go` stubs, nothing implements them yet |
 | `.golangci.yml` | [Live-session engine](/concepts/subsystems/engine.md), [Checks](/concepts/runbooks/checks.md) |
 | `pyproject.toml`, `.env.example` | [Conventions](/concepts/conventions.md), [Dev setup](/concepts/runbooks/dev-setup.md) |
 | `control_plane.db` | [Database schema](/concepts/contracts/database-schema.md) — gitignored |
@@ -88,3 +97,4 @@ status: stable
 | Anything inside `engine/` | [Live-session engine](/concepts/subsystems/engine.md) — then `go test ./internal/arch`, which enforces the layering |
 | A vendor's observed behaviour (Live API, TTS) | [Live-session engine](/concepts/subsystems/engine.md) — the live-verified facts section. Several of them removed planned work; do not re-derive them from docs |
 | Change any Pydantic model in the public surface | [Owner handover](/concepts/subsystems/owner-handover.md) — regenerate, or CI fails |
+| Anything about the recorded audio artifact, its chunk protocol, or consent/retention | [Session recording](/concepts/contracts/session-recording.md) first — several of its decisions (where bytes land, no auth on the GET, indefinite retention) are meant to be vetoed, not silently changed |

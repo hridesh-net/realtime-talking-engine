@@ -21,6 +21,7 @@ from candidate_agent.schema import VirtualCandidate
 from control_plane.schemas import (
     InterviewCreateRequest,
     InterviewResponse,
+    RecordingMeta,
     SessionResponse,
     SessionSummary,
     Turn,
@@ -125,6 +126,33 @@ class SessionStore(Protocol):
 
 
 @runtime_checkable
+class RecordingStore(Protocol):
+    """Persistence for a session's audio artifact.
+
+    Chunk ordering is enforced here, not by the caller -- same reason turn
+    indexes are.
+    """
+
+    def append_recording_chunk(
+        self, session_id: str, seq: int, mime_type: str, data: bytes
+    ) -> RecordingMeta:
+        """Append one chunk. `seq` must equal the recording's next expected seq."""
+        ...
+
+    def finalize_recording(self, session_id: str) -> RecordingMeta | None:
+        """Mark the recording complete. Idempotent; None when there is none."""
+        ...
+
+    def get_recording_meta(self, session_id: str) -> RecordingMeta | None:
+        """Return the recording's metadata, or None when it does not exist."""
+        ...
+
+    def read_recording(self, session_id: str) -> tuple[RecordingMeta, bytes] | None:
+        """Return the recording's metadata and its bytes, or None."""
+        ...
+
+
+@runtime_checkable
 class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol):
     """Composition for handlers that read an interview and write its expectation."""
 
@@ -154,3 +182,8 @@ class TurnWorkflowStore(CandidateStore, SessionStore, Protocol):
     Deliberately excludes :class:`InterviewStore` — the busiest endpoint in the
     system has no business depending on job-spec storage.
     """
+
+
+@runtime_checkable
+class RecordingWorkflowStore(SessionStore, RecordingStore, Protocol):
+    """For the chunk handler, which must check the session's modality first."""

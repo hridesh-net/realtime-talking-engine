@@ -6,8 +6,10 @@ resource: /scripts/check.sh
 tags: [runbook, ci, lint, tests]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5
     at: "2026-08-23T18:00:00Z"
   - by: claude-opus-5/okf-curator
@@ -37,6 +39,7 @@ non-zero if any failed, with a summary list.
 | `pytest tests/test_candidate_rubric.py` | Determinism, clamping, scorecard integrity, prompt byte-stability |
 | `pytest tests/test_session.py` | The live text session — contract-verbatim prompt, transcript ordering, session SQL, and the session endpoints under `TestClient`. Offline: a fake `ChatModel`, an in-memory database |
 | `pytest tests/test_voice.py` | The voice session — deterministic voice/speed/eagerness, prompt verbatimness, the never-leak-the-prompt guarantee, and the voice endpoints. Offline: a fake `RealtimeBroker` |
+| `pytest tests/test_recording.py` | [Session recording](/concepts/contracts/session-recording.md) — chunk ordering, finalize idempotency, the modality gate, and the recording endpoints. Offline: `recordings_dir=tmp_path`, no real audio |
 | gofmt / go vet / go build / `go test -race` / go architecture / golangci-lint | The [live-session engine](/concepts/subsystems/engine.md) in `engine/`. Every gate runs **from inside the module** — a repo-root `go vet ./...` finds no packages. Race detector always on |
 | `export_schemas.py --check` | `owner_handover/` matches the Pydantic models |
 | Live scenarios | Only with `--live` — Python model scenarios plus the engine's `//go:build live` vendor tests. The Go live tests read credentials through `internal/config`, not `os.Getenv`, because the layering gate allows only that package to read the environment — which also means they exercise the same configuration path production does |

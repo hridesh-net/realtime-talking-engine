@@ -13,5 +13,6 @@ handoff to the Go engine. Read the page before editing the file, and regenerate
 * [ChatModel](/concepts/contracts/chat-model.md) - the sibling port for free-text conversation turns.
 * [Realtime voice](/concepts/contracts/realtime-voice.md) - the broker port, the ephemeral credential, and the browser-to-vendor media path.
 * [Session transcript](/concepts/contracts/session-transcript.md) - a live interview and its server-stamped turns.
-* [Storage ports](/concepts/contracts/storage-ports.md) - the four narrow persistence protocols.
+* [Session recording](/concepts/contracts/session-recording.md) - the browser-captured audio artifact for voice sessions, and the seam to the engine's future recorder.
+* [Storage ports](/concepts/contracts/storage-ports.md) - the five narrow persistence protocols.
 * [Database schema](/concepts/contracts/database-schema.md) - SQLite tables, constraints, indexes.

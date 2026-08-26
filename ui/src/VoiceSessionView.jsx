@@ -1,9 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { appendTranscript, endSession, mintRealtimeCredential } from './api'
+import {
+  appendRecordingChunk,
+  appendTranscript,
+  endSession,
+  finalizeRecording,
+  mintRealtimeCredential,
+  recordingUrl,
+} from './api'
+
+// audio/webm;codecs=opus is what we ask MediaRecorder for below — checked once
+// so the connecting/live copy and the finish()/unmount teardown can all agree
+// on whether a recording is actually happening.
+const RECORDING_SUPPORTED =
+  typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
 
 const fmt = (ms) => {
   const total = Math.max(0, Math.floor(ms / 1000))
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Transient network blips are the common case and are recoverable — retry a
+// few times with a short backoff before treating a chunk as truly failed.
+const postChunkWithRetry = async (sessionId, seq, blob, attempts = 3) => {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await appendRecordingChunk(sessionId, seq, blob)
+    } catch (e) {
+      if (attempt === attempts) throw e
+      await sleep(300 * attempt)
+    }
+  }
+  return undefined
 }
 
 /**
@@ -26,6 +55,7 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
   const [muted, setMuted] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [voice, setVoice] = useState('')
+  const [recordingReady, setRecordingReady] = useState(false)
 
   const pcRef = useRef(null)
   const micRef = useRef(null)
@@ -36,6 +66,21 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
   // out of order and mis-sequence the stored conversation.
   const queueRef = useRef(Promise.resolve())
   const startedAtRef = useRef(Date.now())
+
+  // Stereo capture: the manager's mic feeds the left channel, the persona's
+  // vendor audio feeds the right, mixed together by a ChannelMerger into a
+  // single MediaStream that MediaRecorder chunks and uploads. Same reasoning
+  // as queueRef above: chunk POSTs are chained on their own dedicated queue
+  // (chunkQueueRef) since the server enforces strict seq ordering.
+  const audioCtxRef = useRef(null)
+  const mergerRef = useRef(null)
+  const recorderRef = useRef(null)
+  const chunkQueueRef = useRef(Promise.resolve())
+  const chunkSeqRef = useRef(0)
+  // Set once a chunk fails all its retries — the client's seq must never
+  // drift ahead of the server's, so once this trips we stop posting (and
+  // stop the recorder) rather than 409 on every chunk for the rest of the call.
+  const recordingGaveUpRef = useRef(false)
 
   const record = useCallback(
     (speaker, text) => {
@@ -68,11 +113,33 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
         }
         micRef.current = mic
 
+        // Left = manager mic, right = persona — filled in once the vendor's
+        // track arrives in pc.ontrack below. A muted mic needs no special
+        // handling here: a disabled track renders silence into Web Audio, so
+        // the recording honestly captures the muted state.
+        let dest
+        if (RECORDING_SUPPORTED) {
+          const ctx = new AudioContext()
+          const merger = ctx.createChannelMerger(2)
+          dest = ctx.createMediaStreamDestination()
+          ctx.createMediaStreamSource(mic).connect(merger, 0, 0)
+          merger.connect(dest)
+          audioCtxRef.current = ctx
+          mergerRef.current = merger
+        }
+
         pc = new RTCPeerConnection()
         pcRef.current = pc
 
         pc.ontrack = (e) => {
           if (audioRef.current) audioRef.current.srcObject = e.streams[0]
+          // Chrome quirk: a remote WebRTC MediaStream only keeps producing
+          // samples for Web Audio while it is *also* attached to a playing
+          // media element — the srcObject assignment above already satisfies
+          // that, so this tap keeps the persona's audio flowing to channel 1.
+          if (mergerRef.current) {
+            audioCtxRef.current.createMediaStreamSource(e.streams[0]).connect(mergerRef.current, 0, 1)
+          }
         }
         pc.addTrack(mic.getTracks()[0], mic)
 
@@ -130,6 +197,38 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
         if (cancelled) return
         startedAtRef.current = Date.now()
         setPhase('live')
+
+        if (RECORDING_SUPPORTED && dest) {
+          const recorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' })
+          recorder.ondataavailable = (e) => {
+            if (!e.data || e.data.size === 0 || recordingGaveUpRef.current) return
+            chunkQueueRef.current = chunkQueueRef.current.then(async () => {
+              if (recordingGaveUpRef.current) return
+              // Read the seq here rather than when the chunk fired: a slow or
+              // retrying POST can still be in flight when the next chunk
+              // arrives, and both would otherwise claim the same seq. It only
+              // advances on confirmed success, so the client's notion of
+              // "next seq" can never drift ahead of the server's.
+              const seq = chunkSeqRef.current
+              try {
+                await postChunkWithRetry(session.id, seq, e.data)
+                chunkSeqRef.current = seq + 1
+              } catch {
+                // Give up once, quietly from here on — what already landed is
+                // a valid, playable partial recording. Stop the recorder so
+                // it stops trying to post into a stream the server will now
+                // refuse, and surface a single, non-repeating notice.
+                recordingGaveUpRef.current = true
+                setError('recording stopped early — the part before the failure was saved')
+                if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+                  recorderRef.current.stop()
+                }
+              }
+            })
+          }
+          recorderRef.current = recorder
+          recorder.start(10000) // 10s chunks
+        }
       } catch (e) {
         if (!cancelled) {
           setError(e.message)
@@ -143,6 +242,12 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
       cancelled = true
       pc?.close()
       micRef.current?.getTracks().forEach((t) => t.stop())
+      // Same teardown as finish(), but fire-and-forget: the component is
+      // unmounting so there is nowhere left to report a failure to.
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        recorderRef.current.stop()
+      }
+      closeAudioCtx()
     }
   }, [session.id, record])
 
@@ -163,10 +268,48 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
     setMuted(!track.enabled)
   }
 
+  // Idempotent: finish() and the unmount cleanup can both reach here (e.g.
+  // the user hits "Back" right after ending), and closing an already-closed
+  // AudioContext throws.
+  const closeAudioCtx = () => {
+    const ctx = audioCtxRef.current
+    audioCtxRef.current = null
+    if (ctx && ctx.state !== 'closed') ctx.close()
+  }
+
+  // Stop the recorder, wait for its final chunk to land, then finalize. Runs
+  // alongside — never gating — the transcript drain below: a lost recording
+  // must not cost the transcript.
+  const stopRecording = () =>
+    new Promise((resolve, reject) => {
+      const recorder = recorderRef.current
+      if (!recorder || recorder.state === 'inactive') {
+        resolve()
+        return
+      }
+      recorder.onerror = (e) => reject(e.error || new Error('recorder error'))
+      recorder.onstop = () => {
+        // MediaRecorder fires a final `dataavailable` (which queues onto
+        // chunkQueueRef) before `stop` — so waiting on the queue here also
+        // waits for that last chunk's POST to finish.
+        chunkQueueRef.current.then(resolve, reject)
+      }
+      recorder.stop()
+    })
+
   const finish = async () => {
     pcRef.current?.close()
     micRef.current?.getTracks().forEach((t) => t.stop())
     setPhase('ended')
+
+    if (recorderRef.current) {
+      stopRecording()
+        .then(() => finalizeRecording(session.id))
+        .then((meta) => meta && setRecordingReady(true))
+        .catch((e) => setError(`recording not fully saved: ${e.message}`))
+        .finally(closeAudioCtx)
+    }
+
     try {
       // Let any in-flight transcript land before the session closes — a turn
       // posted after `end` would 409 and vanish from the record.
@@ -250,7 +393,10 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
         </span>
         <span>
           {phase === 'connecting' &&
-            'Requesting the microphone and opening the call. Chrome will ask for permission.'}
+            'Requesting the microphone and opening the call. Chrome will ask for permission.' +
+              (RECORDING_SUPPORTED
+                ? ' This call is recorded and stored on the control plane.'
+                : '')}
           {phase === 'live' &&
             (muted
               ? 'The persona cannot hear you.'
@@ -259,6 +405,22 @@ export default function VoiceSessionView({ session, personaLabel, onExit }) {
           {phase === 'error' && 'Could not start the call.'}
         </span>
       </div>
+
+      {!RECORDING_SUPPORTED && (phase === 'connecting' || phase === 'live') && (
+        <div className="tip" style={{ marginTop: 10 }}>
+          This browser can't record this call (no MediaRecorder support for audio/webm;codecs=opus)
+          — the interview will proceed without a saved recording.
+        </div>
+      )}
+
+      {phase === 'ended' && (recordingReady || session.recording) && (
+        <div className="row" style={{ marginTop: 10, gap: 12 }}>
+          <audio controls src={recordingUrl(session.id)} />
+          <a href={recordingUrl(session.id)} download>
+            Download recording
+          </a>
+        </div>
+      )}
 
       <div className="chat">
         {bubbles.length === 0 && phase === 'live' && (

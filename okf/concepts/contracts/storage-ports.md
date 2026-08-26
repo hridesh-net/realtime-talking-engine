@@ -1,13 +1,15 @@
 ---
 type: Contract
 title: Storage ports
-description: Four narrow persistence protocols and four compositions, depended on instead of the SQLite adapter.
+description: Five narrow persistence protocols and five compositions, depended on instead of the SQLite adapter.
 resource: /control_plane/ports.py
 tags: [contract, ports, isp, dip, protocol]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
 status: stable
@@ -49,10 +51,18 @@ class SessionStore(Protocol):
     def end_session(self, session_id: str, status: str = "completed") -> SessionResponse | None
     def list_sessions(self, interview_id: str) -> list[SessionSummary]
 
+class RecordingStore(Protocol):
+    def append_recording_chunk(self, session_id: str, seq: int, mime_type: str,
+                               data: bytes) -> RecordingMeta
+    def finalize_recording(self, session_id: str) -> RecordingMeta | None
+    def get_recording_meta(self, session_id: str) -> RecordingMeta | None
+    def read_recording(self, session_id: str) -> tuple[RecordingMeta, bytes] | None
+
 class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol): ...
 class EnrollmentStore(InterviewStore, ExpectationStore, CandidateStore, Protocol): ...
 class SessionWorkflowStore(InterviewStore, CandidateStore, SessionStore, Protocol): ...
 class TurnWorkflowStore(CandidateStore, SessionStore, Protocol): ...
+class RecordingWorkflowStore(SessionStore, RecordingStore, Protocol): ...
 ```
 
 ## Why `SessionStore` assigns the turn index and the clock
@@ -79,6 +89,17 @@ payload.
 does more than label the row — `create_session` writes turn 0 only for text
 sessions. See [Session transcript](/concepts/contracts/session-transcript.md).
 
+## `RecordingStore` — the same ordering discipline as `SessionStore`
+
+`append_recording_chunk` takes `seq` from the caller but enforces it against
+the recording's own `next_seq`, the same shape as `append_turn`'s server-owned
+index: the caller proposes, the adapter is the one place that can be trusted
+not to reorder or duplicate. `RecordingWorkflowStore` composes `SessionStore`
+in, not `InterviewStore` — the chunk handler needs the session (to check
+`modality` before accepting bytes for a text session), never the interview.
+See [Session recording](/concepts/contracts/session-recording.md) for the full
+chunk protocol.
+
 ## Which route uses which
 
 | Route | Port | Why |
@@ -94,6 +115,8 @@ sessions. See [Session transcript](/concepts/contracts/session-transcript.md).
 | `POST /sessions/{id}/realtime` | `TurnWorkflowStore` | reads the persona's contract to compile the voice session |
 | `POST /sessions/{id}/transcript` | `SessionStore` | writes a turn; generates nothing |
 | `GET /interviews/{id}/sessions` | `SessionStore` | lists sessions; despite the path it never touches interview storage |
+| `POST /sessions/{id}/recording/chunks` | `RecordingWorkflowStore` | checks the session's `modality`, then appends a chunk |
+| `POST /sessions/{id}/recording/finalize`, `GET /sessions/{id}/recording` | `RecordingStore` | recording only — no session check, the recording either exists or does not |
 
 Depending on the narrowest port is the ISP discipline, and it is tested: ports
 must stay small and **non-overlapping** (no shared method names), and the SQLite

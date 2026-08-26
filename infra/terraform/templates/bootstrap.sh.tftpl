@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Rendered by Terraform (templates/bootstrap.sh.tftpl) and run once at first
+# boot via cloud-init's runcmd. Idempotent where it matters (format check,
+# fstab entry, mount) because "once" isn't guaranteed across an AMI change
+# or a manual re-run during debugging.
+set -euo pipefail
+
+APP_DIR="${app_dir}"
+DATA_MOUNT="${data_mount_path}"
+ENV_DIR="${env_dir}"
+SERVICE_USER="${service_user}"
+AWS_REGION="${aws_region}"
+S3_BUCKET="${s3_bucket}"
+ARTIFACT_KEY="${artifact_key}"
+SSM_PREFIX="${ssm_param_prefix}"
+
+echo "bootstrap: locating data volume"
+DEVICE=""
+for candidate in /dev/nvme1n1 /dev/xvdf /dev/sdf; do
+  if [ -e "$${candidate}" ]; then
+    DEVICE="$${candidate}"
+    break
+  fi
+done
+if [ -z "$${DEVICE}" ]; then
+  # Loud and fatal on purpose: booting past this would mean the control
+  # plane silently writes its SQLite DB and recordings onto the root
+  # volume instead of the durable data volume.
+  echo "bootstrap: FATAL - no data volume device found (checked nvme1n1, xvdf, sdf)" >&2
+  exit 1
+fi
+echo "bootstrap: using device $${DEVICE}"
+
+# Format only if the device has no filesystem yet. Never blindly mkfs — on
+# an instance replacement the same EBS volume (protected by
+# prevent_destroy in storage.tf) reattaches here already formatted and full
+# of interview data.
+if ! blkid "$${DEVICE}" >/dev/null 2>&1; then
+  echo "bootstrap: $${DEVICE} is unformatted, creating ext4"
+  mkfs.ext4 -F "$${DEVICE}"
+else
+  echo "bootstrap: $${DEVICE} already has a filesystem, leaving it alone"
+fi
+
+mkdir -p "$${DATA_MOUNT}"
+VOL_UUID=$(blkid -s UUID -o value "$${DEVICE}")
+if ! grep -q "$${VOL_UUID}" /etc/fstab; then
+  # nofail: a data-volume hiccup at boot must not drop the instance to an
+  # emergency shell and take the whole host offline with it.
+  echo "UUID=$${VOL_UUID} $${DATA_MOUNT} ext4 defaults,nofail 0 2" >>/etc/fstab
+fi
+mountpoint -q "$${DATA_MOUNT}" || mount "$${DATA_MOUNT}"
+
+mkdir -p "$${DATA_MOUNT}/db" "$${DATA_MOUNT}/recordings" "$${DATA_MOUNT}/spool"
+chown -R "$${SERVICE_USER}:$${SERVICE_USER}" "$${DATA_MOUNT}"
+
+CADDY_VERSION="2.8.4"
+echo "bootstrap: installing Caddy $${CADDY_VERSION}"
+if ! command -v caddy >/dev/null 2>&1; then
+  # AL2023's package repos don't carry Caddy, so this pulls the official
+  # pinned static binary release rather than a third-party dnf/copr repo of
+  # uncertain AL2023 compatibility.
+  ARCH=$(uname -m)
+  case "$${ARCH}" in
+    aarch64) CADDY_ARCH=arm64 ;;
+    x86_64) CADDY_ARCH=amd64 ;;
+    *)
+      echo "bootstrap: FATAL - unsupported architecture $${ARCH}" >&2
+      exit 1
+      ;;
+  esac
+  curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v$${CADDY_VERSION}/caddy_$${CADDY_VERSION}_linux_$${CADDY_ARCH}.tar.gz" -o /tmp/caddy.tar.gz
+  tar -xzf /tmp/caddy.tar.gz -C /usr/local/bin caddy
+  chmod +x /usr/local/bin/caddy
+  rm -f /tmp/caddy.tar.gz
+fi
+
+echo "bootstrap: ensuring AWS CLI is present"
+# The standard AL2023 AMI ships the CLI pre-installed; this is a defensive
+# fallback (via pip, since it needs no extra repo) for a minimal base image
+# where it isn't, so this script never assumes a fact it hasn't checked.
+if ! command -v aws >/dev/null 2>&1; then
+  python3.11 -m pip install awscli
+fi
+
+echo "bootstrap: fetching deploy artifact from s3://$${S3_BUCKET}/$${ARTIFACT_KEY}"
+mkdir -p "$${APP_DIR}"
+aws s3 cp "s3://$${S3_BUCKET}/$${ARTIFACT_KEY}" /tmp/artifact.tar.gz --region "$${AWS_REGION}"
+tar -xzf /tmp/artifact.tar.gz -C "$${APP_DIR}"
+rm -f /tmp/artifact.tar.gz
+chmod +x "$${APP_DIR}/engined"
+
+echo "bootstrap: creating venv and installing Python deps"
+python3.11 -m venv "$${APP_DIR}/venv"
+"$${APP_DIR}/venv/bin/pip" install --upgrade pip
+"$${APP_DIR}/venv/bin/pip" install -r "$${APP_DIR}/requirements.txt"
+
+chown -R "$${SERVICE_USER}:$${SERVICE_USER}" "$${APP_DIR}"
+
+echo "bootstrap: reading secrets from SSM"
+GEMINI_API_KEY=$(aws ssm get-parameter --with-decryption --region "$${AWS_REGION}" --name "$${SSM_PREFIX}/GEMINI_API_KEY" --query 'Parameter.Value' --output text)
+OPENAI_API_KEY=$(aws ssm get-parameter --with-decryption --region "$${AWS_REGION}" --name "$${SSM_PREFIX}/OPENAI_API_KEY" --query 'Parameter.Value' --output text)
+CONTROL_PLANE_SHARED_SECRET=$(aws ssm get-parameter --with-decryption --region "$${AWS_REGION}" --name "$${SSM_PREFIX}/CONTROL_PLANE_SHARED_SECRET" --query 'Parameter.Value' --output text)
+
+echo "bootstrap: writing env files"
+mkdir -p "$${ENV_DIR}"
+# Restrict the umask *before* the heredocs run. chmod after the fact
+# would leave these files world-readable for the moment between
+# creation and the chmod, and they hold vendor API keys.
+OLD_UMASK=$(umask)
+umask 077
+
+cat >"$${ENV_DIR}/control-plane.env" <<EOF
+GEMINI_API_KEY=$${GEMINI_API_KEY}
+OPENAI_API_KEY=$${OPENAI_API_KEY}
+CONTROL_PLANE_DB=$${DATA_MOUNT}/db/control_plane.db
+CONTROL_PLANE_PORT=${control_plane_port}
+RECORDINGS_DIR=$${DATA_MOUNT}/recordings
+EOF
+
+cat >"$${ENV_DIR}/engined.env" <<EOF
+GEMINI_API_KEY=$${GEMINI_API_KEY}
+OPENAI_API_KEY=$${OPENAI_API_KEY}
+SPEAKER_MODEL_ID=${speaker_model_id}
+THINKER_MODEL_ID=${thinker_model_id}
+JUDGE_MODEL_ID=${judge_model_id}
+TTS_MODEL_ID=${tts_model_id}
+ASR_MODEL_ID=${asr_model_id}
+SPEAKER_VENDOR=${speaker_vendor}
+S3_BUCKET=$${S3_BUCKET}
+S3_REGION=$${AWS_REGION}
+S3_PREFIX=bundles/
+CONTROL_PLANE_BASE_URL=http://127.0.0.1:${control_plane_port}
+CONTROL_PLANE_SHARED_SECRET=$${CONTROL_PLANE_SHARED_SECRET}
+SPOOL_DIR=$${DATA_MOUNT}/spool
+EOF
+
+umask "$${OLD_UMASK}"
+chmod 0600 "$${ENV_DIR}/control-plane.env" "$${ENV_DIR}/engined.env"
+chown "$${SERVICE_USER}:$${SERVICE_USER}" "$${ENV_DIR}/control-plane.env" "$${ENV_DIR}/engined.env"
+
+echo "bootstrap: enabling services"
+systemctl daemon-reload
+systemctl enable --now caddy
+systemctl enable --now control-plane.service
+systemctl enable --now engined.service
+
+echo "bootstrap: done"

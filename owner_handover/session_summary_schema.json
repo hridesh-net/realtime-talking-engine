@@ -55,6 +55,11 @@
       "minimum": 0,
       "title": "Turn Count",
       "type": "integer"
+    },
+    "has_recording": {
+      "default": false,
+      "title": "Has Recording",
+      "type": "boolean"
     }
   },
   "required": [

@@ -6,8 +6,10 @@ resource: /control_plane/api.py
 tags: [api, fastapi, routes, di]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
   - by: kimi-code/okf-curator
@@ -18,7 +20,7 @@ sources:
 ---
 # control_plane/api.py
 
-544 lines. Endpoint reference lives in [REST API](/concepts/contracts/rest-api.md);
+700 lines. Endpoint reference lives in [REST API](/concepts/contracts/rest-api.md);
 this card is about the code.
 
 # Schema
@@ -39,7 +41,8 @@ Handlers, in order: `create_interview`, `get_interview`, `list_interviews`,
 `list_archetypes`, `list_trait_dimensions`, `enroll_candidates`,
 `list_candidates`, `get_candidate`, `get_engine_contract`, `get_scorecard`,
 `delete_candidate`, `start_session`, `take_turn`, `end_session`, `get_session`,
-`voice_capability`, `mint_realtime_credential`, `append_transcript_turn`.
+`voice_capability`, `mint_realtime_credential`, `append_transcript_turn`,
+`append_recording_chunk`, `finalize_recording`, `get_recording`.
 
 One module-level helper backs `enroll_candidates`'s `custom_personas` path:
 
@@ -148,11 +151,38 @@ DIP scan stays quiet.
 A `ModelError` from the broker becomes **502**, not 500 — the vendor refused, and
 saying so lets the UI show something truthful.
 
+## `append_recording_chunk` — the one guard the adapter cannot own
+
+```python
+session = repo.get_session(session_id)               # 404
+if session.modality != "voice": ... 409               # handler-owned, not the adapter's
+data = await request.body()
+if not data: ... 422
+mime_type = request.headers.get("content-type", "application/octet-stream")
+try:
+    return repo.append_recording_chunk(session_id, seq, mime_type, data)
+except ValueError as exc:
+    raise HTTPException(409, str(exc)) from exc         # wrong seq, or already finalized
+```
+
+The modality check lives here, not in `InterviewRepository.append_recording_chunk` —
+same split as `take_turn` checking `session.status` before calling `append_turn`.
+`request: Request` and `await request.body()` read the body as raw bytes rather
+than through a Pydantic model, since this is audio, not JSON; `Content-Type` on
+the request becomes the recording's stored `mime_type`, read once, on `seq=0`.
+
+`finalize_recording` and `get_recording` take the narrower `RecordingStore` —
+neither needs the session, only the recording, which either exists or does
+not. `get_recording` returns a raw `Response` (not a Pydantic model) so it can
+set `media_type` from the stored `mime_type` rather than being forced to JSON.
+See [Session recording](/concepts/contracts/session-recording.md) for the full
+chunk protocol.
+
 ## Gotchas
 
 * `get_repo()` calls `init_db()` per request, opening a new SQLite connection and re-running the whole schema. The source flags it as needing a pool.
 * `req: CandidateEnrollRequest | None = None` then `req = req or CandidateEnrollRequest()` — a body-less POST is valid and enrolls the defaults.
 * Route order matters for the FastAPI matcher: `/candidates/{cid}` sits under the router alongside `/interviews/{id}/candidates`; they do not collide, but adding `/candidates/search` would need to precede `/candidates/{cid}`.
 * `B008` is ignored for this file — `Depends()` in a default is the framework's calling convention.
-* `tests/test_session.py` and `tests/test_voice.py` cover the session and voice handlers (201/404/409/410/422/502 and the full round trips) with `TestClient` and `Depends` overrides. The interview, expectation, and enrollment handlers still have no test.
+* `tests/test_session.py` and `tests/test_voice.py` cover the session and voice handlers (201/404/409/410/422/502 and the full round trips) with `TestClient` and `Depends` overrides. `tests/test_recording.py` covers the recording handlers the same way, plus the adapter directly against `:memory:` with `recordings_dir=tmp_path`. The interview, expectation, and enrollment handlers still have no test.
 * `voice_capability` is the one route that answers rather than fails when misconfigured. Resist making it 503: the UI's question is "should I show the button", and an exception is a worse answer than `false`.

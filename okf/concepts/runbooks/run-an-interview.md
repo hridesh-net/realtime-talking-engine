@@ -6,8 +6,10 @@ resource: /control_plane/api.py
 tags: [runbook, session, interview, ui, curl]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-22T17:05:00Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
 status: stable
@@ -46,6 +48,14 @@ call.
 
 Either way, **End interview** closes the session and leaves the stored transcript
 on screen; **Back** returns to the console.
+
+**Playback (voice only)** — once a **🎙 Voice** session ends, an `<audio
+controls>` player and a **Download recording** link appear under the transcript.
+The browser recorded the call, stereo (manager left, persona right), and
+uploaded it here in the background while the call was live; see [Session
+recording](/concepts/contracts/session-recording.md). If the browser crashed
+or the tab was closed mid-call, the same player still works — it serves
+whatever was uploaded before the failure, not a 404.
 
 Two ports, one prerequisite: Vite proxies `/api` to `127.0.0.1:8081`, so a
 `Failed to fetch` in the UI almost always means the API is not running.
@@ -90,6 +100,26 @@ curl -s -X POST localhost:8081/api/v1/sessions/$SID/realtime | jq 'del(.client_s
 A voice session starts with `turns: []` — the persona *says* its opening line and
 the browser reports it back through `POST /sessions/{id}/transcript`.
 
+### Recording, by curl
+
+You cannot capture real audio from a shell, but the chunk protocol is plain
+bytes, so a synthetic upload exercises the whole path:
+
+```bash
+curl -s -X POST "localhost:8081/api/v1/sessions/$SID/recording/chunks?seq=0" \
+  -H 'Content-Type: audio/webm;codecs=opus' --data-binary @chunk0.webm | jq
+
+curl -s -X POST localhost:8081/api/v1/sessions/$SID/recording/finalize | jq .status
+# "complete"
+
+curl -s localhost:8081/api/v1/sessions/$SID/recording -o recording.webm
+```
+
+`seq` must start at 0 and increment by exactly 1 per call, or you get a 409 —
+see [Session recording](/concepts/contracts/session-recording.md). A GET
+against a session with no `recording/chunks` POST yet is a 404, not an empty
+file: `session_recordings` has no row until the first chunk lands.
+
 ## When it misbehaves
 
 | Symptom | Cause |
@@ -105,6 +135,8 @@ the browser reports it back through `POST /sessions/{id}/transcript`.
 | Voice call connects, no audio | Check the browser gave microphone permission, and that the tab is not muted. `output_audio_buffer.started` on the data channel means the persona is speaking even if you cannot hear it. |
 | Voice transcript is missing turns | Only finalised transcripts are stored — greyed italic text on screen has not been persisted yet. A `transcript not saved` banner means the POST failed. |
 | The voice persona answers above its knowledge ceiling | Known Speaker-only limitation: in voice mode the ceiling is prompt text with nothing enforcing it. See [Realtime voice](/concepts/contracts/realtime-voice.md). Reproduce in **Chat** to confirm whether the persona or the modality is at fault. |
+| "recording stopped early — the part before the failure was saved" | Three chunk-upload retries all failed (network blip, or the tab lost connectivity). The interview itself is unaffected — only the recording is short. Playback still works on what landed. |
+| No player under an ended voice session's transcript | Either the browser cannot record (`MediaRecorder` for `audio/webm;codecs=opus` unsupported — the connecting screen says so at the time), or the very first chunk never landed and `session_recordings` has no row. `GET /sessions/{id}` will show `recording: null`. |
 
 Latency is one model round trip per turn: roughly 2–8s on `gemini-3.7-flash`.
 Point `SESSION_PROVIDER` / `SESSION_MODEL` at something else to trade cost
@@ -117,15 +149,19 @@ layer (deterministic signals, judge pass, analytical report) is Phase 4 of the
 pivot plan. No session list, no resume-by-id in the UI, and no timeout sweep, so
 `status = "abandoned"` is never set.
 
-On the voice side specifically: no recording is kept (only the transcript), no
-timing telemetry is extracted, and the persona is **Speaker-only** — the
-knowledge-ceiling enforcement, false-belief gating and claims ledger all live in
-the Go engine's Thinker, which is still parked at Phase 0.
+On the voice side specifically: no timing telemetry is extracted (WPM,
+interruptions, silence handling, filler density), and the persona is
+**Speaker-only** — the knowledge-ceiling enforcement, false-belief gating and
+claims ledger all live in the Go engine's Thinker, which is still parked at
+Phase 0. A browser-captured recording **is** now kept for voice sessions (see
+above) — that is a separate producer from the Go engine, which still has no
+recorder of its own; see [Live-session engine](/concepts/subsystems/engine.md).
 
 ## Related
 
 [Create an interview](/concepts/runbooks/create-an-interview.md) ·
 [Realtime voice](/concepts/contracts/realtime-voice.md) ·
 [Session transcript](/concepts/contracts/session-transcript.md) ·
+[Session recording](/concepts/contracts/session-recording.md) ·
 [REST API § Sessions](/concepts/contracts/rest-api.md) ·
 [Test UI](/concepts/subsystems/ui.md)

@@ -34,7 +34,14 @@ from llm.openai_realtime import OpenAIRealtimeBroker
 ROOT = Path(__file__).resolve().parent.parent
 
 #: Every first-party package, in dependency order.
-PACKAGES = ["llm", "expectation_agent", "candidate_agent", "evaluation_agent", "control_plane"]
+PACKAGES = [
+    "llm",
+    "expectation_agent",
+    "candidate_agent",
+    "evaluation_agent",
+    "report_engine",
+    "control_plane",
+]
 
 #: package -> packages it is allowed to import from.
 #: Enforces one direction: adapters depend on domain, never the reverse.
@@ -43,7 +50,17 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
     "expectation_agent": {"llm"},
     "candidate_agent": {"llm"},
     "evaluation_agent": {"llm"},
-    "control_plane": {"llm", "expectation_agent", "candidate_agent", "evaluation_agent"},
+    # The report engine is standalone: the rubric travels in its input bundle
+    # rather than being imported, so it depends on no first-party package at
+    # all. See docs/REPORT_ENGINE_SCORING_SPEC.md section 2.
+    "report_engine": set(),
+    "control_plane": {
+        "llm",
+        "expectation_agent",
+        "candidate_agent",
+        "evaluation_agent",
+        "report_engine",
+    },
 }
 
 #: Vendor SDKs may only be imported inside the llm package.
@@ -127,6 +144,7 @@ NARROW_PORTS = [
     ports.ExpectationStore,
     ports.CandidateStore,
     ports.SessionStore,
+    ports.RecordingStore,
 ]
 
 COMPOSITION_PORTS = [
@@ -134,6 +152,7 @@ COMPOSITION_PORTS = [
     ports.EnrollmentStore,
     ports.SessionWorkflowStore,
     ports.TurnWorkflowStore,
+    ports.RecordingWorkflowStore,
 ]
 
 

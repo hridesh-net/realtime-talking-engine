@@ -130,15 +130,42 @@ CREATE TABLE IF NOT EXISTS interview_expectations (
     model_used TEXT,
     created_at TEXT NOT NULL
 );
+
+-- One recording per session; the artifact's identity IS the session, whoever
+-- produced it. Bytes live outside SQLite (RECORDINGS_DIR today; S3 when the
+-- Go engine's Finalizer becomes the producer). Channel semantics are contract:
+-- left = the manager's mic, right = the persona -- the same split as the
+-- engine Recorder port's WriteHuman/WritePersona.
+CREATE TABLE IF NOT EXISTS session_recordings (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'recording' CHECK (status IN ('recording', 'complete')),
+    producer TEXT NOT NULL DEFAULT 'browser' CHECK (producer IN ('browser', 'engine')),
+    mime_type TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    byte_size INTEGER NOT NULL DEFAULT 0,
+    next_seq INTEGER NOT NULL DEFAULT 0,
+    channel_layout TEXT NOT NULL DEFAULT 'manager_left_candidate_right',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
 DEFAULT_DB_PATH = "control_plane.db"
 
+#: Where session audio artifacts land on disk (RECORDINGS_DIR env), relative
+#: to the process working directory, mirroring DEFAULT_DB_PATH.
+DEFAULT_RECORDINGS_DIR = "recordings"
+
 
 def db_path_from_env() -> str:
     """Database path from CONTROL_PLANE_DB, falling back to the default."""
     return os.getenv("CONTROL_PLANE_DB") or DEFAULT_DB_PATH
+
+
+def recordings_dir_from_env() -> str:
+    """Recordings directory from RECORDINGS_DIR, falling back to the default."""
+    return os.getenv("RECORDINGS_DIR") or DEFAULT_RECORDINGS_DIR
 
 
 def init_db(db_path: str | Path | None = None) -> sqlite3.Connection:

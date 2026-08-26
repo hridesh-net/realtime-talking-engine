@@ -1,0 +1,27 @@
+{
+  "pack_version": "competencies-2026.08",
+  "note": "Coverage checklist per role family. A coverage measure, not a knowledge test - the BRD is explicit that no model reads the job card to decide what good looks like.",
+  "families": {
+    "sales": [
+      {"id": "targets", "label": "Target and quota handling", "cues": ["target", "quota", "number", "achieve", "sales", "revenue", "conversion"]},
+      {"id": "customer_handling", "label": "Customer handling", "cues": ["customer", "walk-in", "walkin", "objection", "complaint", "angry", "rude"]},
+      {"id": "product_knowledge", "label": "Product knowledge", "cues": ["product", "plan", "tariff", "sim", "broadband", "postpaid", "prepaid", "upgrade"]},
+      {"id": "resilience", "label": "Resilience under pressure", "cues": ["pressure", "rejection", "difficult", "stress", "missed", "bad month", "setback"]},
+      {"id": "process", "label": "Process and compliance", "cues": ["process", "documentation", "kyc", "compliance", "system", "record"]}
+    ],
+    "operations": [
+      {"id": "scheduling", "label": "Scheduling and coverage", "cues": ["shift", "roster", "schedule", "coverage", "attendance"]},
+      {"id": "escalation", "label": "Escalation handling", "cues": ["escalate", "escalation", "ticket", "priority", "sla"]},
+      {"id": "coordination", "label": "Team coordination", "cues": ["team", "coordinate", "handover", "colleague", "vendor"]},
+      {"id": "safety", "label": "Safety and compliance", "cues": ["safety", "protocol", "compliance", "checklist", "incident"]},
+      {"id": "problem_solving", "label": "Problem solving", "cues": ["problem", "troubleshoot", "root cause", "fix", "resolve"]}
+    ],
+    "technical": [
+      {"id": "equipment", "label": "Equipment and field knowledge", "cues": ["equipment", "tower", "router", "fibre", "fiber", "cable", "hardware"]},
+      {"id": "fault_diagnosis", "label": "Fault diagnosis", "cues": ["fault", "diagnose", "downtime", "outage", "troubleshoot", "root cause"]},
+      {"id": "escalation", "label": "Escalation and ticketing", "cues": ["ticket", "escalate", "sla", "priority", "uptime"]},
+      {"id": "safety", "label": "Field safety", "cues": ["safety", "height", "electrical", "protocol", "ppe"]},
+      {"id": "documentation", "label": "Documentation", "cues": ["document", "report", "log", "record", "closure"]}
+    ]
+  }
+}

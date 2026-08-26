@@ -6,8 +6,10 @@ resource: /tests
 tags: [tests, pytest, architecture, determinism]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5
     at: "2026-08-23T18:00:00Z"
   - by: claude-opus-5/okf-curator
@@ -18,6 +20,7 @@ sources:
   - resource: /tests/test_candidate_rubric.py
   - resource: /tests/test_session.py
   - resource: /tests/test_voice.py
+  - resource: /tests/test_recording.py
   - resource: /tests/test_candidate_agent.py
   - resource: /tests/test_expectation_agent.py
 ---
@@ -73,6 +76,20 @@ decided before the vendor is involved**, and is therefore testable here.
 * **Two invariants no persona may switch off** — the human can always interrupt, and their speech is always transcribed.
 * **Storage** — a voice session does not pre-write turn 0; a text one still does.
 * **Endpoints** — minting seals the persona and never leaks the prompt into the response; transcript records without generating; a bad speaker label is 422; a finished session refuses both mint and transcript; a deleted persona is 410 while the session survives; a vendor failure is 502; `voice-capability` answers rather than raising.
+
+### `tests/test_recording.py`
+
+Session recording, offline — no audio codec, no network, no file-backed
+database. Every test writes to `tmp_path` via
+`InterviewRepository(conn, recordings_dir=tmp_path)`, the same way
+`RECORDINGS_DIR` points the real service at disk, so nothing here touches the
+repo's real recordings directory.
+
+* **Adapter** — the first chunk creates the recording row and its file; chunks append in order and `byte_size` accumulates; an out-of-order `seq` raises; `finalize` is idempotent and does not move `updated_at` on a repeat call, or on an unknown session (returns `None`); a chunk after finalize raises; `get_session` carries `recording` and `list_sessions` flags `has_recording` correctly before and after the first chunk.
+* **Endpoints** — the full round trip (three chunks → finalize → GET returns the concatenated bytes with the stored `Content-Type`); wrong seq is 409; a text session's chunk POST is 409; an unknown session is 404 on all three routes; a GET before any chunk landed is 404; an empty chunk body is 422.
+
+See [Session recording](/concepts/contracts/session-recording.md) for what
+each of these enforces and why.
 
 ## Live — `scripts/check.sh --live`
 

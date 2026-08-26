@@ -1,0 +1,62 @@
+{
+  "pack_version": "in-2026.08",
+  "jurisdiction": "IN",
+  "reviewed_by": "",
+  "note": "Drafted from the BRD's detector list. NOT signed off by anyone with Indian employment-law standing - see spec section 11.",
+  "categories": [
+    {
+      "id": "marital_status",
+      "label": "Marital status",
+      "patterns": ["\\b(are you |you )?(married|unmarried|single)\\b", "\\byour (husband|wife|spouse)\\b", "\\bshaadi\\b", "\\bmarriage plans?\\b"],
+      "alternative": "Ask about availability for the shift pattern instead: \"This role runs rotational shifts - does that work for you?\""
+    },
+    {
+      "id": "family_planning",
+      "label": "Children and family planning",
+      "patterns": ["\\bchildren\\b", "\\bkids\\b", "\\bplanning (a )?(family|kids|children)\\b", "\\bhow many kids\\b", "\\bwho looks after\\b", "\\bchild ?care\\b"],
+      "alternative": "Ask only about the job: \"The role needs weekend coverage twice a month. Is that something you can commit to?\""
+    },
+    {
+      "id": "pregnancy",
+      "label": "Pregnancy",
+      "patterns": ["\\bpregnan\\w*\\b", "\\bexpecting\\b", "\\bmaternity\\b"],
+      "alternative": "Never ask. If leave policy comes up, state the policy without asking about the candidate's plans."
+    },
+    {
+      "id": "age",
+      "label": "Age",
+      "patterns": ["\\bhow old are you\\b", "\\byour age\\b", "\\bwhat year (were you born|did you (pass out|graduate))\\b", "\\bdate of birth\\b", "\\bretire\\w*\\b"],
+      "alternative": "Ask about experience directly: \"How many years have you spent in frontline retail sales?\""
+    },
+    {
+      "id": "religion",
+      "label": "Religion",
+      "patterns": ["\\bwhat (is your |your )?(religion|caste|community)\\b", "\\bwhich (religion|caste|community)\\b", "\\breligious\\b", "\\btemple|mosque|church|gurudwara\\b", "\\bfasting\\b"],
+      "alternative": "If availability on festival days matters, state the requirement: \"The store trades on public holidays - are you able to work them?\""
+    },
+    {
+      "id": "caste_community",
+      "label": "Caste, community or native place",
+      "patterns": ["\\bcaste\\b", "\\bwhich community\\b", "\\bnative place\\b", "\\byour surname (suggests|means)\\b", "\\bwhere are you (really|originally) from\\b", "\\bmother tongue\\b"],
+      "alternative": "If a language is genuinely required, ask about the language: \"This branch serves Marathi-speaking customers - how comfortable are you selling in Marathi?\""
+    },
+    {
+      "id": "gender_role",
+      "label": "Gender-role assumption",
+      "patterns": ["\\bwill your family allow\\b", "\\bwill your (husband|wife|parents) (allow|mind|permit)\\b", "\\bcan you adjust\\b", "\\bas a (woman|girl|lady)\\b", "\\bsuitable for a (woman|girl|lady)\\b", "\\bmanage (both )?home and\\b"],
+      "alternative": "Put the requirement to every candidate the same way: \"The role involves travel to three stores a week. Can you do that?\""
+    },
+    {
+      "id": "disability_health",
+      "label": "Disability or health",
+      "patterns": ["\\bany (health|medical) (issues?|problems?|conditions?)\\b", "\\bdisabilit\\w*\\b", "\\bhandicap\\w*\\b", "\\bmedication\\b", "\\bhow many sick days\\b", "\\bfit enough\\b", "\\bany illness\\b"],
+      "alternative": "Ask about the task, not the body: \"The role needs standing for most of an eight-hour shift. Can you do that, with or without adjustments?\""
+    },
+    {
+      "id": "salary_history",
+      "label": "Salary history",
+      "patterns": ["\\b(what|what's|whats) your current (salary|ctc|package|pay)\\b", "\\bcurrent ctc\\b", "\\blast drawn\\b", "\\bhow much (are|were) you (earning|paid|making)\\b", "\\bexisting salary\\b"],
+      "alternative": "Ask for expectations against the band: \"The band for this role is X to Y. Does that work for you?\" Salary history is banned in 22 US states; in India it is legal but it imports the candidate's previous underpayment into your offer."
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from candidate_agent import archetypes as archetype_catalog
 from candidate_agent import trait_dimensions
@@ -24,6 +24,8 @@ from control_plane.ports import (
     ExpectationStore,
     ExpectationWorkflowStore,
     InterviewStore,
+    RecordingStore,
+    RecordingWorkflowStore,
     SessionStore,
     SessionWorkflowStore,
     TurnWorkflowStore,
@@ -36,6 +38,7 @@ from control_plane.schemas import (
     InterviewCreateRequest,
     InterviewResponse,
     RealtimeCredentialResponse,
+    RecordingMeta,
     RoleFactsRequest,
     SessionCreateRequest,
     SessionResponse,
@@ -615,3 +618,83 @@ def append_transcript_turn(
             detail=f"session is {session.status}, not live",
         )
     return repo.append_turn(session_id, req.speaker, req.text)
+
+
+# ---------------------------------------------------------------------------
+# Session recordings
+#
+# The browser's own MediaRecorder captures the tab audio (manager mic, left
+# channel; persona TTS, right channel) and uploads it in chunks as it records
+# -- this is the "browser" producer. When the Go engine's Finalizer becomes a
+# second producer, it will PUT the same shape through the same table, just
+# with `producer='engine'` and bytes that land in S3 instead of RECORDINGS_DIR.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/sessions/{session_id}/recording/chunks",
+    response_model=RecordingMeta,
+    status_code=status.HTTP_201_CREATED,
+)
+async def append_recording_chunk(
+    session_id: str,
+    seq: int,
+    request: Request,
+    repo: RecordingWorkflowStore = Depends(get_repo),
+) -> RecordingMeta:
+    """Append one chunk of the session's audio recording.
+
+    Chunks are accepted while the RECORDING is unfinalized, regardless of the
+    session's own status: the last chunk legitimately lands around
+    ``POST /sessions/{id}/end`` as the browser flushes its MediaRecorder on
+    hangup, and gating on the recording's own status -- open until finalized --
+    keeps acceptance deterministic instead of racing session teardown.
+    """
+    session = repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    if session.modality != "voice":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"session modality is {session.modality}, not voice",
+        )
+    data = await request.body()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="empty chunk body"
+        )
+    mime_type = request.headers.get("content-type", "application/octet-stream")
+    try:
+        return repo.append_recording_chunk(session_id, seq, mime_type, data)
+    except ValueError as exc:
+        # Wrong seq or already-finalized -- the adapter enforces both, the
+        # same way append_turn's index and end_session's status guard do.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.post("/sessions/{session_id}/recording/finalize", response_model=RecordingMeta)
+def finalize_recording(session_id: str, repo: RecordingStore = Depends(get_repo)) -> RecordingMeta:
+    """Mark the session's recording complete. Idempotent, like ``/end``."""
+    meta = repo.finalize_recording(session_id)
+    if not meta:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="recording not found")
+    return meta
+
+
+@router.get("/sessions/{session_id}/recording")
+def get_recording(session_id: str, repo: RecordingStore = Depends(get_repo)) -> Response:
+    """Serve the session's recorded audio bytes.
+
+    Serves a partial recording (``status == 'recording'``) too -- the honest
+    artifact of a crashed or abandoned session, rather than a 404 that hides
+    that a recording exists.
+    """
+    found = repo.read_recording(session_id)
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="recording not found")
+    meta, data = found
+    return Response(
+        content=data,
+        media_type=meta.mime_type,
+        headers={"Content-Disposition": f'inline; filename="session-{session_id}.webm"'},
+    )

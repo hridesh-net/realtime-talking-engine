@@ -6,8 +6,10 @@ resource: /ui
 tags: [ui, react, vite, frontend]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T18:55:00Z"
 status: stable
@@ -61,7 +63,7 @@ Vite proxies `/api` → `http://127.0.0.1:8081`, so **start the API first**.
 | `src/PersonaPicker.jsx` | `.plist` + sticky `.detail` — traits, beats, stress bars | `GET /candidate-archetypes` |
 | `src/InterviewDetail.jsx` | Tabs: Sessions (table + transcript panel), Practise, Cast | candidates + `GET /interviews/{id}/sessions` |
 | `src/SessionView.jsx` | The typed interview | session endpoints |
-| `src/VoiceSessionView.jsx` | The **spoken** interview — WebRTC to the vendor | realtime + transcript |
+| `src/VoiceSessionView.jsx` | The **spoken** interview — WebRTC to the vendor, dual-channel recording uploaded to us | realtime + transcript + recording |
 | `src/index.css` | Ported mockup stylesheet | — |
 
 `api.js` covers the interview, expectation, archetype, candidate, and session
@@ -148,12 +150,18 @@ row.
 
 `VoiceSessionView` notes:
 
-* **The audio does not pass through our API.** It mints a credential, opens a `RTCPeerConnection` to the vendor, and streams mic in / persona out directly. See [Realtime voice](/concepts/contracts/realtime-voice.md).
+* **The live call does not pass through our API.** It mints a credential, opens a `RTCPeerConnection` to the vendor, and streams mic in / persona out directly. See [Realtime voice](/concepts/contracts/realtime-voice.md).
+* **It now also records the call, dual-channel, and uploads it here.** A `ChannelMergerNode` puts the manager's mic on channel 0 (left) and the persona's remote WebRTC track — tapped off the same `MediaStream` already attached to the `<audio>` element in `pc.ontrack`, which is what keeps Chrome feeding it samples — on channel 1 (right), into one `MediaStreamDestination` that `MediaRecorder` chunks at 10s intervals and POSTs to `/sessions/{id}/recording/chunks`. This is a **separate, out-of-band upload**, not part of the WebRTC media path — see [Session recording](/concepts/contracts/session-recording.md).
+* Chunk POSTs are chained on their **own** queue (`chunkQueueRef`, separate from the transcript's `queueRef`) for the same reason: the server enforces strict `seq` ordering per recording, so two in-flight chunk uploads could land out of order. Each retries 3× with backoff; on final failure the recorder stops itself and a one-time banner says the early part was saved rather than silently drifting from the server's `seq`.
+* **Recording teardown never gates the transcript.** `finish()` runs the recorder's stop → finalize chain independently of the transcript-drain-then-`/end` sequence below — a failed upload must not cost the transcript, which is the thing the evaluation layer actually reads.
+* Browsers without `MediaRecorder` support for `audio/webm;codecs=opus` skip recording entirely and say so on the connecting screen; the interview still proceeds.
+* The connecting screen states the call is recorded and stored — proceeding is the consent event for this practice tool. See [Session recording § consent](/concepts/contracts/session-recording.md).
 * Transcript POSTs are **chained, not parallel** (`queueRef`). The server assigns each turn's index on arrival, so two in flight at once could land out of order and mis-sequence the stored conversation.
 * Ending the call awaits that queue **before** `POST /end` — a turn posted after the session closes would 409 and vanish from the record.
 * Interim (`.delta`) transcripts render greyed and italic; only `.completed` / `.done` are persisted. What you see mid-sentence is not yet in the database.
-* The mic track is toggled via `track.enabled` rather than being stopped, so unmuting does not re-trigger the browser permission prompt.
+* The mic track is toggled via `track.enabled` rather than being stopped, so unmuting does not re-trigger the browser permission prompt — and a muted mic is also honestly silent in the recording, since a disabled track renders silence into Web Audio.
 * First use raises Chrome's microphone permission dialog. That is browser chrome, not page UI — nothing in the app can pre-grant it.
+* On `phase === 'ended'`, an `<audio controls>` element and a download link both point at `GET /sessions/{id}/recording` once a recording exists (or has just finished uploading) — playback of a partial recording works the same way, since the endpoint serves one before it is finalized.
 
 `SessionView` notes:
 
