@@ -8,6 +8,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from candidate_agent.schema import VirtualCandidate
 from control_plane.database import recordings_dir_from_env
@@ -20,6 +21,7 @@ from control_plane.schemas import (
     InterviewCreateRequest,
     InterviewResponse,
     RecordingMeta,
+    ReportMeta,
     SessionResponse,
     SessionSummary,
     Turn,
@@ -417,7 +419,10 @@ class InterviewRepository:
                    (SELECT COUNT(*) FROM session_turns t WHERE t.session_id = s.id) AS turn_count,
                    EXISTS(
                        SELECT 1 FROM session_recordings r WHERE r.session_id = s.id
-                   ) AS has_recording
+                   ) AS has_recording,
+                   EXISTS(
+                       SELECT 1 FROM session_reports p WHERE p.session_id = s.id
+                   ) AS has_report
             FROM sessions s
             LEFT JOIN virtual_candidates v ON v.candidate_id = s.candidate_id
             WHERE s.interview_id = ?
@@ -438,6 +443,7 @@ class InterviewRepository:
                 ended_at=(_parse_ts(r["ended_at"]) if r["ended_at"] else None),
                 turn_count=int(r["turn_count"]),
                 has_recording=bool(r["has_recording"]),
+                has_report=bool(r["has_report"]),
             )
             for r in rows
         ]
@@ -577,6 +583,84 @@ class InterviewRepository:
         if not row:
             return None
         return self._row_to_recording_meta(row)
+
+    # ------------------------------------------------------------ reports ----
+
+    def save_report(self, session_id: str, report: dict[str, Any]) -> ReportMeta:
+        """Store or replace this session's report.
+
+        The headline and provenance columns are denormalised out of the JSON so
+        the list view can draw a row without parsing every report body.
+        """
+        now = _utcnow()
+        provenance = report.get("provenance") or {}
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO session_reports (
+                    session_id, report_json, readiness_index, band, unscoreable,
+                    scoring_version, rubric_version, english_weight, language_gate,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    report_json = excluded.report_json,
+                    readiness_index = excluded.readiness_index,
+                    band = excluded.band,
+                    unscoreable = excluded.unscoreable,
+                    scoring_version = excluded.scoring_version,
+                    rubric_version = excluded.rubric_version,
+                    english_weight = excluded.english_weight,
+                    language_gate = excluded.language_gate,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    session_id,
+                    json.dumps(report),
+                    report.get("readiness_index"),
+                    report.get("band") or "",
+                    report.get("unscoreable") or "",
+                    provenance.get("scoring_version", ""),
+                    provenance.get("rubric_version", ""),
+                    provenance.get("english_weight"),
+                    1 if provenance.get("language_gate", True) else 0,
+                    now,
+                    now,
+                ),
+            )
+        meta = self.get_report_meta(session_id)
+        if meta is None:  # pragma: no cover - written in the transaction above
+            raise RuntimeError(f"report for {session_id} vanished after write")
+        return meta
+
+    def get_report(self, session_id: str) -> dict[str, Any] | None:
+        """The stored report body, or None when none has been generated."""
+        row = self.conn.execute(
+            "SELECT report_json FROM session_reports WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if not row:
+            return None
+        loaded: dict[str, Any] = json.loads(row["report_json"])
+        return loaded
+
+    def get_report_meta(self, session_id: str) -> ReportMeta | None:
+        """The stored report's headline and provenance, without its body."""
+        row = self.conn.execute(
+            "SELECT * FROM session_reports WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return ReportMeta(
+            session_id=row["session_id"],
+            readiness_index=row["readiness_index"],
+            band=row["band"],
+            unscoreable=row["unscoreable"],
+            scoring_version=row["scoring_version"],
+            rubric_version=row["rubric_version"],
+            english_weight=row["english_weight"],
+            language_gate=bool(row["language_gate"]),
+            created_at=_parse_ts(row["created_at"]),
+            updated_at=_parse_ts(row["updated_at"]),
+        )
 
     def read_recording(self, session_id: str) -> tuple[RecordingMeta, bytes] | None:
         """Return the recording's metadata and its bytes, or None."""

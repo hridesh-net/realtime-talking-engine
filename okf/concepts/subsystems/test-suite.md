@@ -26,6 +26,11 @@ sources:
 ---
 # Test suite
 
+> **`tests/test_report_engine.py`** (38 tests) covers the report engine and the
+> control-plane seam: determinism on both JSON and HTML, question typing
+> including the unpunctuated shapes ASR produces, the restraint-persona rule,
+> the two operator toggles, and composed-persona resolution.
+
 Two kinds of test, and the distinction matters: the offline ones defend rules,
 the live ones check model behaviour and cost money.
 

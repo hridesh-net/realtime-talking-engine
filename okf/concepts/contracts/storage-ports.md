@@ -19,6 +19,9 @@ sources:
 ---
 # Storage ports
 
+> **Six narrow ports now, not five.** `ReportStore` joined them with the
+> session report — see [Report engine](/concepts/subsystems/report-engine.md).
+
 `typing.Protocol`, `@runtime_checkable`, **structural** — `InterviewRepository`
 neither imports nor subclasses them. Swapping SQLite for Postgres means writing
 a class with matching methods; no route changes.

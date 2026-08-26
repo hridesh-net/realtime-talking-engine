@@ -113,3 +113,22 @@ export const finalizeRecording = (sessionId) =>
   request(`/sessions/${sessionId}/recording/finalize`, { method: 'POST' })
 
 export const recordingUrl = (sessionId) => `/api/v1/sessions/${sessionId}/recording`
+
+export const recordingDownloadUrl = (sessionId) =>
+  `/api/v1/sessions/${sessionId}/recording`
+
+// The report is generated once and stored, so a score a trainer has already
+// discussed cannot move under them. Regenerating is this explicit POST.
+export const generateReport = (sessionId, { englishWeight = null, languageGate = false } = {}) => {
+  const params = new URLSearchParams()
+  if (englishWeight !== null) params.set('english_weight', String(englishWeight))
+  if (languageGate) params.set('language_gate', 'true')
+  const query = params.toString()
+  return request(`/sessions/${sessionId}/report${query ? `?${query}` : ''}`, { method: 'POST' })
+}
+
+export const getReport = (sessionId) => request(`/sessions/${sessionId}/report`)
+
+// The console embeds this rather than re-drawing the report, so the page on
+// screen and the page that prints are the same document.
+export const reportHtmlUrl = (sessionId) => `/api/v1/sessions/${sessionId}/report.html`

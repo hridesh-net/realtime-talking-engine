@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getSession } from './api'
+import { getSession, recordingDownloadUrl } from './api'
 import PersonaComposer from './PersonaComposer'
 import PersonaPicker from './PersonaPicker'
 
@@ -41,6 +41,7 @@ export default function InterviewDetail({
   onEnroll,
   onEnrollCustom,
   onDeleteCandidate,
+  onOpenReport,
   onBack,
 }) {
   const [tab, setTab] = useState('sessions')
@@ -180,6 +181,7 @@ export default function InterviewDetail({
                       <th>Turns</th>
                       <th>Started</th>
                       <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Audio &amp; report</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -212,6 +214,38 @@ export default function InterviewDetail({
                           <span className={`badge ${STATUS[s.status]?.cls || 'draft'}`}>
                             {STATUS[s.status]?.text || s.status}
                           </span>
+                        </td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {s.has_recording ? (
+                            <a
+                              className="btn sm"
+                              href={recordingDownloadUrl(s.id)}
+                              download={`session-${s.id}.webm`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Download the stereo recording (manager left, candidate right)"
+                            >
+                              ⬇ Audio
+                            </a>
+                          ) : (
+                            <span className="muted small" title="Text sessions have no recording">
+                              —
+                            </span>
+                          )}{' '}
+                          <button
+                            className={`btn sm ${s.has_report ? '' : 'primary'}`}
+                            disabled={!s.turn_count}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onOpenReport(s)
+                            }}
+                            title={
+                              s.turn_count
+                                ? 'Open this session\u2019s development report'
+                                : 'Nothing was said in this session'
+                            }
+                          >
+                            {s.has_report ? '📄 Report' : '⚡ Generate'}
+                          </button>
                         </td>
                       </tr>
                     ))}

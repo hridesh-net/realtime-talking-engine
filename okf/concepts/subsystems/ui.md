@@ -28,6 +28,12 @@ sources:
 ---
 # Test UI
 
+> **Sessions table gains an "Audio & report" column.** Direct download of the
+> stereo recording where one exists, and a button that opens
+> `ReportView` — an **iframe of the engine's own report HTML**, not a second
+> React layout of the same data, because "Download PDF" is the browser printing
+> that very document and two layouts could drift apart.
+
 `ui/` — React 18 + Vite 5, no framework beyond that, no state library, no
 TypeScript.
 

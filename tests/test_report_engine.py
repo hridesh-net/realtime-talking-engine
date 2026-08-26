@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -229,7 +230,46 @@ def test_the_english_weight_is_stamped_so_reports_stay_comparable():
     assert weighted.provenance.english_weight == 0.10
 
 
-def test_a_hindi_session_is_refused_rather_than_scored_wrongly():
+def test_pure_english_is_never_mistaken_for_code_mixed():
+    """Regression on a false positive that refused real sessions.
+
+    "the" was in the romanised-Hindi list (Hindi "the"), so an ordinary English
+    sentence containing it scored as code-mixed and was gated.
+    """
+    from report_engine import language as lang
+
+    turns = [
+        Turn(
+            index=0,
+            speaker="manager",
+            text="Walk me through the last time the store missed the target.",
+            elapsed_ms=0,
+        )
+    ]
+    check = lang.check(turns, gate=True)
+    assert check.detected == "en"
+    assert not check.gated
+
+
+def test_the_hindi_and_english_wordlists_do_not_overlap():
+    """An ambiguous word in both lists biases every transcript toward code-mixed."""
+    from report_engine.language import _ENGLISH_MARKERS, _ROMAN_HINDI
+
+    assert not (_ROMAN_HINDI & _ENGLISH_MARKERS)
+
+
+def test_non_latin_script_is_detected_beyond_devanagari():
+    """A real session was part Urdu, which is Arabic script, and slipped through."""
+    from report_engine import language as lang
+
+    turns = [
+        Turn(index=0, speaker="manager", text="تمہیں کیوں لگتا ہے کہ تم صحیح فٹ ہو", elapsed_ms=0)
+    ]
+    assert lang.check(turns, gate=False).detected == "non-latin"
+
+
+def test_a_non_english_session_is_scored_by_default_not_refused():
+    """An interview happens in whatever language the room speaks."""
     turns = [
         {
             "index": i,
@@ -240,11 +280,13 @@ def test_a_hindi_session_is_refused_rather_than_scored_wrongly():
         for i in range(8)
     ]
     report = build_report(_bundle(turns=turns))
-    assert report.unscoreable == "language_unsupported"
-    assert report.readiness_index is None
+    assert not report.unscoreable
+    assert report.readiness_index is not None
+    assert any("still been scored" in w for w in report.validity_warnings)
 
 
-def test_the_language_gate_can_be_turned_off_but_stamps_a_warning():
+def test_a_non_english_session_marks_english_dependent_criteria_low_confidence():
+    """Scored is not the same as equally trustworthy."""
     turns = [
         {
             "index": i,
@@ -254,9 +296,26 @@ def test_the_language_gate_can_be_turned_off_but_stamps_a_warning():
         }
         for i in range(8)
     ]
-    report = build_report(_bundle(turns=turns, scoring_options={"language_gate": False}))
-    assert not report.unscoreable
-    assert any("not valid" in w for w in report.validity_warnings)
+    report = build_report(_bundle(turns=turns))
+    scored = [c for c in report.criteria if c.score is not None]
+    assert scored
+    assert all(c.confidence == "low" for c in scored)
+    assert all("English patterns" in c.confidence_reason for c in scored)
+
+
+def test_the_gate_can_still_be_turned_on_deliberately():
+    turns = [
+        {
+            "index": i,
+            "speaker": "manager" if i % 2 == 0 else "candidate",
+            "text": "Aap apne bare mein kuch bataiye, aapko kya lagta hai yeh role kaise hai",
+            "elapsed_ms": i * 1000,
+        }
+        for i in range(8)
+    ]
+    report = build_report(_bundle(turns=turns, scoring_options={"language_gate": True}))
+    assert report.unscoreable == "language_unsupported"
+    assert report.readiness_index is None
 
 
 def test_language_is_always_reported_even_when_it_passes():
@@ -293,3 +352,65 @@ def test_the_cli_runs_offline_and_writes_both_formats(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "<title>" in html_path.read_text()
     assert json.loads(json_path.read_text())["readiness_index"] is not None
+
+
+# ------------------------------------------------------ the control plane ----
+
+
+def test_the_bundle_reads_a_composed_personas_scorecard_off_the_candidate():
+    """A `dyn-` persona has no catalog entry; its ground truth is on the candidate."""
+    from control_plane.reporting import persona_block
+
+    session = SimpleNamespace(persona_key="dyn-abc123", candidate_id="vc-1")
+    candidate = SimpleNamespace(
+        archetype_label="Composed persona",
+        interviewer_scorecard=SimpleNamespace(
+            must_discover=[
+                SimpleNamespace(
+                    id="depth_vs_effort",
+                    signal="Separates skill ceiling from effort",
+                    weight=0.3,
+                    how_to_surface="Offer an easy win and see if real depth appears",
+                )
+            ]
+        ),
+    )
+    block = persona_block(session, candidate)
+    assert block["archetype_key"] == "dyn-abc123"
+    assert len(block["must_discover"]) == 1
+    # Composed personas are assembled from trait presets, not written to stress
+    # a criterion, so there is no scripted beat list and no stress map to copy.
+    assert block["session_beats"] == []
+    assert block["stresses"] == {}
+
+
+def test_an_unknown_persona_yields_an_empty_block_rather_than_raising():
+    from control_plane.reporting import persona_block
+
+    session = SimpleNamespace(persona_key="dyn-gone", candidate_id="vc-1")
+    block = persona_block(session, None)
+    assert block["must_discover"] == []
+
+
+def test_a_catalog_persona_still_comes_from_the_catalog():
+    from control_plane.reporting import persona_block
+
+    session = SimpleNamespace(persona_key="inflated_resume", candidate_id="vc-1")
+    block = persona_block(session, None)
+    assert block["label"] == "The inflated resume"
+    assert len(block["must_discover"]) == 4
+    assert block["stresses"]["structure"] == 4
+
+
+@pytest.mark.parametrize(
+    ("title", "family"),
+    [
+        ("Network Field Engineer", "technical"),
+        ("Operations Coordinator", "operations"),
+        ("Assistant Store Manager", "sales"),
+    ],
+)
+def test_role_family_is_derived_deterministically_from_the_title(title, family):
+    from control_plane.reporting import role_family_for
+
+    assert role_family_for(title) == family

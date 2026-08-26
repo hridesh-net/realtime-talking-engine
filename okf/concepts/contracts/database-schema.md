@@ -21,6 +21,13 @@ sources:
 ---
 # Database schema
 
+> **`session_reports`** — one row per session, `session_id` as the primary key,
+> holding the report JSON plus denormalised headline and provenance columns
+> (`readiness_index`, `band`, `scoring_version`, `rubric_version`,
+> `english_weight`, `language_gate`). The report is **stored, not recomputed on
+> read**: a threshold change must not silently move a score a trainer already
+> discussed. See [Report engine](/concepts/subsystems/report-engine.md).
+
 SQLite, path from `CONTROL_PLANE_DB` (default `control_plane.db`, gitignored via
 `*.db`). `init_db()` runs the whole schema as `CREATE TABLE IF NOT EXISTS` on
 every startup and every request — there are **no migrations**, so an added

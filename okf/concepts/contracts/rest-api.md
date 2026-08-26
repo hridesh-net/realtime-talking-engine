@@ -22,6 +22,14 @@ sources:
 ---
 # REST API
 
+> **Session reports.** `POST /sessions/{id}/report` generates or regenerates
+> (409 when nothing was said; `english_weight` and `language_gate` ride as query
+> parameters and are stamped into the report's provenance),
+> `GET /sessions/{id}/report` returns the stored body, and
+> `GET /sessions/{id}/report.html` returns the engine's self-contained page —
+> which the console embeds rather than re-drawing, so the screen and the print
+> output are one document. See [Report engine](/concepts/subsystems/report-engine.md).
+
 FastAPI, router prefix `/api/v1`, tag `interviews`. Served by
 `control_plane.main:build_app` (factory), default port **8081**
 (`CONTROL_PLANE_PORT`). `GET /healthz` sits outside the router.

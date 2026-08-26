@@ -52,11 +52,20 @@ def _base(signal_id: str, label: str, weight: float, basis: str) -> SignalResult
     return SignalResult(id=signal_id, label=label, criterion=CRITERION, weight=weight, basis=basis)
 
 
-#: `must_discover` items are not all "surface it by asking". Some are restraint
-#: ("Move back to the role without asking a single follow-up on it") and some are
-#: statement ("State the process for requests rather than granting or refusing").
-#: Scoring those by question-overlap would credit the manager for doing exactly
-#: the wrong thing, so they are excluded here and left to the judge.
+#: `must_discover` items are not all "surface it by asking", and two different
+#: authors write them:
+#:
+#: * A **catalog archetype** writes from the interviewer's side, so most items
+#:   read "Ask for the mechanism, the number, or the decision behind it". Some
+#:   are deliberate restraint - "Move back to the role *without* asking a single
+#:   follow-up" - and scoring those by question-overlap credits the manager for
+#:   doing exactly the wrong thing.
+#: * A **composed persona** is written from the candidate's side by the casting
+#:   agent: "Offer an easy win and see if real depth appears". Those are stage
+#:   directions for the persona, not questions for the manager, so no amount of
+#:   question-matching can measure them.
+#:
+#: Only items that describe a question the interviewer should ask are counted.
 _RESTRAINT_CUES = compile_all(
     [
         r"\bwithout\b",
@@ -72,10 +81,15 @@ _ASK_CUES = compile_all([r"^\s*(ask|probe|compare|request|push|challenge)\b"])
 
 
 def _is_ask_item(how_to_surface: str) -> bool:
-    """Whether this item can be measured by looking at the questions asked."""
+    """Whether this item describes a question the interviewer should ask.
+
+    Deliberately an allowlist. Anything that is not recognisably an instruction
+    to ask something is left to the judge, because the failure mode of guessing
+    wrong here is a score that means the opposite of what it says.
+    """
     if any(p.search(how_to_surface) for p in _RESTRAINT_CUES):
         return False
-    return bool(any(p.search(how_to_surface) for p in _ASK_CUES))
+    return any(p.search(how_to_surface) for p in _ASK_CUES)
 
 
 def _discovery_attempted(ctx: Context) -> SignalResult:
@@ -111,8 +125,9 @@ def _discovery_attempted(ctx: Context) -> SignalResult:
     ask_weight = sum(t.weight for t in askable)
     if not askable:
         out.reason = (
-            f"this persona has no ask-shaped signals - all {len(targets)} are "
-            "restraint or statement items, which only the judge can assess"
+            f"none of this persona's {len(targets)} signals describes a question "
+            "the interviewer should ask - they are restraint items, or stage "
+            "directions for the persona - so only the judge can assess them"
         )
         return out
 

@@ -11,7 +11,7 @@
 #   2. Cross-compiles engined for linux/arm64   -> engined
 #      (the instance is Graviton/t4g by default; see infra/terraform/variables.tf)
 #   3. Packs the Python source packages control_plane/, candidate_agent/,
-#      expectation_agent/, evaluation_agent/, llm/ (the same set
+#      expectation_agent/, evaluation_agent/, report_engine/, llm/ (the same set
 #      pyproject.toml's dependency graph pulls in — see CLAUDE.md's
 #      "llm ← agents ← control_plane" rule) plus requirements.txt, the UI
 #      build (as ui_dist/) and the engined binary into one tarball.
@@ -78,16 +78,42 @@ mkdir -p "${STAGE}"
 
 # Python source the control plane needs at runtime — the same set the
 # dependency-direction rule in CLAUDE.md names (llm <- agents <- control_plane).
-for pkg in control_plane candidate_agent expectation_agent evaluation_agent llm; do
+for pkg in control_plane candidate_agent expectation_agent evaluation_agent report_engine llm; do
   cp -R "${REPO_ROOT}/${pkg}" "${STAGE}/${pkg}"
 done
+# Compiled caches are machine-specific and just inflate the tarball.
+find "${STAGE}" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 cp "${REPO_ROOT}/requirements.txt" "${STAGE}/requirements.txt"
 
 cp -R "${REPO_ROOT}/ui/dist" "${STAGE}/ui_dist"
 cp "${WORKDIR}/engined" "${STAGE}/engined"
 
+# The package list above is hand-maintained, and a package missing from it does
+# not fail the build -- it fails at *import time on the instance*, which takes
+# the whole site down on the next boot. That happened once (report_engine was
+# added to control_plane's imports and not to this list), so the staged tree is
+# now proven importable before anything is uploaded.
+echo "build-artifacts: verifying the staged tree imports"
+VENV_PY="${REPO_ROOT}/.venv/bin/python"
+if [ -x "${VENV_PY}" ]; then
+  (
+    cd "${STAGE}"
+    PYTHONPATH="${STAGE}" "${VENV_PY}" -c "import control_plane.api" || {
+      echo "build-artifacts: the staged tree cannot import control_plane.api." >&2
+      echo "A first-party package it needs is missing from the copy list above." >&2
+      exit 1
+    }
+  )
+else
+  echo "build-artifacts: no ${VENV_PY}, skipping the import check" >&2
+fi
+
 TARBALL="${WORKDIR}/${PROJECT}.tar.gz"
-tar -czf "${TARBALL}" -C "${STAGE}" .
+# --no-xattrs: without it a tarball built on macOS carries com.apple.provenance
+# attributes that GNU tar on the instance cannot read, emitting a warning per
+# file. ~130 lines of noise that a real error would hide in.
+tar --no-xattrs -czf "${TARBALL}" -C "${STAGE}" . 2>/dev/null ||
+  tar -czf "${TARBALL}" -C "${STAGE}" .
 
 LATEST_KEY="artifacts/${PROJECT}-latest.tar.gz"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"

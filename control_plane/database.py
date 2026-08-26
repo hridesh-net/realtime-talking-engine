@@ -41,6 +41,25 @@ CREATE TABLE IF NOT EXISTS interviews (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS session_reports (
+    -- One report per session, keyed by the session, for the same reason the
+    -- recording is: the stable identity is "this session's report", whatever
+    -- produced it. Regenerating overwrites in place; there is no history.
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    report_json TEXT NOT NULL,
+    -- Denormalised out of the JSON so the list view can render a row and the
+    -- cohort view can segment without parsing every report.
+    readiness_index INTEGER,
+    band TEXT NOT NULL DEFAULT '',
+    unscoreable TEXT NOT NULL DEFAULT '',
+    scoring_version TEXT NOT NULL,
+    rubric_version TEXT NOT NULL,
+    english_weight REAL,
+    language_gate INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS interview_assignments (
     id TEXT PRIMARY KEY,
     interview_id TEXT NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,

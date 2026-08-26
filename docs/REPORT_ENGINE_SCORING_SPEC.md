@@ -175,14 +175,33 @@ The engine **always** detects and reports the language mix of manager turns —
 `detected_language`, `english_token_share`, `confidence`. Visibility is not
 optional. The flag controls only what happens next:
 
-| `language_gate` | Behaviour when `english_token_share` < 0.85 (**`CALIBRATION`**) |
+| `language_gate` | Behaviour when the session is not detected as English |
 |---|---|
-| `true` (default) | Return `unscoreable: language_unsupported`. No numbers produced. |
-| `false` | Score anyway, stamp `validity_warning: language` on the report and on every affected signal. |
+| `false` (**default**) | **Score it**, stamp a validity warning, and mark every criterion whose evidence leans on English patterns as low confidence, naming the share. |
+| `true` | Return `unscoreable: language_unsupported`. No numbers produced. |
 
-Turning the gate off does not make the numbers valid; it makes them *available*.
-The report must say so on its face, because a confidently wrong score is the
-worst failure mode this engine has.
+**Revised 2026-08-26: the default was `true` and that was wrong.** An interview
+happens in whatever language the room speaks; refusing to report on one is the
+tool failing the user rather than protecting them, and it left a manager who had
+just been interviewed with nothing at all. The honest position is not "no
+number" — it is a number plus a plain statement of what it could and could not
+see.
+
+That statement is per criterion, not one banner: `LANGUAGE_SENSITIVE` in
+`report_engine/signals/__init__.py` names every signal computed from English
+lexicons or English syntax, and a criterion carrying them is marked low
+confidence with the affected share spelled out. A Hindi question does not match
+an English question pattern and an Urdu turn trips no English protected-topic
+phrase — the score still stands, it has simply measured less than it claims to.
+
+**Detection precision matters more than recall here**, because a false positive
+used to refuse a real session. Two bugs found by running against production:
+`the` sat in the romanised-Hindi wordlist (Hindi *थे*) and collided with the
+commonest English word, so "walk me through the last time the store missed the
+target" scored as code-mixed and was gated; and script detection covered only
+Devanagari, so a genuinely part-Urdu session — Arabic script — was judged
+entirely on its English half. The wordlists are now disjoint and the script
+check spans Arabic plus the major Indic blocks.
 
 ---
 

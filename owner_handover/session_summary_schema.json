@@ -60,6 +60,11 @@
       "default": false,
       "title": "Has Recording",
       "type": "boolean"
+    },
+    "has_report": {
+      "default": false,
+      "title": "Has Report",
+      "type": "boolean"
     }
   },
   "required": [

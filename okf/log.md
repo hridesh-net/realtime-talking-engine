@@ -315,3 +315,49 @@
   Result on the real session: readiness **62, "Developing"** — Fair & Inclusive 10.0, Communication 8.23, Clarity 4.29 (low confidence: the job card could not be reached, so the clarity checklist is reported absent rather than invented), Structured 3.33 (no behavioural questions, no follow-up probes, 3 of 5 competencies touched). Focus areas: never introduced themselves, never invited the candidate's questions, never set an agenda. All three check out by eye against the transcript.
 
   Nine new tests (32 total in `tests/test_report_engine.py`), covering the unpunctuated-question shapes, the statements that must *not* trip them, the restraint-persona rule, and the descriptive-not-scored rule. `scripts/check.sh` green.
+
+## 2026-08-26 (report in the console: generate, read, print)
+
+* **Addition**: past sessions can now be scored and read from the operator console. New column **"Audio & report"** on the sessions table in `InterviewDetail`: a direct download of the stereo recording when one exists (`recordingUrl` was exported from `api.js` and wired to nothing until now), and a button that opens the session's development report.
+
+* **Addition**: `session_reports` — one row per session, `session_id` as the primary key, for the same reason `session_recordings` uses it: the stable identity is "this session's report", whatever produced it. Headline and provenance (`readiness_index`, `band`, `scoring_version`, `rubric_version`, `english_weight`, `language_gate`) are **denormalised out of the JSON** so the list view can draw a row and a cohort view can segment without parsing every report body. New narrow port `ReportStore` and composition `ReportWorkflowStore` (interview + candidate + session + report).
+
+  **The report is stored, not recomputed on read.** A threshold change must not silently move a score a trainer has already discussed with a manager — the comparability design rests on a report being a fixed artifact with its provenance stamped on it. Regenerating is an explicit `POST`.
+
+* **Addition**: `control_plane/reporting.py` — the seam that assembles a bundle. `report_engine` imports no first-party package by design, so *something* has to read the interview, the session and the catalog and hand it one object; this is that something, and it scores nothing itself.
+
+  **Composed personas turned out to carry ground truth too**, which the first cut missed. A `dyn-` persona has no catalog entry, so `archetypes.get()` raised on every session started from the Compose tab — which is most of the sessions in the database. But the casting agent writes the same `must_discover` scorecard onto the candidate (`persona_json.interviewer_scorecard`), so the fixed denominator survives composition; `persona_block` reads the catalog first and the candidate second, and returns an empty block rather than raising when neither exists. Composed personas get no `session_beats` and no `stresses`: they are assembled from trait presets, not written to stress a criterion.
+
+  A related honesty fix in `report_engine/signals/structure.py`: a composed persona's `how_to_surface` is written from the *candidate's* side ("Offer an easy win and see if real depth appears") rather than the interviewer's ("Ask for the mechanism, the number"). Those are stage directions for the persona, not questions for the manager, so no amount of question-matching can measure them. The allowlist already excluded them; the *reason* it printed called them restraint items, which was wrong. It now says what is actually true.
+
+* **Addition**: three endpoints — `POST /sessions/{id}/report` (generate or regenerate; the two operator toggles ride as query parameters and are stamped into provenance), `GET /sessions/{id}/report` (the stored body), `GET /sessions/{id}/report.html` (the engine's own self-contained page). 409 when nothing was said in the session; 404 for an unknown session or an ungenerated report.
+
+* **Decision — the console embeds the engine's HTML rather than re-drawing the report.** "Download as PDF" is the browser printing that very document, so a second React layout of the same data would mean the report a trainer reads on screen and the one they file could drift apart. One renderer, two outputs. `render.py` gains a print stylesheet (`@page` margins, `break-inside:avoid` on cards and quotes so a finding never loses the quote that makes it checkable). Server-side PDF was considered and rejected: WeasyPrint needs pango/cairo on the EC2 box and supports a CSS subset, headless Chrome means shipping ~400MB of Chromium — both are a large infrastructure change for a document download the browser already does well.
+
+* **Fix**: the sessions table kept offering "Generate" for a report that now existed, because `sessions` is fetched by the parent and does not refetch on generate. `ReportView` reports back and the row remembers, until the next real load corrects it.
+
+  Verified against a running server on a copy of the real database, not just the offline suite: 404 before generation, 201 on generate, 200 on read, 200 with the print stylesheet on `report.html`, `has_report` true in the list, 404 on an unknown session, and `english_weight=0.1` rescaling the rubric to 0.27/0.225/0.225/0.18 + 0.10 (summing to 1.0) with the value stamped on provenance. Then driven in Chrome end to end: generate from the table, report renders in the panel with quoted evidence and timestamps, and the button still reads "Report" after a full page reload. `owner_handover/session_summary_schema.json` regenerated for `has_report`. Six new tests (38 total).
+
+## 2026-08-26 (language gate: default reversed, detection corrected)
+
+* **Reversal**: `scoring_options.language_gate` now defaults to **`false`** — a non-English session is **scored**, not refused. The original default of `true` was wrong and production proved it: a real Frontline Sales Executive session came back `NOT SCORED — language_unsupported` and the manager got nothing. An interview happens in whatever language the room speaks; declining to report on one is the tool failing its user, not protecting them. The gate remains available for an org that would rather have no number than a shaky one, but it is opt-in.
+
+* **Addition**: the honest half of scoring anyway. `LANGUAGE_SENSITIVE` in `report_engine/signals/__init__.py` names the 22 signals computed from English lexicons or English syntax; `_downgrade_for_language` marks any criterion carrying them **low confidence** with the affected share spelled out ("100% of this criterion's evidence is counted from English patterns, and this session was detected as 'non-latin'"). The score still stands — what changes is the claim made about it. A Hindi question matches no English question pattern; an Urdu turn trips no English protected-topic phrase.
+
+* **Fix — a false positive that refused English sessions.** `the` was in the romanised-Hindi wordlist (Hindi *थे*) and is also the commonest English word, so it counted for both sides: **"Walk me through the last time the store missed the target."** scored `hi-en` at 0.5 English share and was **gated**. The wordlists are now disjoint, asserted by a test. Also removed for the same ambiguity: *par*, *hum*, *ya*, *tha*, *ho*, *tum*. Precision beats recall here, because the cost of a false positive was a refused report.
+
+* **Fix — script detection covered only Devanagari.** The production session that triggered this was part **Urdu**, which is written in Arabic script, so the Devanagari check never fired and the verdict came entirely from the Latin half (via the `the` collision above — two bugs conspiring to produce a plausible-looking wrong answer). Detection now spans Arabic/Urdu plus Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada and Malayalam.
+
+* **Fix**: the English share is now computed from Latin-script tokens **regardless** of a script hit. A session that is mostly English with one Urdu turn was being reported as "0% English function words", which misdescribes it — the script hit changes the verdict, not the arithmetic.
+
+* **Fix**: `GET /sessions/{id}/report` on an unknown session said "no report generated for this session yet" rather than "session not found" — `_report_or_404` ran before the session lookup, sending someone to the generate button for an id that does not exist.
+
+* **Fix**: `build-artifacts.sh` tars with `--no-xattrs`. A tarball built on macOS carried `com.apple.provenance` attributes that GNU tar on the instance cannot read, emitting ~130 warning lines into the deploy output — enough noise to hide a real error.
+
+  Four new tests (42 total): pure English is never mistaken for code-mixed, the wordlists are disjoint, non-Latin script is caught beyond Devanagari, a non-English session is scored by default, and its English-dependent criteria come back low confidence.
+
+## 2026-08-26 (the report gets its own screen)
+
+* **Change**: the development report is now a **screen**, not a panel wedged above the sessions table. `App.jsx` gains a `report` screen alongside `list`/`create`/`detail`/`session` — the same `useState` switch the console already uses instead of a router — with its own breadcrumb trail (`Interview Training › <role> › <candidate> · report`) and the full viewport height. It is a document a trainer reads end to end and prints from; squeezing it into a strip above a table fought that.
+
+  `InterviewDetail` no longer owns any report state: the row calls `onOpenReport(session)` and the parent switches screens. That also removed the `justReported` set it kept to stop a freshly generated report still reading "Generate" — leaving the report screen now refetches the session list, so the row reflects the server rather than a local guess.

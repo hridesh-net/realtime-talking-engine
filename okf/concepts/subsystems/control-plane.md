@@ -26,6 +26,10 @@ sources:
 ---
 # Control plane
 
+> **Six narrow ports now.** `ReportStore` and the `ReportWorkflowStore`
+> composition landed with session reports; `control_plane/reporting.py` is the
+> seam that assembles a `report_engine` bundle from stored rows.
+
 `control_plane/` — the top layer. Composes the three agent packages
 (`expectation_agent`, `candidate_agent`, `evaluation_agent`) and owns all
 storage. The only package allowed to import `sqlite3`.

@@ -335,6 +335,26 @@ class SessionResponse(BaseModel):
     recording: RecordingMeta | None = None
 
 
+class ReportMeta(BaseModel):
+    """A generated report's headline and provenance, without its body.
+
+    The body is large and the list view does not need it. Provenance rides here
+    because two reports are only comparable when it matches - see
+    `docs/REPORT_ENGINE_SCORING_SPEC.md` section 9.
+    """
+
+    session_id: str
+    readiness_index: int | None = None
+    band: str = ""
+    unscoreable: str = ""
+    scoring_version: str
+    rubric_version: str
+    english_weight: float | None = None
+    language_gate: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+
 class SessionSummary(BaseModel):
     """One row of GET /api/v1/interviews/{id}/sessions.
 
@@ -354,6 +374,7 @@ class SessionSummary(BaseModel):
     ended_at: datetime | None = None
     turn_count: int = Field(..., ge=0, description="Turns stored so far, both speakers.")
     has_recording: bool = False
+    has_report: bool = False
 
 
 class TranscriptAppendRequest(BaseModel):

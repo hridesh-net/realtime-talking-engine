@@ -59,11 +59,17 @@ def build_report(bundle: SessionBundle) -> AssessmentReport:
     if report.language.gated:
         report.unscoreable = "language_unsupported"
         return report
-    if report.language.detected != "en":
+
+    english = report.language.detected == "en"
+    if not english:
         report.validity_warnings.append(
-            f"Language detected as '{report.language.detected}' "
-            f"({report.language.english_token_share:.0%} English function words). "
-            "The English rule set does not hold — these numbers are available, not valid."
+            f"This interview was not conducted entirely in English "
+            f"(detected '{report.language.detected}', "
+            f"{report.language.english_token_share:.0%} English function words). "
+            "It has still been scored. What that costs is named per criterion: "
+            "anything counted from English question patterns or English phrase "
+            "lists measures less than it claims to here, and those criteria are "
+            "marked low confidence."
         )
 
     question_acts = acts_module.extract(bundle.turns)
@@ -80,6 +86,8 @@ def build_report(bundle: SessionBundle) -> AssessmentReport:
     report.duration_ms = ctx.duration_ms
     report.question_acts = question_acts
     report.criteria = _score_criteria(bundle.rubric, signals, options.english_weight)
+    if not english:
+        _downgrade_for_language(report.criteria, report.language.detected)
     report.readiness_index = _readiness(report.criteria)
     if report.readiness_index is not None:
         report.band = bundle.rubric.band_for(report.readiness_index)
@@ -158,6 +166,31 @@ def _score_criteria(
         out.append(entry)
 
     return out
+
+
+def _downgrade_for_language(criteria: list[CriterionScore], detected: str) -> None:
+    """Mark criteria whose evidence leans on English as low confidence.
+
+    The score still stands - refusing to produce one was the old behaviour and
+    it left a manager with nothing. What changes is the claim made about it: a
+    criterion counted from English question patterns has measured less of a
+    code-mixed interview than of an English one, and the report should not
+    present the two as equally solid.
+    """
+    for entry in criteria:
+        scored = [s for s in entry.signals if s.measurable and s.weight > 0]
+        if not scored:
+            continue
+        affected = [s for s in scored if s.language_sensitive]
+        if not affected:
+            continue
+        share = sum(s.weight for s in affected) / sum(s.weight for s in scored)
+        entry.confidence = "low"
+        entry.confidence_reason = (
+            f"{share:.0%} of this criterion's evidence is counted from English "
+            f"patterns, and this session was detected as '{detected}'"
+            + (f". {entry.confidence_reason}" if entry.confidence_reason else "")
+        )
 
 
 def _readiness(criteria: list[CriterionScore]) -> int | None:

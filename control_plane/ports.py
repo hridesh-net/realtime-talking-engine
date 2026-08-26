@@ -15,13 +15,14 @@ does not import or subclass anything here.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from candidate_agent.schema import VirtualCandidate
 from control_plane.schemas import (
     InterviewCreateRequest,
     InterviewResponse,
     RecordingMeta,
+    ReportMeta,
     SessionResponse,
     SessionSummary,
     Turn,
@@ -153,6 +154,23 @@ class RecordingStore(Protocol):
 
 
 @runtime_checkable
+@runtime_checkable
+class ReportStore(Protocol):
+    """Persistence for one session's generated report."""
+
+    def save_report(self, session_id: str, report: dict[str, Any]) -> ReportMeta:
+        """Store or replace this session's report. Returns its metadata."""
+        ...
+
+    def get_report(self, session_id: str) -> dict[str, Any] | None:
+        """The stored report body, or None when none has been generated."""
+        ...
+
+    def get_report_meta(self, session_id: str) -> ReportMeta | None:
+        """The stored report's headline and provenance, without its body."""
+        ...
+
+
 class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol):
     """Composition for handlers that read an interview and write its expectation."""
 
@@ -187,3 +205,15 @@ class TurnWorkflowStore(CandidateStore, SessionStore, Protocol):
 @runtime_checkable
 class RecordingWorkflowStore(SessionStore, RecordingStore, Protocol):
     """For the chunk handler, which must check the session's modality first."""
+
+
+class ReportWorkflowStore(InterviewStore, CandidateStore, SessionStore, ReportStore, Protocol):
+    """The ports report generation needs, and no more.
+
+    Generating a report reads the interview (the job card and its clarity
+    facts), the session (the transcript and the persona faced), and the cast
+    candidate - because a *composed* persona has no catalog entry, and its
+    `must_discover` scorecard lives on the candidate rather than in code. Then
+    it writes the report. Composed from the narrow ports rather than handing the
+    handler the whole repository.
+    """

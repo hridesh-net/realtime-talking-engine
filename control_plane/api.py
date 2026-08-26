@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from candidate_agent import archetypes as archetype_catalog
@@ -17,6 +19,7 @@ from candidate_agent.schema import (
 )
 from candidate_agent.session import CANDIDATE, MANAGER, CandidateSessionAgent
 from candidate_agent.voice import build_realtime_session
+from control_plane import reporting
 from control_plane.database import init_db
 from control_plane.ports import (
     CandidateStore,
@@ -26,6 +29,7 @@ from control_plane.ports import (
     InterviewStore,
     RecordingStore,
     RecordingWorkflowStore,
+    ReportWorkflowStore,
     SessionStore,
     SessionWorkflowStore,
     TurnWorkflowStore,
@@ -53,6 +57,8 @@ from expectation_agent.agent import InterviewExpectationAgent
 from expectation_agent.schema import InterviewExpectation
 from llm.base import ModelError, RealtimeBroker
 from llm.factory import build_realtime_broker, realtime_providers_available
+from report_engine import render
+from report_engine.schema import AssessmentReport
 
 
 def get_repo() -> InterviewRepository:
@@ -698,3 +704,89 @@ def get_recording(session_id: str, repo: RecordingStore = Depends(get_repo)) -> 
         media_type=meta.mime_type,
         headers={"Content-Disposition": f'inline; filename="session-{session_id}.webm"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Session reports
+# ---------------------------------------------------------------------------
+# The report is **stored**, not recomputed on read. A threshold change must not
+# silently move a score a trainer already discussed with a manager -- the whole
+# comparability design (spec section 9) rests on a report being a fixed artifact
+# with its provenance stamped on it. Regenerating is an explicit POST.
+
+
+def _report_or_404(repo: ReportWorkflowStore, session_id: str) -> dict[str, Any]:
+    report = repo.get_report(session_id)
+    if report is not None:
+        return report
+    # Distinguish the two 404s. "No report yet" sends someone to the generate
+    # button; "no such session" sends them to check the id they were given.
+    detail = (
+        "no report generated for this session yet"
+        if repo.get_session(session_id)
+        else "session not found"
+    )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+@router.post("/sessions/{session_id}/report", status_code=status.HTTP_201_CREATED)
+def generate_session_report(
+    session_id: str,
+    english_weight: float | None = None,
+    language_gate: bool = False,
+    repo: ReportWorkflowStore = Depends(get_repo),
+) -> dict[str, Any]:
+    """Generate (or regenerate) this session's report and store it.
+
+    The two query parameters are the operator toggles from the scoring spec.
+    They are stamped into the report's provenance because a report scored with
+    English weighted in is not comparable to one without it.
+    """
+    session = repo.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    interview = repo.get(session.interview_id)
+    if interview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+    if not session.turns:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="nothing was said in this session, so there is nothing to report on",
+        )
+
+    # A composed persona keeps its scorecard on the candidate, not in the
+    # catalog, so the ground truth is fetched rather than assumed.
+    candidate = repo.get_candidate(session.candidate_id)
+
+    report = reporting.generate(
+        interview,
+        session,
+        candidate,
+        english_weight=english_weight,
+        language_gate=language_gate,
+    )
+    repo.save_report(session_id, report)
+    return report
+
+
+@router.get("/sessions/{session_id}/report")
+def get_session_report(
+    session_id: str, repo: ReportWorkflowStore = Depends(get_repo)
+) -> dict[str, Any]:
+    """The stored report for this session."""
+    return _report_or_404(repo, session_id)
+
+
+@router.get("/sessions/{session_id}/report.html")
+def get_session_report_html(
+    session_id: str, repo: ReportWorkflowStore = Depends(get_repo)
+) -> Response:
+    """The stored report as a self-contained HTML page.
+
+    The console embeds this rather than re-implementing the layout, so what a
+    trainer reads on screen and what comes out of the print dialog are the same
+    document rendered once.
+    """
+    report = _report_or_404(repo, session_id)
+    html = render.to_html(AssessmentReport.model_validate(report))
+    return Response(content=html, media_type="text/html; charset=utf-8")

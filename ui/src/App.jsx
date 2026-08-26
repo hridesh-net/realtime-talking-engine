@@ -13,6 +13,7 @@ import {
 } from './api'
 import InterviewDetail from './InterviewDetail'
 import InterviewList from './InterviewList'
+import ReportView from './ReportView'
 import SessionView from './SessionView'
 import Shell from './Shell'
 import VoiceSessionView from './VoiceSessionView'
@@ -30,6 +31,7 @@ export default function App() {
   const [sessions, setSessions] = useState([])
   const [catalog, setCatalog] = useState({ archetypes: [], rubric_criteria: [], stress_labels: [] })
   const [session, setSession] = useState(null)
+  const [reportSession, setReportSession] = useState(null)
   const [voiceCap, setVoiceCap] = useState(null)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
@@ -43,6 +45,27 @@ export default function App() {
       .then(setVoiceCap)
       .catch(() => setVoiceCap({ available: false, detail: 'voice check failed' }))
   }, [])
+
+  const refreshSessions = async () => {
+    if (!selected) return
+    try {
+      setSessions(await listSessions(selected.id))
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  const openReport = (s) => {
+    setReportSession(s)
+    setScreen('report')
+  }
+
+  // Refresh on the way out so the row reflects a report that now exists.
+  const leaveReport = () => {
+    setScreen('detail')
+    setReportSession(null)
+    refreshSessions()
+  }
 
   const loadInterview = async (iv) => {
     setSelected(iv)
@@ -188,6 +211,22 @@ export default function App() {
     busy,
   }
 
+  // The report is its own screen rather than a panel wedged above the sessions
+  // table: it is a document a trainer reads end to end, and it prints from here.
+  if (screen === 'report' && reportSession) {
+    return (
+      <Shell
+        crumbs={[
+          { label: 'Interview Training', onClick: () => setScreen('list') },
+          { label: selected?.job_title || 'Interview', onClick: () => leaveReport() },
+          { label: `${reportSession.candidate_name} · report` },
+        ]}
+      >
+        <ReportView session={reportSession} onClose={leaveReport} onGenerated={refreshSessions} />
+      </Shell>
+    )
+  }
+
   if (screen === 'session' && session) {
     const View = session.modality === 'voice' ? VoiceSessionView : SessionView
     return (
@@ -254,6 +293,7 @@ export default function App() {
           onEnroll={enroll}
           onEnrollCustom={enrollCustom}
           onDeleteCandidate={removeCandidate}
+          onOpenReport={openReport}
           onBack={() => setScreen('list')}
         />
       )}

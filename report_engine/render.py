@@ -49,6 +49,24 @@ border-radius:10px;margin-bottom:14px;font-size:14px}
 border:1px solid #b2ddff;border-radius:8px;padding:9px 12px}
 .prov{font-size:11px;color:var(--ink3);margin-top:28px;line-height:1.8}
 li{margin-bottom:10px}ul{padding-left:18px}
+
+/* Print is a first-class output here: "download as PDF" is the browser's own
+   print-to-PDF, so this stylesheet is what the saved document looks like.
+   Keeping one renderer for screen and paper is why the report a trainer reads
+   and the report they file cannot drift apart. */
+@page{margin:14mm 12mm}
+@media print{
+  body{background:#fff}
+  .wrap{max-width:none;padding:0}
+  /* A finding split across a page break loses its quote, which is the part
+     that makes it checkable. */
+  .card,blockquote,.alt{break-inside:avoid;page-break-inside:avoid}
+  h2{break-after:avoid;page-break-after:avoid}
+  .card{box-shadow:none}
+  .scroll{overflow:visible}
+  table{font-size:11px}
+  .prov{position:relative;break-before:auto}
+}
 """
 
 

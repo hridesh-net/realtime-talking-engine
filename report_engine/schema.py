@@ -94,8 +94,12 @@ class ScoringOptions(BaseModel):
     #: None = English is advisory only. A float adds a fifth weighted criterion
     #: and scales the rubric's four by (1 - w).
     english_weight: float | None = Field(None, gt=0.0, lt=1.0)
-    #: True refuses a non-English session; False scores it with a stamped warning.
-    language_gate: bool = True
+    #: Interviews happen in whatever language the room speaks, so the default is
+    #: to **score anyway** and say plainly which signals that weakens. Turning
+    #: this on refuses a non-English session outright instead - available for an
+    #: org that would rather have no number than a shaky one, but never the
+    #: default, because a missing report helps nobody.
+    language_gate: bool = False
 
 
 class Criterion(BaseModel):
@@ -175,6 +179,10 @@ class SignalResult(BaseModel):
     weight: float = 1.0
     basis: str = ""
     reason: str = ""
+    #: Whether this measurement rests on English lexicons or English syntax. It
+    #: still produces a number on a code-mixed session; that number is just
+    #: worth less, and the criterion's confidence says so.
+    language_sensitive: bool = False
     evidence: list[Evidence] = Field(default_factory=list)
 
     @property
@@ -257,7 +265,7 @@ class Provenance(BaseModel):
     bundle_version: str = BUNDLE_VERSION
     rubric_version: str = ""
     english_weight: float | None = None
-    language_gate: bool = True
+    language_gate: bool = False
     jurisdiction: str = "IN"
     pack_version: str = ""
     judge: str = "none"
