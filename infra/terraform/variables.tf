@@ -145,6 +145,13 @@ variable "gemini_api_key_placeholder" {
   sensitive   = true
 }
 
+variable "gemini_api_key2_placeholder" {
+  description = "Placeholder for the optional fallback Gemini key. Written at create time only; Terraform never manages the real secret (lifecycle ignore_changes). Leave unset if there is no second key."
+  type        = string
+  default     = "REPLACE_ME"
+  sensitive   = true
+}
+
 variable "openai_api_key_placeholder" {
   description = "Placeholder value written at create time only; Terraform never manages the real secret (lifecycle ignore_changes). Set the real key out-of-band via console or CLI."
   type        = string

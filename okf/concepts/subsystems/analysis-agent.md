@@ -103,6 +103,33 @@ voice; and **never rate warmth or confidence as a score** — acoustic emotion
 inference is unreliable and culturally biased, and this is Indian-English
 frontline speech. Tone is described with anchors and left for a human to read.
 
+## It needs ffmpeg on PATH, and nothing else in the repo does
+
+`analysis_agent/audio.py` shells out to **`ffprobe`** for a recording's duration
+and **`ffmpeg`** to cut it into windows and write each as WAV. They are
+subprocesses, not a vendor SDK, which is why they live here rather than behind
+the `llm/` boundary — but they are still a hard runtime dependency, and the only
+one in this repository that is not a Python package.
+
+The failure is narrow and therefore easy to miss: the control plane starts fine,
+serves the console fine, and generates reports fine. Only **Analyse** fails, with
+
+```
+AudioError: ffmpeg/ffprobe not found on PATH
+```
+
+That is exactly how it reached production on 2026-08-27 — the deploy that first
+shipped `analysis_agent/` to the instance did not ship the binary it shells out
+to, because `infra/` had been written before this package existed and nothing
+named the dependency. Amazon Linux 2023 has no ffmpeg package at all, so
+`infra/terraform/templates/bootstrap.sh.tftpl` now installs the static build
+alongside Caddy, for the same reason and with the same shape.
+
+**Codec requirement, not just presence.** The browser recorder produces WebM
+with Opus, so an ffmpeg build without the `matroska,webm` demuxer or the `opus`
+decoder satisfies `shutil.which` and then fails on the first real recording.
+Check the decoders, not just the binary.
+
 ## Related
 
 [Report engine](/concepts/subsystems/report-engine.md) ·

@@ -42,7 +42,36 @@ Generate Go structs from the schema, or hand-write them to match it.
 **`contract_version`** — pin it. Reject a contract whose major version the
 engine does not implement rather than running a persona you cannot honour.
 
-**Now `v1.3`** (2026-08-25). The minor bump adds the fields the dual-model
+**Now `v1.6`** (2026-09-01). v1.5's gender-matched voice only engaged for
+personas carrying a `HumanTraitProfile`, and the default cast path — the fixed
+catalog archetypes — has none, so most personas were still hashing over the full
+roster and a persona named "Tanvi" could speak as a man. The casting model now
+declares `presented_gender` (`woman | man | neutral`) describing the identity it
+just authored, and code maps it to the voice subset;
+`human_traits.gender_presentation` still wins where it exists. **No new contract
+field and no prompt-text change** — the engine needs no change, it pins by major
+version. Same reason for the bump as v1.5: the compiled `tts_voice_id` for
+identical inputs moved.
+
+**`v1.5`** (2026-09-01). The minor bump changes **which voice a persona is
+cast in**, not what the contract holds. `tts_voice_id` is picked from the
+subset of the roster whose vendor-documented voice gender matches the persona's
+`gender_presentation` — a persona presenting as a woman no longer speaks in a
+man's voice. **No new field and no prompt-text change**, so the engine needs no
+change: it pins by major version. The bump exists because the compiled
+`tts_voice_id` for identical inputs moved, and the contract version is the only
+thing that records that. Already-cast personas keep the `tts_voice_id` stored in
+their contract — it is never recomputed.
+
+**`v1.4`** (2026-09-01). The minor bump adds a **THE ROLE YOU ARE
+INTERVIEWING FOR** section to `system_prompt` — the job title with its
+qualifiers, a code-truncated JD précis, and an instruction anchoring the
+persona's answers to that role. **No new field**, so the engine needs no change:
+it pins by major version, and the only difference is longer `system_prompt`
+bytes. A contract compiled without a job spec emits no such section and is
+byte-identical to v1.3.
+
+**`v1.3`** (2026-08-25). The minor bump adds the fields the dual-model
 runtime needs compiled at design time. All are optional — a v1.0–v1.2 contract
 parses with them zero-valued and the engine degrades to the single-model path
 rather than refusing to run.
@@ -55,7 +84,7 @@ rather than refusing to run.
 | `unlock_spec` | `{kind: never\|conditional, condition, hints}`. `never` short-circuits per-turn unlock assessment entirely — most personas never unlock and paying a reasoning call every turn to re-learn that is waste. |
 | `tts_voice_id` | The voice stall clips are synthesized in. **Must equal the speech model's voice.** Empty means the engine resolves it with the same deterministic rule (`sha256(candidate_id) % len(voices)`). |
 
-**Earlier minors** (both still apply):
+**Earlier minors** (all still apply):
 
 **`v1.2`** (2026-08-24). Two minor bumps landed on separate branches and
 each called itself `v1.1`; the merge is a third shape, so it takes its own

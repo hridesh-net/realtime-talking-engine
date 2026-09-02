@@ -36,7 +36,17 @@ concept and append to [log.md](/log.md) — see
 Curated 2026-08-21 against commit `802c8426` by reading every documented source
 file, and kept current since — see [log.md](/log.md) for what has changed.
 
-Most recent substantive change: the **audio analysis agent** and the report
+Most recent substantive change (2026-08-27): the **report a manager can read**.
+The default render is the five sections the hiring manager asked for — the four
+competencies, the Q&A, BEI questions, strengths against gaps, and the areas to
+improve — with the signal tables, the readiness index and the summary behind a
+`detail` flag. **Spec phase 6 — the judge** — now writes its prose, with
+`report_engine/validate.py` vetoing any claim whose quote is not in the
+transcript verbatim and any sentence that states a number. See
+[Report engine](/concepts/subsystems/report-engine.md) and the judge table in
+[Determinism split](/concepts/determinism.md).
+
+Previous substantive change: the **audio analysis agent** and the report
 built from it. `analysis_agent/` listens to a session's recording against the
 expectation it was held against and stores observations; `report_engine/`
 composes a report with two clearly-separated halves, **counted** and **heard**.
@@ -44,7 +54,7 @@ See [Audio analysis agent](/concepts/subsystems/analysis-agent.md),
 [Report engine](/concepts/subsystems/report-engine.md) and
 [What a session costs](/references/pricing.md).
 
-Previous substantive change: the **Phase 0 MVP milestone M1** — the interview
+Before that: the **Phase 0 MVP milestone M1** — the interview
 configuration the training-wizard specification asks for, including a `language`
 setting that genuinely reaches the persona's prompt and the speech-to-text hint,
 operator notes that cannot override an archetype, and the fixed role-fact

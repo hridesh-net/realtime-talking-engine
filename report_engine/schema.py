@@ -253,6 +253,19 @@ class Evidence(BaseModel):
         return f"{total // 60:02d}:{total % 60:02d}"
 
 
+class ChecklistItem(BaseModel):
+    """One item a signal counted over, and whether the manager covered it.
+
+    A ratio signal loses the thing a reader most wants back: *which* ones were
+    missed. "4 of 5 role facts conveyed" sends them looking for the fifth. A
+    signal that counts over a known list therefore publishes the list, and the
+    scorecard prints it as a covered/missed strip.
+    """
+
+    label: str
+    covered: bool
+
+
 class SignalResult(BaseModel):
     """One deterministic measurement and the score it transfers to."""
 
@@ -269,13 +282,19 @@ class SignalResult(BaseModel):
     reason: str = ""
     #: Where the number came from. `measured` is counted from the transcript by
     #: code and is reproducible; `assessed` came from the audio analysis and
-    #: rests on a model's reading. The report shows which is which, because a
-    #: reader is owed the difference.
-    source: str = Field("measured", pattern="^(measured|assessed)$")
+    #: rests on a model's reading of the recording; `judged` came from the report
+    #: judge reading the transcript, and every claim under it carries a span
+    #: checked verbatim. The report shows which is which, because a reader is
+    #: owed the difference.
+    source: str = Field("measured", pattern="^(measured|assessed|judged)$")
     #: Whether this measurement rests on English lexicons or English syntax. It
     #: still produces a number on a code-mixed session; that number is just
     #: worth less, and the criterion's confidence says so.
     language_sensitive: bool = False
+    #: Populated only by signals that count over a named list. Empty everywhere
+    #: else, and never scored from — the sub-score is the measurement, this is
+    #: the same measurement itemised for the reader.
+    checklist: list[ChecklistItem] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
 
     @property
@@ -300,16 +319,42 @@ class SignalResult(BaseModel):
         self.evidence = unique
 
 
+class Bullet(BaseModel):
+    """One plain-language line under a criterion: what the manager did, or did not.
+
+    The scorecard a reader acts on has to say what happened, not which detector
+    fired. `signals` still carries the measurement behind every bullet, so the
+    claim stays checkable — this is the sentence, not the evidence.
+    """
+
+    text: str
+    #: `positive` earned the criterion something, `negative` cost it something,
+    #: `neutral` is context that did neither. Drives nothing but colour.
+    polarity: str = Field("neutral", pattern="^(positive|negative|neutral)$")
+    #: The signal this line was written about, so a bullet can always be traced
+    #: back to the number it came from.
+    signal_id: str = ""
+
+
 class CriterionScore(BaseModel):
     """One rubric criterion, scored from its measurable signals."""
 
     id: str
     label: str
+    #: The rubric's own description of what this criterion covers, copied so the
+    #: scorecard can say what a competency *is* without importing the rubric.
+    covers: list[str] = Field(default_factory=list)
     weight: float
     score: float | None = None
     confidence: str = "high"
     confidence_reason: str = ""
     signals: list[SignalResult] = Field(default_factory=list)
+
+    #: The paragraph a reader gets instead of the signal table. Composed by code
+    #: from the measurements; replaced by the judge's prose when one has run.
+    narrative: str = ""
+    #: Up to three plain-language lines under the narrative.
+    bullets: list[Bullet] = Field(default_factory=list)
 
 
 class QuestionAct(BaseModel):
@@ -364,6 +409,10 @@ class Provenance(BaseModel):
     #: The analysis that fed this report, when there was one.
     analysis_instructions_version: str = ""
     analysis_model: str = ""
+    #: The judge that wrote this report's prose, when one has run. Empty means
+    #: every sentence in the report was composed by code from the measurements.
+    judge_model: str = ""
+    judge_version: str = ""
 
 
 class AssessmentReport(BaseModel):
@@ -375,12 +424,19 @@ class AssessmentReport(BaseModel):
     job_title: str = ""
     modality: str = "text"
     duration_ms: int = 0
+    #: When the session was held. Carried onto the report because a filed
+    #: development report is read months later, when "which one was this" is the
+    #: first question.
+    started_at: datetime | None = None
 
     unscoreable: str = ""
     validity_warnings: list[str] = Field(default_factory=list)
 
     readiness_index: int | None = None
     band: str = ""
+    #: The paragraph the report opens with. Composed by code from the criterion
+    #: scores; replaced by the judge's prose when one has run.
+    summary: str = ""
     criteria: list[CriterionScore] = Field(default_factory=list)
 
     strengths: list[Finding] = Field(default_factory=list)

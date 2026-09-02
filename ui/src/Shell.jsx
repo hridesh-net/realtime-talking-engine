@@ -1,32 +1,15 @@
 /**
  * The console chrome: icon rail, topbar, breadcrumbs, footer.
  *
- * Every rail entry except Interview Training is disabled. This service is one
- * product inside the SkillBrew.AI console; showing the neighbours as live links
- * would promise navigation that goes nowhere.
+ * The rail carries **only Interview Training** — the one product this service
+ * is. It used to carry four more (Home, BrewVoice, AI Interviews, Assessments),
+ * every one of them `disabled` with a "not part of this service" tooltip, on
+ * the theory that the neighbours should be visible even if unreachable. In
+ * practice a column of dead icons reads as a broken console rather than a
+ * bigger one, so they are gone. Add an entry here only when it navigates.
  */
 
 const RAIL = [
-  {
-    key: 'home',
-    title: 'Home',
-    path: <path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />,
-  },
-  {
-    key: 'brewvoice',
-    title: 'BrewVoice',
-    path: <path d="M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v5H4zM17 14h3v5h-3z" />,
-  },
-  {
-    key: 'ai-interviews',
-    title: 'AI Interviews',
-    path: (
-      <>
-        <rect x="3" y="5" width="18" height="12" rx="2" />
-        <path d="M8 21h8" />
-      </>
-    ),
-  },
   {
     key: 'training',
     title: 'Interview Training',
@@ -38,21 +21,11 @@ const RAIL = [
       </>
     ),
   },
-  {
-    key: 'assessments',
-    title: 'Assessments',
-    path: <path d="M9 5h6M9 12h6M9 19h6M5 5h.01M5 12h.01M5 19h.01" />,
-  },
 ]
 
 function RailIcon({ item }) {
   return (
-    <button
-      className={`ri ${item.active ? 'active' : ''}`}
-      title={item.active ? item.title : `${item.title} — not part of this service`}
-      disabled={!item.active}
-      type="button"
-    >
+    <button className={`ri ${item.active ? 'active' : ''}`} title={item.title} type="button">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         {item.path}
       </svg>
@@ -67,14 +40,7 @@ export default function Shell({ crumbs = [], children }) {
   return (
     <div className="app">
       <aside className="rail" aria-label="Navigation">
-        <svg className="logo" viewBox="0 0 32 32" fill="none">
-          <path
-            d="M16 3v26M9 9c0 5 14 5 14 0M9 23c0-5 14-5 14 0"
-            stroke="#0555C8"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-          />
-        </svg>
+        <img className="logo" src="/logo.svg" alt="SkillBrew" />
         {RAIL.map((item) => (
           <RailIcon key={item.key} item={item} />
         ))}

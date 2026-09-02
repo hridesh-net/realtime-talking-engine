@@ -28,6 +28,7 @@ from candidate_agent.engine_contract import (
     DEFAULT_LANGUAGE,
     build_engine_contract,
     casting_realism_note,
+    normalize_presented_gender,
 )
 from candidate_agent.prompts import (
     PERSONA,
@@ -135,6 +136,10 @@ class VirtualCandidateAgent:
         human_traits: HumanTraitProfile | None = None,
         archetype: Archetype | None = None,
         voices: Sequence[str] = (),
+        location: str = "",
+        department: str = "",
+        manager_level: str = "",
+        clarity_facts: list[dict[str, str]] | None = None,
     ) -> VirtualCandidate:
         """Cast one persona for this interview and archetype.
 
@@ -165,6 +170,14 @@ class VirtualCandidateAgent:
                 `archetype_key` up in the catalog. Personas composed per
                 interview are validated but never registered, so there is
                 nothing in the catalog to find.
+            location: Where the role is based. Reaches both the casting prompt
+                and the compiled runtime prompt.
+            department: The team the role sits in, for the casting prompt.
+            manager_level: Who the role reports to, for the casting prompt.
+            clarity_facts: The role facts the interviewer is expected to be
+                able to state (`evaluation_agent.schema.ClarityFact` dumps).
+                The persona is the one who has to notice whether they were
+                said, so it is told what they are.
 
         Returns:
             The assembled persona, including its engine contract.
@@ -211,6 +224,10 @@ class VirtualCandidateAgent:
                 ],
                 expectation_note=expectation_note(expectation),
                 avoid_names=avoid_names,
+                location=location,
+                department=department,
+                manager_level=manager_level,
+                clarity_facts=clarity_facts,
             )
         )
 
@@ -233,6 +250,11 @@ class VirtualCandidateAgent:
         resume_claims = self._build_resume_claims(draft)
 
         name = str(draft.get("name") or "Unnamed Candidate").strip()
+        # Model-authored, code-validated: the only thing that knows how the
+        # name it just wrote reads. Used for the voice when there is no
+        # code-owned `human_traits.gender_presentation` to override it, and
+        # stored so a persona can explain the voice it speaks in.
+        presented_gender = normalize_presented_gender(draft.get("presented_gender"))
         headline = str(draft.get("headline") or archetype.label).strip()
         background = str(draft.get("background") or archetype.description).strip()
         years = max(0, min(40, int(draft.get("years_experience") or 0)))
@@ -251,8 +273,15 @@ class VirtualCandidateAgent:
             policy=policy,
             opening_line=opening_line,
             human_traits=human_traits,
+            presented_gender=presented_gender,
             language=language,
             voices=voices,
+            job_title=job_title,
+            jd=jd,
+            company_type=company_type,
+            experience_level=experience_level,
+            job_location_type=job_location_type,
+            location=location,
         )
 
         # Reproducibility claim: everything here is derived from the seed alone,
@@ -274,6 +303,9 @@ class VirtualCandidateAgent:
             {
                 "seed_fingerprint": seed_fingerprint,
                 "name": name,
+                # Model-authored and stored, and it decides the voice a manager
+                # hears — exactly what the integrity claim is for.
+                "presented_gender": presented_gender,
                 "background": background,
                 "knowledge": {k.skill: k.level for k in knowledge_map},
                 "stances": {k.skill: k.stance for k in knowledge_map},
@@ -289,6 +321,7 @@ class VirtualCandidateAgent:
             archetype_label=archetype.label,
             catalog_version=CATALOG_VERSION,
             name=name,
+            presented_gender=presented_gender,
             headline=headline,
             background=background,
             years_experience=years,

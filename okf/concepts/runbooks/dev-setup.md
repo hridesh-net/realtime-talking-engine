@@ -47,16 +47,36 @@ service binds `0.0.0.0` while the UI proxy targets `127.0.0.1`.
 
 # Environment
 
+## ffmpeg — required for audio analysis only
+
+`analysis_agent` shells out to `ffprobe` and `ffmpeg`; nothing else in the repo
+does. Everything except the **Analyse** action works without them.
+
+```bash
+brew install ffmpeg            # macOS
+sudo dnf install ffmpeg        # or the distro equivalent
+ffmpeg -hide_banner -formats | grep matroska,webm   # the recorder's container
+```
+
 ## Credentials — at least one required
 
 | Var | Used when |
 |---|---|
 | `GEMINI_API_KEY` | provider is `gemini` (the default pick) |
+| `GEMINI_API_KEY2` | *optional.* A second Gemini key, tried automatically when the first fails for a reason that names the key |
 | `OPENAI_API_KEY` | **required for voice mode**, whatever the text provider is |
 | `OPENAI_API_KEY` | provider is `openai` |
 
 With no `*_PROVIDER` set, the factory takes the first provider whose key is
 present, checking Gemini first.
+
+`GEMINI_API_KEY2` is a **fallback, not a configuration**: it does not make
+Gemini available on its own, and setting it changes nothing until the primary
+key fails with a 401/403/429, an invalid or expired key, or a quota/rate-limit
+error. Then the same call is retried on it, once, and it is preferred for the
+rest of the process. Any other failure is not retried. Nothing is visible to the
+client; the switch is a server-side warning log. See
+[the LLM port](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01).
 
 ## Provider and model selection
 

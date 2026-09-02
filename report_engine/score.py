@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 from report_engine import acts as acts_module
-from report_engine import language, segment
+from report_engine import language, narrate, segment
 from report_engine.coach import for_signal, in_perspective
 from report_engine.schema import (
     AssessmentReport,
@@ -31,14 +31,35 @@ from report_engine.signals.context import load_pack
 #: is reported with low confidence and the report names what was missing.
 CONFIDENCE_FLOOR = 0.5
 
+#: Strengths, and gaps, shown per report. The same convention as
+#: `ReportConfig.max_development_areas` and for the same reason: Kluger &
+#: DeNisi's mechanism is that diffuse, high-volume feedback shifts attention from
+#: the task to the self, so a longer list is not a better one. Selection is
+#: unchanged — these are still the highest and lowest scoring signals with valid
+#: evidence, and every signal remains in `criteria[].signals` either way.
+MAX_FINDINGS_PER_SIDE = 3
+
 #: Kluger & DeNisi's mechanism argues against volume: diffuse feedback shifts
 #: attention from the task to the self. Three is convention, not a finding, and
 #: it is now the default of `ReportConfig.max_development_areas` rather than a
 #: constant here - an org running longer coaching sessions may want more.
 
 
-def build_report(bundle: SessionBundle) -> AssessmentReport:
-    """Turn one session bundle into one report. Deterministic end to end."""
+def build_report(
+    bundle: SessionBundle, extra_signals: list[SignalResult] | None = None
+) -> AssessmentReport:
+    """Turn one session bundle into one report. Deterministic end to end.
+
+    Args:
+        bundle: The session, the rubric and the persona.
+        extra_signals: Measurements this module did not compute — today, the
+            judge's evidence-checked `must_discover` verdicts. They join the
+            counted signals *before* aggregation rather than being patched onto
+            a finished report, so the criterion score, the readiness index and
+            the finding selection are all still derived here, in one place, from
+            the whole signal set. Passing none is the offline path and is
+            byte-identical across runs.
+    """
     options = bundle.scoring_options
     pack = load_pack(bundle.jurisdiction.lower())
 
@@ -48,6 +69,7 @@ def build_report(bundle: SessionBundle) -> AssessmentReport:
         persona_label=bundle.persona.label or bundle.persona.archetype_key,
         job_title=bundle.job_card.job_title,
         modality=bundle.session.modality,
+        started_at=bundle.session.started_at,
         provenance=Provenance(
             analysis_instructions_version=(
                 bundle.analysis.instructions_version if bundle.analysis else ""
@@ -85,7 +107,7 @@ def build_report(bundle: SessionBundle) -> AssessmentReport:
     _label_protected(question_acts, pack)
 
     ctx = Context(bundle=bundle, acts=question_acts, segments=segments)
-    signals = extract_all(ctx)
+    signals = extract_all(ctx) + list(extra_signals or [])
     for signal in signals:
         signal.dedupe_evidence()
 
@@ -102,6 +124,9 @@ def build_report(bundle: SessionBundle) -> AssessmentReport:
     report.strengths, report.gaps = _findings(signals, bundle.report_config.perspective)
     report.development_areas = report.gaps[: bundle.report_config.max_development_areas]
     report.next_practice, report.next_practice_reason = _next_practice(bundle, report.criteria)
+    # Last, because every sentence it writes is composed from numbers the lines
+    # above have already settled.
+    narrate.apply(report, bundle.report_config.perspective)
     return report
 
 
@@ -114,6 +139,7 @@ def _basis(bundle: SessionBundle, report: AssessmentReport, signals: list[Signal
     """
     measured = [s for s in signals if s.measurable and s.source == "measured"]
     assessed = [s for s in signals if s.measurable and s.source == "assessed"]
+    judged = [s for s in signals if s.measurable and s.source == "judged"]
     lines = [
         f"**{len(measured)} measured signals** — counted from the stored transcript by code. "
         "Re-running produces the same numbers.",
@@ -159,6 +185,14 @@ def _basis(bundle: SessionBundle, report: AssessmentReport, signals: list[Signal
             "not evidence that nothing was asked."
         )
 
+    if judged:
+        lines.append(
+            f"**{len(judged)} judged signal(s)** — read out of the transcript by the "
+            "report judge. Every claim under one carries a quote matched word for "
+            "word against the transcript; a claim whose quote did not match was "
+            "dropped rather than counted against the manager."
+        )
+
     cautions.append(
         "Every number is an analytical estimate of how the manager interviewed. "
         "There is no pass, no fail, and no criterion that caps another."
@@ -199,6 +233,7 @@ def _score_criteria(
     weights = _effective_weights(rubric, english_weight)
     labels = {c.id: c.label for c in rubric.criteria}
     labels.setdefault("communication_english", "Communication & Presentation (English)")
+    covers = {c.id: list(c.covers) for c in rubric.criteria}
 
     out: list[CriterionScore] = []
     for criterion_id, weight in weights.items():
@@ -213,6 +248,7 @@ def _score_criteria(
         entry = CriterionScore(
             id=criterion_id,
             label=labels.get(criterion_id, criterion_id),
+            covers=covers.get(criterion_id, []),
             weight=round(weight, 4),
             signals=mine,
         )
@@ -279,6 +315,18 @@ def _readiness(criteria: list[CriterionScore]) -> int | None:
     return round(10.0 * sum(score * c.weight for c, score in scored) / total)
 
 
+#: Measurements that say nothing without the signal's name in front of them.
+#: "no" is not a finding; "Agenda and duration stated: no" is.
+_BARE = {"yes", "no", "none", "", "—"}
+
+
+def _detail(signal: SignalResult) -> str:
+    """The measurement, phrased so it can stand alone under a headline."""
+    if signal.display.strip().lower() in _BARE:
+        return f"{signal.label}: {signal.display}"
+    return signal.display
+
+
 def _findings(
     signals: list[SignalResult], perspective: str = "manager"
 ) -> tuple[list[Finding], list[Finding]]:
@@ -288,7 +336,7 @@ def _findings(
 
     strengths: list[Finding] = []
     for signal in ranked:
-        if (signal.sub_score or 0) < 7.5 or len(strengths) >= 4:
+        if (signal.sub_score or 0) < 7.5 or len(strengths) >= MAX_FINDINGS_PER_SIDE:
             break
         coaching = for_signal(signal.id)
         if not coaching.strength:
@@ -297,14 +345,14 @@ def _findings(
             Finding(
                 signal_id=signal.id,
                 headline=in_perspective(coaching.strength, perspective),
-                detail=signal.display,
+                detail=_detail(signal),
                 evidence=signal.evidence[:2],
             )
         )
 
     gaps: list[Finding] = []
     for signal in reversed(ranked):
-        if (signal.sub_score or 0) >= 6.0 or len(gaps) >= 4:
+        if (signal.sub_score or 0) >= 6.0 or len(gaps) >= MAX_FINDINGS_PER_SIDE:
             break
         coaching = for_signal(signal.id)
         if not coaching.gap:
@@ -313,7 +361,7 @@ def _findings(
             Finding(
                 signal_id=signal.id,
                 headline=in_perspective(coaching.gap, perspective),
-                detail=signal.display,
+                detail=_detail(signal),
                 alternative=coaching.alternative,
                 evidence=signal.evidence[:2],
             )
@@ -331,8 +379,7 @@ def _next_practice(bundle: SessionBundle, criteria: list[CriterionScore]) -> tup
     stress = bundle.persona.stresses.get(weakest.id, 0)
     return (
         weakest.id,
-        f"Weakest criterion is {weakest.label} at {weakest_score}/10. "
-        f"Practise against a persona that stresses it harder than "
-        f"'{bundle.persona.label or bundle.persona.archetype_key}' did "
-        f"(stress level {stress}/4 on this criterion).",
+        f"{weakest.label} was weakest at {narrate.out_of_four(weakest_score)}/4. Practise "
+        f"against a persona that stresses it harder than "
+        f"'{bundle.persona.label or bundle.persona.archetype_key}' (stress {stress}/4).",
     )

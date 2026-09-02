@@ -24,6 +24,21 @@ resource "aws_ssm_parameter" "gemini_api_key" {
   }
 }
 
+# Optional second Gemini key. The control plane tries it automatically when the
+# primary fails for a reason that names the key (401/403/429, invalid/expired,
+# quota, rate limit) — see llm/failover.py. The parameter always exists so the
+# value can be set out-of-band later; leaving it at the placeholder is fine,
+# bootstrap treats an unset-looking value as no fallback key.
+resource "aws_ssm_parameter" "gemini_api_key2" {
+  name  = "/${var.project}/${var.environment}/GEMINI_API_KEY2"
+  type  = "SecureString"
+  value = var.gemini_api_key2_placeholder
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 resource "aws_ssm_parameter" "openai_api_key" {
   name  = "/${var.project}/${var.environment}/OPENAI_API_KEY"
   type  = "SecureString"

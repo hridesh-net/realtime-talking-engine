@@ -16,8 +16,20 @@ from fastapi.testclient import TestClient
 from candidate_agent import archetypes as archetype_catalog
 from candidate_agent import engine_contract as ec
 from candidate_agent.agent import VirtualCandidateAgent
+from control_plane import api as api_module
 from control_plane.api import get_candidate_agent
+from control_plane.database import init_db
 from control_plane.main import build_app
+from control_plane.repository import InterviewRepository
+from expectation_agent.schema import (
+    BehavioralAssessment,
+    EvaluationCriterion,
+    InterviewerGuidance,
+    InterviewExpectation,
+    InterviewPhase,
+    ResumeProbing,
+    SkillExpectation,
+)
 from llm.base import StructuredModel
 
 JOB = {
@@ -255,3 +267,119 @@ def test_a_custom_persona_survives_a_process_restart(tmp_path):
         "/api/v1/sessions", json={"interview_id": interview_id, "archetype": "dyn-000000000000"}
     )
     assert missing.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# The cast path inside POST /sessions
+#
+# "Create & chat" casts a persona that was never enrolled. It used to do so
+# with `expectation=None` and a hardcoded interview type, and without the
+# location, department, reporting line or role facts stored on the interview —
+# so the same archetype produced a measurably weaker, less grounded persona
+# here than through enrollment.
+# ---------------------------------------------------------------------------
+
+
+class CapturingAgent(VirtualCandidateAgent):
+    """A real agent over the fake model, recording what casting was asked for."""
+
+    def __init__(self) -> None:
+        super().__init__(model=FakeModel("fake-1", 0.35))
+        self.kwargs: dict[str, Any] = {}
+
+    async def generate(self, **kwargs: Any):  # type: ignore[override]
+        self.kwargs = kwargs
+        return await super().generate(**kwargs)
+
+
+def _expectation(interview_id: str) -> InterviewExpectation:
+    return InterviewExpectation(
+        interview_id=interview_id,
+        interview_type="behavioral",
+        structure=[
+            InterviewPhase(
+                name="Warm up", duration_minutes=5, mandatory=True, guidance="Set the scene."
+            )
+        ],
+        mandatory_skills=[
+            SkillExpectation(
+                skill="Fiber splicing",
+                priority="high",
+                min_duration_minutes=10,
+                assessment_method="discussion",
+                evidence_to_look_for="a job they spliced themselves",
+            )
+        ],
+        resume_probing=ResumeProbing(
+            required=True, focus_areas=["gaps"], sample_questions=["why?"]
+        ),
+        behavioral_assessment=BehavioralAssessment(
+            required=True, focus_areas=["ownership"], sample_questions=["tell me about a mistake"]
+        ),
+        red_flags=["blames the team"],
+        green_flags=["names the customer"],
+        evaluation_criteria=[
+            EvaluationCriterion(name="Craft", weight=1.0, description="Can they splice?")
+        ],
+        interviewer_guidance=InterviewerGuidance(dos=["probe"], donts=["lead"]),
+    )
+
+
+def test_starting_a_session_casts_with_the_stored_expectation_and_job_spec():
+    repo = InterviewRepository(init_db(":memory:"))
+    agent = CapturingAgent()
+    app = build_app(":memory:")
+    app.dependency_overrides[api_module.get_repo] = lambda: repo
+    app.dependency_overrides[get_candidate_agent] = lambda: agent
+    client = TestClient(app)
+
+    interview_id = client.post(
+        "/api/v1/interviews",
+        json={
+            **JOB,
+            "location": "Kochi",
+            "department": "Network",
+            "manager_level": "Frontline manager",
+            "clarity_facts": [{"key": "targets", "statement": "Six installs a day."}],
+        },
+    ).json()["id"]
+    repo.save_expectation(_expectation(interview_id), model_used="offline-fixture")
+
+    created = client.post(
+        "/api/v1/sessions", json={"interview_id": interview_id, "archetype": "nervous_fresher"}
+    )
+    assert created.status_code == 201, created.text
+
+    # The stored expectation grounds the persona, and sets the interview type
+    # instead of the "mixed" that used to be hardcoded here.
+    assert agent.kwargs["expectation"] is not None
+    assert agent.kwargs["expectation"].interview_id == interview_id
+    assert agent.kwargs["interview_type"] == "behavioral"
+    # And the half of the job spec that used to stop at the control plane.
+    assert agent.kwargs["location"] == "Kochi"
+    assert agent.kwargs["department"] == "Network"
+    assert agent.kwargs["manager_level"] == "Frontline manager"
+    assert agent.kwargs["clarity_facts"] == [{"key": "targets", "statement": "Six installs a day."}]
+
+
+def test_enrollment_casts_with_the_same_job_spec_the_session_path_uses():
+    repo = InterviewRepository(init_db(":memory:"))
+    agent = CapturingAgent()
+    app = build_app(":memory:")
+    app.dependency_overrides[api_module.get_repo] = lambda: repo
+    app.dependency_overrides[get_candidate_agent] = lambda: agent
+    client = TestClient(app)
+
+    interview_id = client.post(
+        "/api/v1/interviews",
+        json={**JOB, "location": "Kochi", "department": "Network", "manager_level": "Frontline"},
+    ).json()["id"]
+
+    res = client.post(
+        f"/api/v1/interviews/{interview_id}/candidates", json={"archetypes": ["nervous_fresher"]}
+    )
+    assert res.status_code == 201, res.text
+    assert agent.kwargs["location"] == "Kochi"
+    assert agent.kwargs["department"] == "Network"
+    assert agent.kwargs["manager_level"] == "Frontline"
+    assert agent.kwargs["clarity_facts"] == []

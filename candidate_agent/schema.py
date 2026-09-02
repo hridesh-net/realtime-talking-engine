@@ -18,8 +18,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, StringConstraints
 
-PERSONA_VERSION = "v1.2"
-ENGINE_CONTRACT_VERSION = "v1.3"
+PERSONA_VERSION = "v1.3"
+ENGINE_CONTRACT_VERSION = "v1.6"
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +308,14 @@ class VirtualCandidate(BaseModel):
     catalog_version: str
 
     name: str
+    #: How the cast identity presents, as the casting model declared it —
+    #: `woman | man | neutral`, or `""` on a persona stored before v1.3 and on
+    #: one whose model returned something outside the enum (validated down to
+    #: empty rather than raising: a bad enum value must not lose a whole cast).
+    #: Read at cast time to choose the voice, and stored so a persona can
+    #: explain the voice it speaks in. `human_traits.gender_presentation`, when
+    #: present, is code-owned and wins over it.
+    presented_gender: str = Field(default="", pattern="^(woman|man|neutral)?$")
     headline: str
     background: str
     years_experience: int = Field(..., ge=0, le=40)
@@ -344,6 +352,16 @@ CANDIDATE_DRAFT_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "name": {"type": "string"},
+        #: How the name and identity the model just authored *read* — the one
+        #: piece of the persona's presentation only the author of the name can
+        #: know. Code cannot infer it (a name is not a gender lookup table) and
+        #: will not guess, so the model declares it and code maps it to the
+        #: voice subset. `neutral` is a real answer, not a fallback: it means
+        #: the authored identity does not read as either, and it draws from the
+        #: whole roster. Overridden by `human_traits.gender_presentation`
+        #: whenever a persona carries one — see
+        #: `candidate_agent.engine_contract.voices_for_presentation`.
+        "presented_gender": {"type": "string", "enum": ["woman", "man", "neutral"]},
         "headline": {"type": "string"},
         "background": {"type": "string"},
         "years_experience": {"type": "integer"},
@@ -415,6 +433,7 @@ CANDIDATE_DRAFT_JSON_SCHEMA: dict[str, Any] = {
     },
     "required": [
         "name",
+        "presented_gender",
         "headline",
         "background",
         "years_experience",

@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 from report_engine import transfer
-from report_engine.schema import SignalResult
+from report_engine.schema import ChecklistItem, SignalResult
 from report_engine.segment import CLOSE, OPEN
 from report_engine.signals.context import Context
 from report_engine.text import compile_all, content_words, jaccard, sentences
@@ -115,6 +115,7 @@ def _fact_coverage(ctx: Context) -> SignalResult:
                 break
         if not found:
             missed.append(fact.key)
+        out.checklist.append(ChecklistItem(label=fact.key, covered=found))
 
     value = conveyed / len(facts)
     out.value = round(value, 3)

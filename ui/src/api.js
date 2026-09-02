@@ -131,7 +131,8 @@ export const getReport = (sessionId) => request(`/sessions/${sessionId}/report`)
 
 // The console embeds this rather than re-drawing the report, so the page on
 // screen and the page that prints are the same document.
-export const reportHtmlUrl = (sessionId) => `/api/v1/sessions/${sessionId}/report.html`
+export const reportHtmlUrl = (sessionId, detail = false) =>
+  `/api/v1/sessions/${sessionId}/report.html${detail ? '?detail=1' : ''}`
 
 // Analysis reads the audio and takes about a minute, so it starts a background
 // job and returns immediately. The caller polls until the status settles.

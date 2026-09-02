@@ -5,10 +5,12 @@ control plane (FastAPI), the Go engine (`engined`), and Caddy itself
 terminating TLS and serving the built UI. Every cost decision below is
 deliberate — see "Cost decisions" for what was left out and why.
 
-**Nothing in this repository has been applied to AWS.** This Terraform was
-written and validated (`terraform fmt`, `terraform init -backend=false`,
-`terraform validate`) without any AWS credentials, AWS CLI calls, `plan`,
-or `apply`. You need to run `terraform apply` yourself.
+**Applied and live since 2026-08-23.** This paragraph used to say nothing here
+had ever been applied to AWS; that stopped being true when the stack was first
+applied. `terraform.tfstate` in `terraform/` is the real state for the running
+`prod` environment — the instance, the Elastic IP, the data volume and the
+bucket all exist. Treat `terraform apply` as an operation on a live system, and
+read the replacement warning under "Prerequisites" first.
 
 ## Architecture
 
@@ -53,6 +55,21 @@ start until one is wired up, which is the correct failure mode.
   cert without it — see "DNS and TLS" below.
 - Go and Node.js locally (or in CI) to run `infra/build-artifacts.sh`.
 
+The instance installs two things AL2023 has no package for, both as pinned
+static binaries into `/usr/local/bin`: **Caddy**, and **ffmpeg/ffprobe**, which
+the audio analysis agent shells out to for reading a recording's duration and
+cutting it into windows. Without ffmpeg the Analyse button fails with
+`AudioError: ffmpeg/ffprobe not found on PATH` — the control plane starts and
+serves reports normally, so the failure only shows on that one action.
+
+> **Editing `templates/bootstrap.sh.tftpl` replaces the instance.** It is
+> rendered into `user_data`, and `aws_instance.main` sets
+> `user_data_replace_on_change = true`, so the next `terraform apply` after any
+> template edit destroys and recreates the box. The data volume survives
+> (`prevent_destroy`, and it reattaches), but expect several minutes of downtime
+> and a fresh Let's Encrypt certificate. To pick up a template change *without*
+> a replacement, apply the equivalent commands over SSM by hand.
+
 ## Deploying
 
 ```bash
@@ -71,20 +88,38 @@ After the instance exists but before it has anything to run:
 infra/build-artifacts.sh "$(terraform -chdir=infra/terraform output -raw s3_bucket_name)"
 ```
 
-Then either wait for the instance's first boot to pull it (if you ran
-`build-artifacts.sh` before `terraform apply` finished cloud-init, cloud-init
-retries the `aws s3 cp` — it doesn't retry automatically if it already
-failed and moved on, so on a chicken-and-egg first apply, reboot the
-instance after the artifact exists), or reboot the instance:
+On a **first apply**, the instance's first boot pulls the artifact via
+cloud-init (if the artifact wasn't in S3 yet when cloud-init ran, reboot the
+instance after uploading it — cloud-init does not retry a failed pull on its
+own).
+
+## Redeploying (shipping a new build to the running instance)
+
+**A reboot does not redeploy.** `bootstrap.sh` runs from cloud-init's
+`runcmd`, which executes once per *instance*, not per boot — a rebooted
+instance comes back up on whatever code is already on disk. And a bare
+re-run of `bootstrap.sh` extracts the new tarball but ends with
+`systemctl enable --now`, which is a no-op for services that are already
+running — the old processes keep serving. Both were learned the hard way
+(2026-09-01). The working sequence:
+
+```bash
+infra/build-artifacts.sh "$(terraform -chdir=infra/terraform output -raw s3_bucket_name)"
+
+aws ssm send-command \
+  --instance-ids "$(terraform -chdir=infra/terraform output -raw instance_id)" \
+  --document-name AWS-RunShellScript --comment redeploy \
+  --parameters 'commands=["bash /opt/interview-watcher/bootstrap.sh && systemctl restart control-plane.service engined.service"]'
+```
+
+Caddy needs no restart: it serves `ui_dist` from disk per-request, so the
+new UI is live the moment the tarball is extracted. Verify with
+`GET /api/v1/voice-capability` (or any response only the new build can
+produce). For an interactive shell instead:
 
 ```bash
 aws ssm start-session --target "$(terraform -chdir=infra/terraform output -raw instance_id)"
 ```
-
-There is no in-place redeploy mechanism (no orchestrator, single
-instance): shipping a new build means running `build-artifacts.sh` again
-and rebooting the instance (or re-running `bootstrap.sh` by hand over SSM)
-to pick up the new tarball.
 
 ## Secrets
 

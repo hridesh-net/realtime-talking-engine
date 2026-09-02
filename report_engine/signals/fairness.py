@@ -93,10 +93,11 @@ def _protected_topics(ctx: Context) -> SignalResult:
                     out.evidence.append(ctx.evidence(turn.index, f"[{label}] {sentence}"))
 
     out.value = float(len(seen))
+    topics = ", ".join(sorted(t.replace("_", " ") for t in seen))
     out.display = (
         "none detected"
         if not seen
-        else f"{len(seen)} category/categories: {', '.join(sorted(seen))}"
+        else f"{len(seen)} {'category' if len(seen) == 1 else 'categories'}: {topics}"
     )
     out.sub_score = transfer.penalty_count(len(seen), step=4.0)
     return out

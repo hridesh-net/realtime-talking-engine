@@ -58,8 +58,10 @@ run "trait composition (offline)"   $PY -m pytest tests/test_trait_dimensions.py
 run "custom personas (offline)"     $PY -m pytest tests/test_custom_persona_integration.py -q
 run "candidates API (offline)"      $PY -m pytest tests/test_control_plane_candidates_api.py -q
 run "provider errors (offline)"     $PY -m pytest tests/test_model_error_surfacing.py -q
+run "key failover (offline)"        $PY -m pytest tests/test_key_failover.py -q
 run "analysis agent (offline)"     $PY -m pytest tests/test_analysis_agent.py -q
 run "report engine (offline)"      $PY -m pytest tests/test_report_engine.py -q
+run "report judge (offline)"       $PY -m pytest tests/test_report_judge.py -q
 run "full pipeline (offline)"       $PY -m pytest tests/test_full_interview_pipeline_integration.py -q
 
 # -------------------------------------------------------------------- go ----
@@ -101,6 +103,10 @@ run "handover schemas match the code" $PY scripts/export_schemas.py --check
 if (( LIVE )); then
     run "expectation scenarios (live)" $PY tests/test_expectation_agent.py
     run "candidate scenarios (live)"   $PY tests/test_candidate_agent.py
+    # Not a scenario — a smoke test that the Live API still accepts the sealed
+    # session config on the configured model id. Cheap, and the offline suite
+    # cannot see it.
+    run "gemini live mint (live)"      $PY tests/test_gemini_live_mint.py
     # Same convention on the Go side: vendor calls cost money, so they sit
     # behind a build tag and never run in the default offline gate.
     if [[ -f engine/go.mod ]] && command -v go >/dev/null 2>&1; then

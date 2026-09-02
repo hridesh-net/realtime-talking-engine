@@ -17,6 +17,8 @@ sources:
   - resource: /ui/src/api.js
   - resource: /ui/src/App.jsx
   - resource: /ui/src/VoiceSessionView.jsx
+  - resource: /ui/src/geminiLive.js
+  - resource: /ui/src/audio/pcmWorklet.js
   - resource: /ui/src/SessionView.jsx
   - resource: /ui/src/Shell.jsx
   - resource: /ui/src/Wizard.jsx
@@ -63,14 +65,26 @@ Vite proxies `/api` → `http://127.0.0.1:8081`, so **start the API first**.
 |---|---|---|
 | `src/api.js` | Thin `fetch` wrapper over `/api/v1`, one function per endpoint; unwraps FastAPI's `detail` into `Error.message` | — |
 | `src/App.jsx` | Screen switch over `'list' \| 'create' \| 'detail' \| 'session'` in one `useState`. A router would be a dependency to express `if` | all loaders |
-| `src/Shell.jsx` | Icon rail, topbar, breadcrumbs, footer | none |
+| `src/Shell.jsx` | Icon rail (**one entry** — Interview Training), topbar, breadcrumbs, footer | none |
 | `src/InterviewList.jsx` | Landing screen: interview cards, status tabs, search | `GET /interviews` |
 | `src/Wizard.jsx` | Two-step new interview: Basics, then the picker | `POST /interviews` |
 | `src/PersonaPicker.jsx` | `.plist` + sticky `.detail` — traits, beats, stress bars | `GET /candidate-archetypes` |
 | `src/InterviewDetail.jsx` | Tabs: Sessions (table + transcript panel), Practise, Cast | candidates + `GET /interviews/{id}/sessions` |
 | `src/SessionView.jsx` | The typed interview | session endpoints |
-| `src/VoiceSessionView.jsx` | The **spoken** interview — WebRTC to the vendor, dual-channel recording uploaded to us | realtime + transcript + recording |
+| `src/VoiceSessionView.jsx` | The **spoken** interview — branches on the credential's `provider`; dual-channel recording uploaded to us | realtime + transcript + recording |
+| `src/geminiLive.js` | The Gemini Live transport: WebSocket connect, PCM up, gapless playback, barge-in, resumption | vendor-direct |
+| `src/audio/pcmWorklet.js` | `AudioWorkletProcessor` — Float32 → Int16 LE at 16 kHz, plus the RMS the "hearing you" indicator reads | — |
 | `src/index.css` | Ported mockup stylesheet | — |
+
+**The rail is single-product** (2026-09-01). It used to carry five entries —
+Home, BrewVoice, AI Interviews, Interview Training, Assessments — with every one
+but Interview Training rendered `disabled` and titled *"not part of this
+service"*, on the theory that the neighbouring SkillBrew products should be
+visible even when unreachable. A column of dead icons reads as a broken console
+rather than a bigger one, so the four are gone, along with `RailIcon`'s disabled
+branch and the orphaned `.rail .ri:disabled` CSS rule. The logo and the one
+active icon stay, so it still reads as a rail. Add an entry here only when it
+navigates somewhere.
 
 `api.js` covers the interview, expectation, archetype, candidate, and session
 endpoints. It does **not** cover the engine-contract or scorecard endpoints —
@@ -82,6 +96,14 @@ Step 1 renders **every** field the training-wizard specification asks for:
 job title, location, job description, department (the mockup's combo box),
 manager level, duration, skills, the language the candidate opens in, and
 proctoring. All are real fields on `InterviewCreateRequest`.
+
+**The job-spec fields start blank (2026-09-01).** They used to ship pre-filled
+with a sample Jaipur retail-sales role and four sample skills, and that sample
+was being submitted unchanged — so interviews that were meant to differ were
+casting personas for the same imaginary job. The sample text now lives in
+`placeholder` attributes, where it suggests without being sent; `canAdvance`
+already refuses to leave step 1 without a real job title, JD and at least one
+skill.
 
 Two carry help text that says what they actually do, because both could
 otherwise be mistaken for decoration:
@@ -142,6 +164,13 @@ The wizard's step 2 goes further: **Create & chat** / **🎙 Create & talk**
 create the interview and open the session in one action, so a first-time user
 reaches a live conversation without visiting the detail screen at all.
 
+Step 2's header says what casting actually does: *"Pick one candidate type. The
+same person of that type is cast once for this interview and returns in every
+session, so different managers can be compared."* It used to claim a different
+person was cast each session, which is the opposite of how casting works and
+would have made the whole comparison worthless — a persona is compiled once,
+stored, and replayed (see [determinism](/concepts/determinism.md)).
+
 The Voice button is enabled from `GET /api/v1/voice-capability`, asked once at
 mount. When voice is unconfigured the button is disabled **and the reason is
 printed** next to the persona list — a greyed-out control with no explanation is
@@ -156,8 +185,14 @@ row.
 
 `VoiceSessionView` notes:
 
-* **The live call does not pass through our API.** It mints a credential, opens a `RTCPeerConnection` to the vendor, and streams mic in / persona out directly. See [Realtime voice](/concepts/contracts/realtime-voice.md).
-* **It now also records the call, dual-channel, and uploads it here.** A `ChannelMergerNode` puts the manager's mic on channel 0 (left) and the persona's remote WebRTC track — tapped off the same `MediaStream` already attached to the `<audio>` element in `pc.ontrack`, which is what keeps Chrome feeding it samples — on channel 1 (right), into one `MediaStreamDestination` that `MediaRecorder` chunks at 10s intervals and POSTs to `/sessions/{id}/recording/chunks`. This is a **separate, out-of-band upload**, not part of the WebRTC media path — see [Session recording](/concepts/contracts/session-recording.md).
+* **The live call does not pass through our API.** It mints a credential and streams mic in / persona out directly to the vendor. See [Realtime voice](/concepts/contracts/realtime-voice.md).
+* **It branches on `cred.provider`.** `gemini` goes through `geminiLive.js` — a WebSocket, a 16 kHz capture `AudioContext` feeding the PCM worklet, and decoded 24 kHz chunks scheduled back to back through one `GainNode`. `openai` keeps the `RTCPeerConnection`. Everything downstream — bubbles, `record()`, the recording graph, `/transcript` — is shared.
+* **The persona speaks first, and each path nudges it differently.** On `openai` the data channel's `onopen` sends `{"type":"response.create"}`; on `gemini` one synthetic `sendClientContent` turn (*"[The call connects…]"*) does it. The nudge is never written to the transcript — what lands there is the persona's actual reply.
+* **Gemini has no per-side "transcript finalised" event.** Both sides arrive as fragments and `turnComplete` is the only boundary, so fragments accumulate and are committed as the manager's turn then the candidate's when it fires. The OpenAI path keeps using `.completed` / `.done`.
+* **Mic device picker and a noise-suppression toggle** sit in the header, populated from `enumerateDevices()` *after* the permission prompt resolves (labels are blank before it). Changing either acquires a new track under the same constraints helper and swaps it live — `sender.replaceTrack()` on WebRTC, `setStream()` on Gemini — and re-points the recording's channel-0 source, then stops the old track. The call is never renegotiated and mute state carries across.
+* **The header names no vendor, model or voice** (2026-09-01). It used to read `· voice "{cred.voice}"` and a second line `Talker {cred.model} · STT {cred.stt_source} · NS on/off`, straight off the credential — which put our model choices on a screen a hiring manager looks at. Both lines are gone; the header is the persona label and *spoken interview*, nothing more. The credential still carries `provider`, `model`, `stt_source` and `voice` because the browser needs them to connect and to branch — they are simply never rendered. Noise suppression is still visible, on the NS toggle button that already shows its own state.
+* **No client-side denoising.** Echo cancellation and AGC are always on (without them a laptop speaker feeds the persona back into the persona), noise suppression is the operator's switch, and beyond those `getUserMedia` constraints nothing between the mic and the recorder touches the signal — no RNNoise, no gate, no worklet. The raw recording is the evidence `report_engine/validate.py` checks quotes against.
+* **It also records the call, dual-channel, and uploads it here — identically on both providers.** A `ChannelMergerNode` puts the manager's mic on channel 0 (left) and the persona on channel 1 (right), into one `MediaStreamDestination` that `MediaRecorder` chunks at 10s intervals and POSTs to `/sessions/{id}/recording/chunks`. On WebRTC the persona is tapped off the same `MediaStream` already attached to the `<audio>` element in `pc.ontrack`, which is what keeps Chrome feeding it samples; on Gemini it is the playback `GainNode`, connected to both the speakers and the merger. This is a **separate, out-of-band upload**, not part of the live media path — see [Session recording](/concepts/contracts/session-recording.md).
 * Chunk POSTs are chained on their **own** queue (`chunkQueueRef`, separate from the transcript's `queueRef`) for the same reason: the server enforces strict `seq` ordering per recording, so two in-flight chunk uploads could land out of order. Each retries 3× with backoff; on final failure the recorder stops itself and a one-time banner says the early part was saved rather than silently drifting from the server's `seq`.
 * **Recording teardown never gates the transcript.** `finish()` runs the recorder's stop → finalize chain independently of the transcript-drain-then-`/end` sequence below — a failed upload must not cost the transcript, which is the thing the evaluation layer actually reads.
 * Browsers without `MediaRecorder` support for `audio/webm;codecs=opus` skip recording entirely and say so on the connecting screen; the interview still proceeds.
@@ -180,6 +215,6 @@ row.
 * `ui/` is excluded from ruff and mypy; there is no JS lint or test setup.
 * `node_modules/` and `ui/dist/` are gitignored; `package-lock.json` is committed.
 * The AI-calling actions are slow and each shows its own pending state: *Generating…*, *Casting…*, and the session's *typing…* bubble. Enrollment is one serial model call per archetype; a session turn is one call round trip (~2–8s on `gemini-3.7-flash`).
-* Sessions are now **listed** on the detail screen, but there is no *resume*. Closing the tab loses the live connection; the transcript is still stored and readable from the table. For a voice session the call is gone — a WebRTC peer connection is not re-establishable from a reload, so a reopened live session shows its transcript and nothing else.
+* Sessions are now **listed** on the detail screen, but there is no *resume*. Closing the tab loses the live connection; the transcript is still stored and readable from the table. For a voice session the call is gone — neither a WebRTC peer connection nor a Live session handle survives a reload, so a reopened live session shows its transcript and nothing else. (Gemini's `sessionResumption` is for reconnecting *within* a live call, across the ~15-minute audio cap; it is not session resume for the operator.)
 * Open Sans is loaded from Google Fonts in `index.html`. It is the only external request the UI makes, and the stack falls back to `system-ui` offline.
 * No JS test setup, so both session views are covered only by the Python endpoint tests plus manual use.

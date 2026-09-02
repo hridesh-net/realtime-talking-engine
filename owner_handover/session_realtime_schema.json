@@ -19,8 +19,14 @@
       "title": "Model",
       "type": "string"
     },
+    "provider": {
+      "description": "Which talker: selects the browser's transport.",
+      "title": "Provider",
+      "type": "string"
+    },
     "call_url": {
-      "description": "POST the SDP offer here with the secret as bearer.",
+      "default": "",
+      "description": "POST the SDP offer here with the secret as bearer. Empty for providers whose SDK owns the endpoint.",
       "title": "Call Url",
       "type": "string"
     },
@@ -28,6 +34,24 @@
       "description": "Derived from the persona; stable across sessions.",
       "title": "Voice",
       "type": "string"
+    },
+    "stt_source": {
+      "default": "",
+      "description": "Who transcribes the interviewer, for the UI's status line.",
+      "title": "Stt Source",
+      "type": "string"
+    },
+    "noise_reduction": {
+      "default": "",
+      "description": "Vendor-side denoising profile; empty when the vendor applies none.",
+      "title": "Noise Reduction",
+      "type": "string"
+    },
+    "client_config": {
+      "additionalProperties": true,
+      "description": "Non-secret connect parameters the browser passes to the vendor SDK verbatim.",
+      "title": "Client Config",
+      "type": "object"
     }
   },
   "required": [
@@ -35,7 +59,7 @@
     "client_secret",
     "expires_at",
     "model",
-    "call_url",
+    "provider",
     "voice"
   ],
   "title": "RealtimeCredentialResponse",

@@ -93,7 +93,7 @@
   "description": "The runtime slice the Go interview-candidate engine consumes. Served by GET /api/v1/candidates/{candidate_id}/engine-contract.",
   "properties": {
     "contract_version": {
-      "default": "v1.3",
+      "default": "v1.6",
       "title": "Contract Version",
       "type": "string"
     },

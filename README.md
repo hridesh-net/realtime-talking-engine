@@ -184,12 +184,24 @@ archetype that is not yet enrolled is cast on the spot.
 **Chat** — you type as the hiring manager; the persona answers in character.
 Enter sends, Shift+Enter breaks the line.
 
-**🎙 Voice** — a real spoken interview. The browser opens a WebRTC call straight
-to OpenAI Realtime and you talk; no push-to-talk, and you can interrupt the
-persona mid-sentence. The first click raises Chrome's microphone prompt, which
-you have to allow yourself. Needs `OPENAI_API_KEY` with Realtime access —
-`GET /api/v1/voice-capability` says whether it is available, and the UI disables
-the button with the reason if not.
+**🎙 Voice** — a real spoken interview. The browser talks to the vendor
+directly and the persona opens the call with its own scripted first line; no
+push-to-talk, and you can interrupt it mid-sentence. The first click raises
+Chrome's microphone prompt, which you have to allow yourself. The header shows
+which talker and transcriber you are getting, and offers a microphone picker and
+a noise-suppression toggle.
+
+Two providers, chosen by `VOICE_PROVIDER`:
+
+* **Gemini Live** (default) — a WebSocket carrying raw PCM. Needs
+  `GEMINI_API_KEY`.
+* **OpenAI Realtime** — the WebRTC path. Set `VOICE_PROVIDER=openai`; needs
+  `OPENAI_API_KEY` with Realtime access, and `TRANSCRIBE_MODEL` picks its
+  speech-to-text (Gemini transcribes in-session).
+
+Leave `VOICE_PROVIDER` blank to auto-detect. `GET /api/v1/voice-capability` says
+whether voice is available at all, and the UI disables the button with the
+reason if not.
 
 **End interview** closes the session either way and leaves the stored transcript
 on screen.
@@ -254,11 +266,13 @@ changes what every report is built from.
 
 ## What a session costs
 
-About **$1.06** marginal for a 20-minute voice session. The live voice call is
-roughly four times the analysis (~$0.85 against $0.19); report generation calls
-no model and is free. Measured token counts, quoted vendor rates and the levers
-that actually move the number are in
-[`docs/PRICING_PER_SESSION.md`](docs/PRICING_PER_SESSION.md).
+About **$1.07** marginal for a 20-minute voice session. The live voice call is
+roughly four times the analysis (~$0.85 against $0.19). Report *scoring* still
+calls no model and is free; the report's *prose* is one judge call at well under
+a cent, which means regenerating a report is no longer free — `judge=false`
+produces the same numbers with code-composed sentences and no call. Measured
+token counts, quoted vendor rates and the levers that actually move the number
+are in [`docs/PRICING_PER_SESSION.md`](docs/PRICING_PER_SESSION.md).
 
 ## Determinism
 

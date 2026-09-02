@@ -20,6 +20,7 @@ sources:
   - resource: /tests/test_candidate_rubric.py
   - resource: /tests/test_session.py
   - resource: /tests/test_voice.py
+  - resource: /tests/test_gemini_live_mint.py
   - resource: /tests/test_recording.py
   - resource: /tests/test_candidate_agent.py
   - resource: /tests/test_expectation_agent.py
@@ -36,6 +37,15 @@ sources:
 > control-plane seam: determinism on both JSON and HTML, question typing
 > including the unpunctuated shapes ASR produces, the restraint-persona rule,
 > the two operator toggles, and composed-persona resolution.
+>
+> **`tests/test_report_judge.py`** (25 tests) covers what the judge veto lets
+> through. A judge cannot be pinned by byte-identical regression, so what is
+> pinned instead is the boundary: a fabricated span is dropped and the claim with
+> it, a `surfaced` verdict credited to the manager's own words is refused, prose
+> stating a number falls back to the composed sentence, and the judge cannot add
+> a finding code did not select. Every test drives `judge.overlay` — the whole
+> judge minus the network hop — with hand-written model output, so no model is
+> called and none is needed.
 
 Two kinds of test, and the distinction matters: the offline ones defend rules,
 the live ones check model behaviour and cost money.
@@ -62,6 +72,8 @@ The real safety net for the persona pipeline. Groups:
 * **Scorecard** — catalog ids and weights survive; model wording is used only when ids match.
 * **Language and operator notes** — every language reaches both the casting prompt and the compiled contract; a hostile `candidate_notes` stays subordinated in the prompt and the knowledge clamp holds regardless.
 * **Engine contract** — self-consistency (`min ≤ target ≤ max`, ceilings present); the system prompt carries the behavioural contract; **the system prompt is byte-stable**.
+* **The voice matches how the persona presents** (v1.5) — a `woman` persona compiles a `tts_voice_id` in the female set and a `man` persona one in the male set, checked over 200 candidate ids rather than one because `pick_voice` is a modulus and a single id could pass by luck; `non_binary` and `unspecified` draw from the whole roster unchanged; the filter preserves roster order; and the choice is still deterministic for a given `(candidate_id, presentation)`.
+* **The trait-less cast path too** (v1.6) — a full `agent.generate` against a fake casting model: a draft declaring `presented_gender` gets a matching voice with `human_traits=None`, `neutral`/absent leaves the unfiltered pick alone, code-owned traits beat a conflicting declaration, and a bad enum value degrades to the full roster without raising. Cast over **eight** interview ids whose unfiltered picks are deliberately mixed male and female, plus an explicit `assert moved` that the filter changed at least one — a single id would have landed on the right gender by luck half the time, which is exactly how the production bug survived v1.5's tests.
 * **Validation** — resume claims reject bad truthfulness values.
 
 ### `tests/test_session.py` (280 ln)
@@ -77,16 +89,40 @@ call, and the endpoints run under `TestClient` with `get_repo` and
 The persona fixture is **built in code**, not cast — the casting agent is not
 exercised here, so nothing in this file can reach the network.
 
-### `tests/test_voice.py` (270 ln)
+### `tests/test_voice.py`
 
 The voice session, offline — the broker is faked, so no audio and no vendor call.
 The point it defends: **everything this service decides about a voice session is
 decided before the vendor is involved**, and is therefore testable here.
 
-* **Compilation** — voice is stable per persona and spread across personas; the contract prompt reaches the instructions verbatim; pace drives speed and eagerness; `may_interrupt` overrides pace; an unknown pace falls back instead of raising.
-* **Two invariants no persona may switch off** — the human can always interrupt, and their speech is always transcribed.
+* **Compilation (OpenAI)** — voice is stable per persona and spread across personas; the contract prompt reaches the instructions verbatim; pace drives speed and eagerness; `may_interrupt` overrides pace; an unknown pace falls back instead of raising; the transcriber is injected rather than hardcoded, and is handed a vocabulary hint composed from the contract's skills; the model hears a denoised mic.
+* **Compilation (Gemini)** — the same prompt verbatim plus the opening line; the stored `tts_voice_id` is what the session speaks in, falling back to the same `pick_voice` rule; VAD silence tracks pace and stays inside 500–800 ms; both transcriptions, resumption and the history flag are present.
+* **The opening line** — it reaches the instructions on both providers, and a contract without one gets no block at all (so hand-built contracts still compile).
+* **Dispatch** — `build_voice_session` returns the shape the named provider speaks, passes the configured transcriber through, and raises `ValueError` on a provider nobody can compile for rather than guessing.
+* **One voice roster** — `llm.gemini_live.GEMINI_LIVE_VOICES` *is* `engine_contract.GEMINI_TTS_VOICES` (identity, not equality), 30 names.
+* **The roster's gender sets partition it** — `GEMINI_FEMALE_VOICES` (14) ∪ `GEMINI_MALE_VOICES` (16) is the roster, and they are disjoint. A voice appended to the roster without a classification fails here rather than becoming unreachable for gendered personas.
+* **Two invariants no persona may switch off** — the human can always interrupt (`interrupt_response` / `START_OF_ACTIVITY_INTERRUPTS`), and their speech is always transcribed.
 * **Storage** — a voice session does not pre-write turn 0; a text one still does.
-* **Endpoints** — minting seals the persona and never leaks the prompt into the response; transcript records without generating; a bad speaker label is 422; a finished session refuses both mint and transcript; a deleted persona is 410 while the session survives; a vendor failure is 502; `voice-capability` answers rather than raising.
+* **Endpoints** — minting seals the persona and never leaks the prompt *or the opening line* into the response, on either provider; the Gemini response carries `client_config` and an empty `call_url`, the OpenAI one carries the STT model and `near_field`; transcript records without generating; a bad speaker label is 422; a finished session refuses both mint and transcript; a deleted persona is 410 while the session survives; a vendor failure is 502; `voice-capability` answers rather than raising and names both keys.
+
+### `tests/test_gemini_live_mint.py` (`--live`)
+
+Not a scenario — one mint against the real Live API, to check the vendor still
+accepts a whole `LiveConnectConfig` inside `live_connect_constraints` on the
+configured model id. That is the one thing the offline suite cannot see: it
+passes either way, and the failure lands in the browser. Skips cleanly without
+`GEMINI_API_KEY`.
+
+### `tests/test_key_failover.py`
+
+The [second Gemini key](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01),
+offline — no vendor, no network, no key. Everything failover decides is decided
+before an SDK is involved.
+
+* **Classification** — the seven vendor phrasings that mean the credential failed (`RESOURCE_EXHAUSTED`, `PERMISSION_DENIED`, an invalid or expired key, a rate limit, `401 Unauthenticated`), and the five that mean the *request* failed (`INVALID_ARGUMENT`, unparseable JSON, an empty reply, `500`, `503`) and must therefore never be retried. A status code on the wrapped vendor exception classifies even when the message is terse.
+* **Two near-misses, asserted in both directions** — the substring "rate" appears inside `generate_content`, which is in every Gemini error message, so matching it would fail over on malformed requests; and a bare `429` classifies while `4291` in a request id does not.
+* **Behaviour** — a rate-limited primary answers from key 2; the *next* call skips the dead key entirely; stickiness survives a rebuild, because `build_model` runs per agent; a non-key error propagates with key 2 never called; the last key's failure is raised unchanged; and the wrapper reports the inner model's `provider`/`model_id`/`temperature`.
+* **The factory** — one key returns the bare adapter, two build one adapter per key in order, a whitespace-only second key is not a key, and `GEMINI_API_KEY2` alone leaves the provider unconfigured.
 
 ### `tests/test_recording.py`
 
@@ -155,7 +191,7 @@ stayed green.
 
 * **The interview, expectation, and enrollment routes are still untested.** `test_session.py` covers the session handlers and the session SQL; the skip-unless-regenerate branch, the 422 on unknown archetypes at enrollment, and the interview/expectation SQL remain uncovered. The pattern to copy is already in `test_session.py`.
 * No live scenario exercises a session end to end against a real provider. The pivot plan's Phase 5 task 30 adds one scripted session per persona under `--live`.
-* **Nothing automated exercises real audio.** The WebRTC handshake, the data-channel event names, and the vendor's session schema were verified by hand against the live API on 2026-08-22 (recorded in [Realtime voice](/concepts/contracts/realtime-voice.md)); a vendor rename would pass every test here and fail in the browser. The event-name mapping in `VoiceSessionView.jsx` is the fragile surface.
+* **Nothing automated exercises real audio.** The WebRTC handshake and the data-channel event names were verified by hand against the live API on 2026-08-22, and the Gemini Live SDK surface against the pinned packages on 2026-09-01 (both recorded in [Realtime voice](/concepts/contracts/realtime-voice.md)); a vendor rename would pass every test here and fail in the browser. The event-name mapping in `VoiceSessionView.jsx`, the PCM framing in `geminiLive.js`, and the resumption/`goAway` handling are the fragile surfaces. `tests/test_gemini_live_mint.py` covers the mint half of that and nothing more.
 * Nothing checks that `EXPECTATION_JSON_SCHEMA` matches `InterviewExpectation` — two hand-maintained representations of one shape.
 * `expectation_agent/agent.py` has no offline test of its overwrite logic, which is where its determinism guarantee actually lives.
 * No JS tests for `ui/`.

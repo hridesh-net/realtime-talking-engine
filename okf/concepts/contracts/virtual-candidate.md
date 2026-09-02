@@ -17,8 +17,17 @@ sources:
 ---
 # VirtualCandidate
 
-`PERSONA_VERSION = "v1.2"`. Stored as one JSON document per
+`PERSONA_VERSION = "v1.3"`. Stored as one JSON document per
 `(interview_id, archetype)`, with indexed columns alongside.
+
+**v1.3 (2026-09-01)** adds `presented_gender` — `woman | man | neutral`,
+declared by the casting model about the name it just authored, validated by
+`engine_contract.normalize_presented_gender` (anything else becomes `""`, never
+an exception), and read at cast time to pick the persona's speaking voice. `""`
+is also what every persona stored before v1.3 carries. It is in `fingerprint`,
+because it is model-authored, stored, and decides what a manager hears.
+`human_traits.gender_presentation` overrides it wherever a persona has one —
+see [the determinism split](/concepts/determinism.md).
 
 # Schema
 
@@ -32,6 +41,7 @@ class VirtualCandidate(BaseModel):
     catalog_version: str
 
     name: str
+    presented_gender: str        # woman | man | neutral | "" — picks the voice
     headline: str
     background: str
     years_experience: int        # 0..40

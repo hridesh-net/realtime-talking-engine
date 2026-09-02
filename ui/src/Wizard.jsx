@@ -11,12 +11,15 @@ import PersonaPicker from './PersonaPicker'
  * which says so on screen rather than implying a capability that is not there.
  */
 
+// Blank on purpose. Pre-filled sample values were being submitted unchanged,
+// so every interview cast a persona for the same imaginary job; the samples now
+// live in `placeholder` attributes, where they suggest without being sent.
 const EMPTY = {
-  job_title: 'Frontline Sales Executive',
-  jd: 'Sell SIM and broadband plans at retail touchpoints. Handle walk-in customers, pitch and close upgrades. Daily targets, rotational shifts.',
-  location: 'Jaipur',
-  department: 'Sales',
-  manager_level: 'Frontline manager',
+  job_title: '',
+  jd: '',
+  location: '',
+  department: '',
+  manager_level: '',
   language: 'english_indian',
   proctoring: 'identity',
   job_location_type: 'onsite',
@@ -27,7 +30,7 @@ const EMPTY = {
   candidate_notes: '',
 }
 
-const START_SKILLS = ['Customer handling', 'Target orientation', 'Product knowledge', 'Upselling']
+const START_SKILLS = []
 
 const DEPARTMENTS = [
   'Sales',
@@ -84,7 +87,7 @@ function Chips({ options, value, onChange }) {
   )
 }
 
-function Combo({ value, options, onChange }) {
+function Combo({ value, options, onChange, placeholder = 'Start typing…' }) {
   const [open, setOpen] = useState(false)
   const hits = options.filter(
     (d) => d.toLowerCase().includes(value.toLowerCase()) && d.toLowerCase() !== value.toLowerCase(),
@@ -94,7 +97,7 @@ function Combo({ value, options, onChange }) {
       <input
         className="input"
         value={value}
-        placeholder="Start typing…"
+        placeholder={placeholder}
         autoComplete="off"
         onChange={(e) => {
           onChange(e.target.value)
@@ -230,7 +233,12 @@ export default function Wizard({
                 <label>
                   Job title <span className="req">*</span>
                 </label>
-                <input className="input" value={form.job_title} onChange={set('job_title')} />
+                <input
+                  className="input"
+                  value={form.job_title}
+                  onChange={set('job_title')}
+                  placeholder="e.g. Frontline Sales Executive"
+                />
               </div>
               <div className="field">
                 <label>Location</label>
@@ -247,7 +255,12 @@ export default function Wizard({
               <label>
                 Job description <span className="req">*</span>
               </label>
-              <textarea className="textarea" value={form.jd} onChange={set('jd')} />
+              <textarea
+                className="textarea"
+                value={form.jd}
+                onChange={set('jd')}
+                placeholder="e.g. Sell SIM and broadband plans at retail touchpoints. Handle walk-in customers, pitch and close upgrades. Daily targets, rotational shifts."
+              />
               <div className="help">
                 The persona's background and knowledge are grounded in this. Keep it concrete.
               </div>
@@ -260,6 +273,7 @@ export default function Wizard({
                   value={form.department}
                   options={DEPARTMENTS}
                   onChange={pick('department')}
+                  placeholder="e.g. Sales"
                 />
                 <div className="help">Type freely or pick a suggestion.</div>
               </div>
@@ -303,7 +317,7 @@ export default function Wizard({
               <input
                 className="input"
                 style={{ marginTop: 8 }}
-                placeholder="Add a skill and press Enter"
+                placeholder="Add a skill and press Enter — e.g. Customer handling"
                 value={skillDraft}
                 onChange={(e) => setSkillDraft(e.target.value)}
                 onKeyDown={addSkill}
@@ -419,7 +433,8 @@ export default function Wizard({
               <span className="secnum">3</span>
               <span className="h2">Who will they interview?</span>
               <span className="note">
-                Pick one candidate type. A different person of that type is cast each session.
+                Pick one candidate type. The same person of that type is cast once for this
+                interview and returns in every session, so different managers can be compared.
               </span>
             </div>
 

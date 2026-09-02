@@ -16,7 +16,7 @@ below are introductory and expire on 2026-12-31.
 | Session length | Marginal cost | Dominated by |
 |---|---|---|
 | 5 min | **~$0.32** | the live voice call |
-| 20 min | **~$1.06** | the live voice call |
+| 20 min | **~$1.07** | the live voice call |
 | 30 min | **~$1.56** | the live voice call |
 
 **The interview itself costs roughly four times what analysing it does.** That
@@ -33,8 +33,9 @@ effort spent on the smaller number.
 | Audio analysis (`gemini-3.7-flash`) | **$0.19** | **measured**, §2 |
 | Persona casting (one structured call) | ~$0.013 | estimated |
 | Role-fact drafting (optional, once per role) | ~$0.005 | estimated |
-| Report generation | **$0.00** | code only — no model call, §4 |
-| **Marginal total** | **~$1.06** | |
+| Report scoring | **$0.00** | code only — no model call, §4 |
+| Report prose (the judge, one call) | ~$0.007 | estimated, §4 |
+| **Marginal total** | **~$1.07** | |
 | Infrastructure, amortised | +$0.01 – $0.36 | §5, depends entirely on volume |
 
 ---
@@ -121,14 +122,36 @@ system.
 
 ---
 
-## 4. Report generation is free
+## 4. Report generation — one call, well under a cent
 
-Building a report calls no model. It is pattern matching and arithmetic over the
-stored transcript plus the stored analysis — a few milliseconds of CPU. Clicking
-**Generate report** repeatedly costs nothing, and regenerating after a threshold
-change costs nothing.
+**Every number is still free.** Scoring is pattern matching and arithmetic over
+the stored transcript plus the stored analysis — a few milliseconds of CPU, and
+no model anywhere near it. What costs money is the **judge**: one structured
+call that writes the report's prose, and only its prose.
 
-Analysis is the paid step, it runs once, and its result is stored.
+Measured on the worked example (11.5 min, 27 turns) and scaled — **estimated**,
+because the token counts below are derived from prompt length rather than read
+off a billing page:
+
+| Part of the prompt | 11.5 min | 20 min |
+|---|---|---|
+| Instructions, rubric, signal table, persona | ~1,650 tok | ~1,650 tok |
+| Transcript (~67 tok per minute of session) | ~770 tok | ~1,340 tok |
+| **Prompt total** | ~2,400 tok | ~3,000 tok |
+| Output — a summary, four narratives, twelve bullets, six findings | ~1,200 tok | ~1,200 tok |
+
+At `gemini-3.7-flash` rates that is **$0.005 – $0.007 per report**, and the
+output half is most of it. The prompt grows with session length; the output does
+not, because the report is a fixed number of sentences however long the
+interview was.
+
+**Regenerating is no longer free**, which is the one behavioural change: each
+press of **Generate report** is another judge call. `judge=false` on the endpoint
+produces the complete report with code-composed sentences and no call at all —
+that is also the regression path, and it is what the CLI runs, since
+`report_engine` imports no vendor SDK and cannot build a model for itself.
+
+Analysis remains the expensive step, it runs once, and its result is stored.
 
 ---
 

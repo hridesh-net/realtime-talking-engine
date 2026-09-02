@@ -5,6 +5,7 @@ must produce byte-identical output, because "last month's 62" and "this month's
 62" are only the same 62 if it does.
 """
 
+import html as html_lib
 import json
 import subprocess
 import sys
@@ -528,3 +529,83 @@ def test_the_language_downgrade_does_not_weaken_assessed_signals():
     comms = next(c for c in report.criteria if c.id == "communication")
     heard = [s for s in comms.signals if s.source == "assessed" and s.measurable]
     assert heard, "assessed communication signals should survive a non-English session"
+
+
+# ------------------------------------------------------- the two renders ----
+
+
+def test_the_managers_page_carries_the_sections_she_asked_for():
+    """Four competencies, the questions, strengths against gaps, what to change."""
+    html = to_html(build_report(_bundle()))
+    for section in (
+        "Competency scorecard",
+        "Q&amp;A — every question asked",
+        "BEI questions",
+        "Strengths &amp; gaps",
+        "Areas to improve",
+    ):
+        assert section in html, section
+
+
+def test_the_readiness_index_and_summary_are_not_on_the_managers_page():
+    """Both are still computed and stored; neither is printed for her."""
+    report = build_report(_bundle())
+    assert report.readiness_index is not None and report.summary
+
+    summary = html_lib.escape(report.summary, quote=True)
+    plain = to_html(report)
+    assert "Interview readiness" not in plain
+    assert summary not in plain
+
+    working = to_html(report, detail=True)
+    assert "Interview readiness" in working
+    assert summary in working
+
+
+def test_every_question_asked_is_listed_with_its_time():
+    report = build_report(_bundle())
+    html = to_html(report)
+    assert report.question_acts
+    for act in report.question_acts:
+        assert act.timestamp in html
+        assert html_lib.escape(act.text[:40], quote=True) in html
+
+
+def test_a_leading_question_is_named_as_one_in_the_list():
+    report = build_report(_bundle())
+    leading = [a for a in report.question_acts if a.type == "leading"]
+    assert leading, "the demo session plants a leading question"
+    html = to_html(report)
+    assert '<span class="pill bad">leading</span>' in html
+
+
+def test_a_protected_topic_is_flagged_on_the_question_that_carried_it():
+    report = build_report(_bundle())
+    flagged = [a for a in report.question_acts if a.protected_topic]
+    assert flagged, "the demo session plants protected-topic questions"
+    html = to_html(report)
+    for act in flagged:
+        assert act.protected_topic.replace("_", " ") in html
+
+
+def test_the_bei_section_lists_the_behavioural_questions_actually_asked():
+    report = build_report(_bundle())
+    behavioural = [a for a in report.question_acts if a.type == "behavioural"]
+    assert behavioural, "the demo session plants a behavioural question"
+    html = to_html(report)
+    assert "Asked as behavioural" in html
+    for act in behavioural:
+        assert html_lib.escape(act.text[:40], quote=True) in html
+
+
+def test_the_internal_type_vocabulary_never_reaches_the_reader():
+    """`double_barrelled` is the classifier's word, not the manager's."""
+    html = to_html(build_report(_bundle()))
+    assert "double_barrelled" not in html
+    assert "open_other" not in html
+
+
+def test_the_question_acts_are_rendered_once_not_twice():
+    """The working dropped its table when the report itself grew the list."""
+    working = to_html(build_report(_bundle()), detail=True)
+    assert "Question analysis" not in working

@@ -38,9 +38,11 @@ non-zero if any failed, with a summary list.
 | `pytest tests/test_architecture.py` | [SOLID and layering](/concepts/architecture.md) |
 | `pytest tests/test_candidate_rubric.py` | Determinism, clamping, scorecard integrity, prompt byte-stability |
 | `pytest tests/test_session.py` | The live text session — contract-verbatim prompt, transcript ordering, session SQL, and the session endpoints under `TestClient`. Offline: a fake `ChatModel`, an in-memory database |
-| `pytest tests/test_voice.py` | The voice session — deterministic voice/speed/eagerness, prompt verbatimness, the never-leak-the-prompt guarantee, and the voice endpoints. Offline: a fake `RealtimeBroker` |
+| `pytest tests/test_voice.py` | The voice session on **both** providers — deterministic voice/speed/eagerness/VAD, prompt and opening-line verbatimness, dispatch by provider, the never-leak-the-prompt guarantee (including `client_config`), and the voice endpoints. Offline: a fake `RealtimeBroker` per provider |
 | `pytest tests/test_recording.py` | [Session recording](/concepts/contracts/session-recording.md) — chunk ordering, finalize idempotency, the modality gate, and the recording endpoints. Offline: `recordings_dir=tmp_path`, no real audio |
+| `pytest tests/test_key_failover.py` | The [second-key failover](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01) — which errors are key-shaped and which are not, that a rate-limited primary falls over and a malformed request does not, that stickiness survives a rebuild, and that a single key builds no wrapper. Offline: counting fakes, no key |
 | gofmt / go vet / go build / `go test -race` / go architecture / golangci-lint | The [live-session engine](/concepts/subsystems/engine.md) in `engine/`. Every gate runs **from inside the module** — a repo-root `go vet ./...` finds no packages. Race detector always on |
+| `pytest tests/test_report_judge.py` | The [judge veto](/concepts/determinism.md) — verbatim spans, who spoke, no numbers in prose, and that a rejected claim leaves the composed sentence standing. Offline: `judge.overlay` driven with hand-written model output |
 | `export_schemas.py --check` | `owner_handover/` matches the Pydantic models |
 | Live scenarios | Only with `--live` — Python model scenarios plus the engine's `//go:build live` vendor tests. The Go live tests read credentials through `internal/config`, not `os.Getenv`, because the layering gate allows only that package to read the environment — which also means they exercise the same configuration path production does |
 
@@ -63,11 +65,19 @@ Install what the Go gates need with `brew install golangci-lint`.
 ```bash
 .venv/bin/python tests/test_expectation_agent.py   # 5 job-spec scenarios
 .venv/bin/python tests/test_candidate_agent.py     # 6 archetypes + determinism
+.venv/bin/python tests/test_gemini_live_mint.py    # Live-API mint smoke test
 ```
 
-Run these after changing a prompt, a guardrail, or a schema the model fills.
-The offline suite cannot catch a model that started dropping skills or drifting
-outside its band — that is exactly what these assert.
+Run the first two after changing a prompt, a guardrail, or a schema the model
+fills. The offline suite cannot catch a model that started dropping skills or
+drifting outside its band — that is exactly what these assert.
+
+The third is not a scenario: it mints one ephemeral Gemini Live token and checks
+the vendor still accepts a whole `LiveConnectConfig` inside
+`live_connect_constraints` on the configured model id. Run it after changing
+`VOICE_MODEL`, the sealed session config, or the pinned `google-genai`. It skips
+cleanly without `GEMINI_API_KEY`. Nothing is spoken; the offline suite already
+covers everything decided before the vendor is involved.
 
 ## When a check fails
 

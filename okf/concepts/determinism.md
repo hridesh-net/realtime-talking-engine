@@ -12,6 +12,9 @@ verified:
     at: "2026-08-22T17:05:00Z"
 status: stable
 sources:
+  - resource: /report_engine/judge.py
+  - resource: /report_engine/validate.py
+  - resource: /report_engine/narrate.py
   - resource: /candidate_agent/agent.py
   - resource: /expectation_agent/agent.py
   - resource: /candidate_agent/archetypes.py
@@ -45,6 +48,7 @@ Two independent requirements force it:
 | Speech spec (pace, verbosity, filler/hesitation, formality, interrupts) | Verbal tics and sample phrases |
 | Answer policy defaults (depth, on-unknown, on-pressure, on-silence) | `reveals_depth_when`, `always_does`, `never_does` |
 | The compiled engine contract and system prompt | `opening_line` |
+| The voice, and the validation of the declaration it is picked from | `presented_gender` — *how the name it authored reads*, not which voice to use |
 | Resume-claim truthfulness enum validation | The claims themselves |
 | Every realism-taxonomy value (`HumanTraitProfile`, when present) — affect, verbal style, language/comprehension, motivation, negotiation stance, compliance traps, environment, profile — **and the behavioural directive each one compiles to** | Nothing — the model never sees or authors `human_traits`; it is composed by `trait_dimensions.compose_human_traits` from fixed presets before the call and injected into the compiled prompt after |
 
@@ -115,14 +119,98 @@ The same discipline again, and one new reproducibility claim.
 | Owned by code | Owned by the model |
 |---|---|
 | The instructions — contract prompt verbatim, plus the spoken-mode preamble | Everything said aloud |
-| **The voice**, hashed from `candidate_id` so a persona always sounds the same | |
-| Speaking rate and turn-detection eagerness, from `voice_directives.pace` | |
+| **The opening line** — appended as a "say this first, close to verbatim" instruction | |
+| **The voice**, hashed from `candidate_id` so a persona always sounds the same, over the roster subset matching how the persona presents | `presented_gender` — how the name it just authored reads, on personas with no code-owned `human_traits` |
+| Speaking rate and turn-detection eagerness (OpenAI) / VAD silence window (Gemini), both from `voice_directives.pace` | |
+| The transcription vocabulary hint, composed in code from the contract's skills | |
 | That the human can always interrupt, and is always transcribed | |
 
 `pick_voice` makes voice a persona property rather than a setting: two managers
 practising against "Ravi Sharma" hear the same person, which is the same
 comparability argument as `seed_fingerprint`. The cost is that the provider's
 voice **ordering** becomes contract — reordering it reassigns every persona.
+On the Gemini path the voice is not even re-derived: `tts_voice_id`, computed
+once at cast time and stored on the contract, is what the session speaks in, so
+it matches the pre-synthesized stall clips the Go engine plays. The roster
+itself has exactly one home — `llm.gemini_live.GEMINI_LIVE_VOICES`, re-exported
+as `engine_contract.GEMINI_TTS_VOICES` — because two copies of an
+order-sensitive tuple is precisely the drift `tts_voice_id` cannot survive.
+
+**The voice matches how the persona presents (contract v1.5, 2026-09-01).**
+`pick_voice` hashes over whatever roster it is handed, and it used to be handed
+all thirty voices — so a persona whose `human_traits.gender_presentation` said
+`woman` had roughly an even chance of speaking in a man's voice. That is the
+same casting-time incoherence as the persona cast under a man's name that the
+realism note fixed: the interviewer hears a contradiction the persona document
+never contained. `engine_contract.voices_for_presentation` now narrows the
+offered roster first — `woman` → `llm.gemini_live.GEMINI_FEMALE_VOICES`, `man`
+→ `GEMINI_MALE_VOICES`, `non_binary`/`unspecified`/absent → the roster
+unchanged, because there is no vendor-neutral subset and inventing one would be
+this repo deciding what non-binary sounds like.
+
+Three properties hold the split together. The classification is a **vendor
+fact** (Google's Gemini-TTS voice table), lives in exactly one place, and
+partitions the roster — a test asserts union and disjointness, so a voice
+appended to the roster without being classified fails. The filter **preserves
+roster order**, because `pick_voice` is a modulus and the subset's order is
+contract too. And `pick_voice` itself is **signature-stable**: the fallback in
+`candidate_agent/voice.py` for pre-`tts_voice_id` contracts has no traits in
+scope and still resolves against the full roster.
+
+**Who declares the presentation when there are no traits (contract v1.6,
+2026-09-01).** v1.5 only engaged when `human_traits` was present — and the
+*default* cast path has none. `enroll_candidates` casts the fixed catalog
+archetypes as `(key, None, None)`, and the lazy session-start cast passes no
+traits either, so the overwhelming majority of personas still hashed over all
+thirty voices. It reached production as a persona named **Tanvi** speaking with
+a man's voice.
+
+Code cannot close this gap alone: a name is not a gender lookup table, and
+writing one would be this repo guessing at the identity the model authored. So
+the split moves the boundary by exactly one field. The casting model declares
+`presented_gender` — `woman | man | neutral`, *describing its own output*, in
+`CANDIDATE_DRAFT_JSON_SCHEMA` and required — and code owns everything after
+that: `normalize_presented_gender` validates it (anything outside the three
+values becomes `""`, never an exception — losing a whole cast over a voice hint
+is the worse failure), `voices_for_presentation` maps it, and `pick_voice`
+still picks. The model does not choose a voice; it answers one question about
+the name it wrote.
+
+**Precedence is code over model.** `human_traits.gender_presentation` is
+composed from fixed presets and never seen by the model, so it wins outright
+where it exists; `presented_gender` only decides for personas that have no
+trait layer. Both `neutral` and `non_binary`/`unspecified` take the same
+full-roster branch.
+
+The declared value is **stored** on `VirtualCandidate` and included in
+`fingerprint`, so a persona can explain the voice it speaks in and an edited
+one no longer matches. `PERSONA_VERSION` v1.2 → **v1.3**: the stored document
+gained a field and the casting prompt changed, which is the same pair of
+reasons v1.1 and v1.2 were bumped.
+
+**Already-cast personas are untouched.** `tts_voice_id` is computed once and
+stored; it is never recomputed at session time, so an existing persona keeps
+the voice its managers already know it by. Only new casts are gender-matched —
+which is why this is a bump of `ENGINE_CONTRACT_VERSION` (v1.4 → **v1.5**) even
+though not one byte of the compiled prompt changed. The rule below is *bump the
+constant that covers what moved*, and what moved is the compiled contract:
+identical inputs now compile a different `tts_voice_id`. Neither fingerprint
+covers that field, so the contract version is the only thing that records it.
+The Go engine pins by major version, so v1.x needs no engine change.
+
+**The opening line is now delivered.** It was authored at cast time and stored,
+and until 2026-09-01 the voice path simply never mentioned it — the model
+improvised a greeting, so every spoken interview opened the same generic way
+regardless of persona. `build_voice_system_prompt` now appends a `THE FIRST
+THING YOU SAY` block carrying it, for both providers, and each browser path
+sends one nudge so the vendor generates turn 0. The nudge itself is never
+stored; what reaches the transcript is what the persona says.
+
+Per-provider turn detection is the same decision expressed twice, because the
+vendors expose different knobs: OpenAI takes a semantic `eagerness`
+(low/medium/high), Gemini takes a silence timer (800/650/500 ms for
+slow/measured/fast). Both are read from `voice_directives.pace`, and neither is
+a client setting.
 
 **Where the split is weaker than elsewhere, said plainly.** In voice mode the
 knowledge ceiling exists only as prompt text. There is no post-hoc clamp (as in
@@ -169,6 +257,13 @@ contract version. Changing the compiled prompt text without bumping
 stability, which `tests/test_candidate_rubric.py::test_system_prompt_is_byte_stable`
 exists to catch.
 
+The prompt text is the common case, not the whole rule. `ENGINE_CONTRACT_VERSION`
+covers **the compiled contract**, so *any* change that makes identical inputs
+compile a different contract needs the bump — including a field no fingerprint
+covers, which is precisely the case that has nothing else to record it. v1.5
+(the gender-matched voice) is the worked example: same prompt bytes, different
+`tts_voice_id`.
+
 ## Operator input is code-owned too (2026-08-22)
 
 Two configuration fields let a human put words into a persona's prompt, which
@@ -191,3 +286,83 @@ prompt framing and the clamp.
 **`clarity_facts`** — the *keys* are fixed in `evaluation_agent.schema`; only the
 *statements* are drafted, and a drafted key that is not on the list is discarded.
 The checklist a manager is measured against is never something a model chose.
+
+## The report judge (2026-08-27)
+
+The newest place the split could leak, and the first one where a model authors
+text a manager reads *about themselves*. `report_engine/judge.py` makes one call;
+`report_engine/validate.py` decides what survives it.
+
+| Owned by code | Owned by the model |
+|---|---|
+| Every number: signal values, sub-scores, criterion scores, the readiness index, the band | Nothing numeric — prose containing a digit outside a quotation is **rejected**, not trimmed |
+| **Which** signals get written about — strengths are the highest sub-scores with valid evidence, gaps the lowest (§7) | The **sentences** about them: headline and detail |
+| Which criteria exist, their weights, and the bullet count | The narrative and the bullets under each criterion |
+| The evidence anchor — turn index, timestamp, speaker — rebuilt from the transcript | Which moment to quote, subject to the span matching verbatim |
+| Whether a `must_discover` verdict counts, and what it does to the score | The verdict itself: `surfaced` plus a span |
+| The next practice persona, unchanged and fully deterministic | |
+
+**A vetoed claim never blanks a section.** `report_engine/narrate.py` composes
+every one of those sentences from the measurements first, and the judge overlays
+what passes. That is why the offline report is a complete report rather than a
+table with the headings missing, and why `--no-judge` is still the regression
+harness: with no model, `to_json` and `to_html` are byte-identical across runs.
+
+**Numbers are recomputed, never patched.** A surviving `must_discover` verdict
+becomes a `discovery_surfaced` signal and the whole report is rebuilt through
+`build_report(bundle, extra_signals=[...])`. Nothing downstream — the criterion
+score, the readiness index, which findings were selected — is edited in place,
+because a patched score is one code did not derive.
+
+**Three vetoes, and one of them is deliberately not a fourth.** A span must
+appear verbatim; a `surfaced: true` must be the *candidate* speaking after a
+manager question; prose must state no number. The spec also asks for "a manager
+question act **in the same topic**" — topics are clustered from the manager's own
+questions, so the nearest preceding act is in the evidence's topic by
+construction, and asserting it would be a test that cannot fail. It is written
+down as not-a-check rather than shipped as an inert one.
+
+**A rejected verdict degrades to `unmeasurable`, never to `False`.** The judge
+failing to evidence something is not evidence that the manager missed it, and
+scoring it as a miss would penalise them for the model's silence.
+
+`source` on a signal now has three values, and the report prints which: `measured`
+(counted by code), `assessed` (heard in the recording), `judged` (read out of the
+transcript by the judge). Temperature **0.1**.
+
+## The job spec reaches the persona's prompt (2026-09-01)
+
+Until contract **v1.4**, no job-spec field reached `_compile_system_prompt` at
+all. The persona knew who it was and what it knew; it never knew what job it had
+walked in for. The determinism table above still held line by line — and the
+system still produced interchangeable candidates for a fiber technician and a
+retail sales role, because the *only* thing distinguishing the two prompts was a
+background paragraph the model happened to write differently.
+
+The fix keeps the split. `job_title`, `experience_level`, `company_type`,
+`job_location_type` and `location` are stored interview fields, interpolated by
+code into the THE ROLE YOU ARE INTERVIEWING FOR section
+(`engine_contract._role_section`). The JD is operator free text of unbounded
+length, so it goes through **`jd_precis(jd, limit=400)` — deterministic, code
+owned, no model call**: whitespace normalisation, a cut at the last sentence end
+inside the limit, a hard cut if there is none. Asking a model to summarise the JD
+here would have been the leak: the same interview would compile different prompt
+bytes on every cast, and `ENGINE_CONTRACT_VERSION` exists precisely to pin those
+bytes.
+
+The casting prompt gained the other half of the spec — `location`, `department`,
+`manager_level` and the interview's `clarity_facts` — for the reason stated
+above: the casting model writes `opening_line`, `sample_phrases` and `background`
+and they are *stored*, so anything it cannot see is permanently missing from the
+artifact that runs. Empty scalars render `(not specified)` and an empty checklist
+renders `(none)`, both in code; a `ClarityFact` with an empty statement is not on
+this interview's checklist and is not rendered at all.
+
+Consequence for [the two fingerprints](#the-two-fingerprints): `fingerprint`
+covers `system_prompt`, so it moves with the job text — as it should, since the
+stored persona did change. `seed_fingerprint` does not include the job spec and
+is unchanged, so "same seed, same person" still holds for the same interview.
+
+Section-conditional rendering is the back-compat rule, same as the realism
+layer: an empty `job_title` renders nothing, so hand-built contracts and the
+handover sample compile byte-identically to v1.3.

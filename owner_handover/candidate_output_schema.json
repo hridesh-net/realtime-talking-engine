@@ -125,7 +125,7 @@
       "description": "Runtime slice consumed by the Go interview-candidate engine.",
       "properties": {
         "contract_version": {
-          "default": "v1.3",
+          "default": "v1.6",
           "title": "Contract Version",
           "type": "string"
         },
@@ -759,7 +759,7 @@
   "description": "One virtual candidate persona. Returned by the enrollment endpoint and by GET /api/v1/candidates/{candidate_id}.",
   "properties": {
     "persona_version": {
-      "default": "v1.2",
+      "default": "v1.3",
       "title": "Persona Version",
       "type": "string"
     },
@@ -785,6 +785,12 @@
     },
     "name": {
       "title": "Name",
+      "type": "string"
+    },
+    "presented_gender": {
+      "default": "",
+      "pattern": "^(woman|man|neutral)?$",
+      "title": "Presented Gender",
       "type": "string"
     },
     "headline": {

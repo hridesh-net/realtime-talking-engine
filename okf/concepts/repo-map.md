@@ -23,7 +23,8 @@ status: stable
 | `llm/base.py` | [StructuredModel](/concepts/contracts/structured-model.md) and [ChatModel](/concepts/contracts/chat-model.md) — the two model ports |
 | `llm/factory.py` | [llm/factory.py](/concepts/modules/llm-factory.md) — provider/model resolution |
 | `llm/gemini.py`, `llm/openai_model.py` | [LLM port subsystem](/concepts/subsystems/llm-port.md) |
-| `llm/openai_realtime.py` | [Realtime voice](/concepts/contracts/realtime-voice.md) — the only realtime provider |
+| `llm/openai_realtime.py`, `llm/gemini_live.py` | [Realtime voice](/concepts/contracts/realtime-voice.md) — the two realtime providers; `gemini_live.py` also owns the voice roster **and its gender classification** |
+| `llm/failover.py` | [LLM port](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01) — retries a key-shaped failure on the provider's second key |
 | `expectation_agent/agent.py` | [expectation_agent/agent.py](/concepts/modules/expectation-agent-agent.md) |
 | `expectation_agent/rubric.py` | [expectation_agent/rubric.py](/concepts/modules/expectation-agent-rubric.md) — the deterministic tables |
 | `expectation_agent/schema.py` | [InterviewExpectation contract](/concepts/contracts/interview-expectation.md) |
@@ -55,10 +56,15 @@ status: stable
 | `report_engine/signals/` | [Report engine](/concepts/subsystems/report-engine.md) — one module per rubric criterion |
 | `report_engine/packs/` | [Report engine](/concepts/subsystems/report-engine.md) — dated jurisdiction and competency packs |
 | `report_engine/schema.py` | [Report engine](/concepts/subsystems/report-engine.md) — `SessionBundle` in, `AssessmentReport` out |
+| `report_engine/judge.py` | [Report engine](/concepts/subsystems/report-engine.md) — the one model call, and what it may author. See [Determinism split](/concepts/determinism.md) |
+| `report_engine/validate.py` | [Report engine](/concepts/subsystems/report-engine.md) — the judge veto: verbatim spans, who spoke, no numbers in prose |
+| `report_engine/narrate.py` | [Report engine](/concepts/subsystems/report-engine.md) — the sentences code composes when no judge has run |
+| `report_engine/render.py` | [Report engine](/concepts/subsystems/report-engine.md) — the two-page report, and `detail=True` for the working |
 | `scripts/make_bundle.py` | [Report engine](/concepts/subsystems/report-engine.md) — builds a bundle from the DB, a turn list, or the demo fixture |
 | `control_plane/schemas.py` | [Interview record](/concepts/contracts/interview-record.md), [Session transcript](/concepts/contracts/session-transcript.md), [Session recording](/concepts/contracts/session-recording.md) — `RecordingMeta` |
 | `control_plane/persona.py` | [Control plane subsystem § legacy persona](/concepts/subsystems/control-plane.md) |
 | `control_plane/main.py` | [Dev setup](/concepts/runbooks/dev-setup.md) |
+| `ui/src/geminiLive.js`, `ui/src/audio/pcmWorklet.js` | [Realtime voice](/concepts/contracts/realtime-voice.md), [Test UI](/concepts/subsystems/ui.md) — the Gemini WebSocket path: PCM capture, gapless playback, resumption |
 | `ui/src/SessionView.jsx`, `ui/src/VoiceSessionView.jsx` | [Test UI § conducting an interview](/concepts/subsystems/ui.md), [Run an interview](/concepts/runbooks/run-an-interview.md), [Session recording](/concepts/contracts/session-recording.md) — the browser-side capture and upload |
 | `ui/src/PersonaPicker.jsx` | [Test UI § the persona picker](/concepts/subsystems/ui.md), [archetypes.py](/concepts/modules/candidate-agent-archetypes.md) |
 | `ui/src/{Shell,InterviewList,Wizard,InterviewDetail}.jsx` | [Test UI](/concepts/subsystems/ui.md) |

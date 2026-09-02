@@ -75,6 +75,45 @@ if ! command -v caddy >/dev/null 2>&1; then
   rm -f /tmp/caddy.tar.gz
 fi
 
+echo "bootstrap: installing ffmpeg"
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+  # The audio analysis agent shells out to ffprobe and ffmpeg to read a
+  # recording's duration and cut it into windows, so without these the
+  # Analyse button fails with "ffmpeg/ffprobe not found on PATH".
+  #
+  # AL2023 carries no ffmpeg package at all - not in amazonlinux, not as
+  # ffmpeg-free - so this pulls the static build ffmpeg.org itself links for
+  # Linux, the same reasoning as the Caddy block above. The md5 is published
+  # by the same host over the same TLS connection, so checking it catches a
+  # truncated or corrupted download and proves nothing about the publisher.
+  ARCH=$(uname -m)
+  case "$${ARCH}" in
+    aarch64) FFMPEG_ARCH=arm64 ;;
+    x86_64) FFMPEG_ARCH=amd64 ;;
+    *)
+      echo "bootstrap: FATAL - unsupported architecture $${ARCH}" >&2
+      exit 1
+      ;;
+  esac
+  FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-$${FFMPEG_ARCH}-static.tar.xz"
+  curl -fsSL "$${FFMPEG_URL}" -o /tmp/ffmpeg.tar.xz
+  curl -fsSL "$${FFMPEG_URL}.md5" -o /tmp/ffmpeg.md5
+  # `md5sum -c` cannot be used directly: the published file names the
+  # *versioned* tarball, and what was downloaded is the -release- alias.
+  FFMPEG_WANT=$(awk '{print $1}' /tmp/ffmpeg.md5)
+  FFMPEG_GOT=$(md5sum /tmp/ffmpeg.tar.xz | awk '{print $1}')
+  if [ "$${FFMPEG_WANT}" != "$${FFMPEG_GOT}" ]; then
+    echo "bootstrap: FATAL - ffmpeg checksum mismatch" >&2
+    exit 1
+  fi
+  command -v xz >/dev/null 2>&1 || dnf install -y -q xz
+  rm -rf /tmp/ffmpeg-static
+  mkdir -p /tmp/ffmpeg-static
+  tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-static --strip-components=1
+  install -m 0755 /tmp/ffmpeg-static/ffmpeg /tmp/ffmpeg-static/ffprobe /usr/local/bin/
+  rm -rf /tmp/ffmpeg-static /tmp/ffmpeg.tar.xz /tmp/ffmpeg.md5
+fi
+
 echo "bootstrap: ensuring AWS CLI is present"
 # The standard AL2023 AMI ships the CLI pre-installed; this is a defensive
 # fallback (via pip, since it needs no extra repo) for a minimal base image
@@ -102,6 +141,17 @@ GEMINI_API_KEY=$(aws ssm get-parameter --with-decryption --region "$${AWS_REGION
 OPENAI_API_KEY=$(aws ssm get-parameter --with-decryption --region "$${AWS_REGION}" --name "$${SSM_PREFIX}/OPENAI_API_KEY" --query 'Parameter.Value' --output text)
 CONTROL_PLANE_SHARED_SECRET=$(aws ssm get-parameter --with-decryption --region "$${AWS_REGION}" --name "$${SSM_PREFIX}/CONTROL_PLANE_SHARED_SECRET" --query 'Parameter.Value' --output text)
 
+# Optional fallback Gemini key. Read tolerantly on purpose: an instance in an
+# environment that predates the parameter, or one where nobody has set a second
+# key, must still boot. A missing parameter, an unresolved placeholder, or the
+# literal "None" the CLI prints for a null value all become empty — and an empty
+# GEMINI_API_KEY2 means "no fallback", which is exactly what llm/failover.py
+# does with it.
+GEMINI_API_KEY2=$(aws ssm get-parameter --with-decryption --region "$${AWS_REGION}" --name "$${SSM_PREFIX}/GEMINI_API_KEY2" --query 'Parameter.Value' --output text 2>/dev/null || true)
+if [ "$${GEMINI_API_KEY2}" = "REPLACE_ME" ] || [ "$${GEMINI_API_KEY2}" = "None" ]; then
+  GEMINI_API_KEY2=""
+fi
+
 echo "bootstrap: writing env files"
 mkdir -p "$${ENV_DIR}"
 # Restrict the umask *before* the heredocs run. chmod after the fact
@@ -112,6 +162,7 @@ umask 077
 
 cat >"$${ENV_DIR}/control-plane.env" <<EOF
 GEMINI_API_KEY=$${GEMINI_API_KEY}
+GEMINI_API_KEY2=$${GEMINI_API_KEY2}
 OPENAI_API_KEY=$${OPENAI_API_KEY}
 CONTROL_PLANE_DB=$${DATA_MOUNT}/db/control_plane.db
 CONTROL_PLANE_PORT=${control_plane_port}
@@ -120,6 +171,7 @@ EOF
 
 cat >"$${ENV_DIR}/engined.env" <<EOF
 GEMINI_API_KEY=$${GEMINI_API_KEY}
+GEMINI_API_KEY2=$${GEMINI_API_KEY2}
 OPENAI_API_KEY=$${OPENAI_API_KEY}
 SPEAKER_MODEL_ID=${speaker_model_id}
 THINKER_MODEL_ID=${thinker_model_id}

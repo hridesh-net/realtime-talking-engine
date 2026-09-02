@@ -29,7 +29,7 @@ from candidate_agent.schema import (
     VirtualCandidate,
 )
 from candidate_agent.session import CANDIDATE, MANAGER, CandidateSessionAgent
-from candidate_agent.voice import build_realtime_session
+from candidate_agent.voice import build_voice_session, session_facts
 from control_plane import reporting
 from control_plane.database import init_db
 from control_plane.ports import (
@@ -69,7 +69,12 @@ from evaluation_agent.role_facts import RoleFactsAgent
 from expectation_agent.agent import InterviewExpectationAgent
 from expectation_agent.schema import InterviewExpectation
 from llm.base import ModelError, RealtimeBroker
-from llm.factory import build_audio_model, build_realtime_broker, realtime_providers_available
+from llm.factory import (
+    build_audio_model,
+    build_realtime_broker,
+    realtime_providers_available,
+    resolve_transcribe_model,
+)
 from report_engine import render
 from report_engine.schema import AssessmentReport
 
@@ -319,6 +324,10 @@ async def enroll_candidates(
                 human_traits=human_traits,
                 archetype=archetype,
                 voices=GEMINI_TTS_VOICES,
+                location=interview.location,
+                department=interview.department,
+                manager_level=interview.manager_level,
+                clarity_facts=[f.model_dump() for f in interview.clarity_facts],
             )
         except ModelError as exc:
             # A casting failure is the provider's answer, not a bug in this
@@ -431,6 +440,11 @@ async def start_session(
                     "through POST /interviews/{id}/candidates before a session can start."
                 ),
             )
+        # Cast the same way enrollment does. A persona cast here used to be
+        # grounded in nothing but the required skills — no expectation, a
+        # hardcoded interview type — so the "Create & chat" path produced a
+        # measurably weaker persona than enrolling the identical archetype.
+        expectation = repo.get_expectation(req.interview_id)
         try:
             candidate = await agent.generate(
                 interview_id=req.interview_id,
@@ -442,12 +456,16 @@ async def start_session(
                 company_type=interview.company_type,
                 job_location_type=interview.job_location_type,
                 duration_minutes=interview.config.duration_minutes,
-                interview_type="mixed",
+                interview_type=(expectation.interview_type if expectation else "mixed"),
                 language=interview.language,
                 candidate_notes=interview.candidate_notes,
-                expectation=None,
+                expectation=expectation,
                 avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
                 voices=GEMINI_TTS_VOICES,
+                location=interview.location,
+                department=interview.department,
+                manager_level=interview.manager_level,
+                clarity_facts=[f.model_dump() for f in interview.clarity_facts],
             )
         except ModelError as exc:
             # A casting failure is the provider's answer, not a bug in this
@@ -558,7 +576,7 @@ def voice_capability() -> VoiceCapabilityResponse:
         detail=(
             f"voice ready via {', '.join(providers)}"
             if providers
-            else "no realtime-capable provider configured; set OPENAI_API_KEY"
+            else "no realtime-capable provider configured; set GEMINI_API_KEY or OPENAI_API_KEY"
         ),
     )
 
@@ -594,7 +612,12 @@ async def mint_realtime_credential(
             detail="the persona for this session has been deleted",
         )
 
-    config = build_realtime_session(candidate.engine_contract, voices=broker.voices)
+    config = build_voice_session(
+        candidate.engine_contract,
+        provider=broker.provider,
+        voices=broker.voices,
+        transcribe_model=resolve_transcribe_model(),
+    )
     try:
         credential = await broker.mint(session=config, ttl_seconds=REALTIME_TTL_SECONDS)
     except ModelError as exc:
@@ -602,20 +625,18 @@ async def mint_realtime_credential(
         # surface it as a gateway error so the UI can say so plainly.
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    audio = config.get("audio")
-    voice = ""
-    if isinstance(audio, dict):
-        output = audio.get("output")
-        if isinstance(output, dict):
-            voice = str(output.get("voice", ""))
-
+    facts = session_facts(config)
     return RealtimeCredentialResponse(
         session_id=session_id,
         client_secret=credential.value,
         expires_at=credential.expires_at,
         model=credential.model,
+        provider=broker.provider,
         call_url=credential.call_url,
-        voice=voice,
+        voice=facts.voice,
+        stt_source=facts.stt_source,
+        noise_reduction=facts.noise_reduction,
+        client_config=facts.client_config,
     )
 
 
@@ -848,13 +869,14 @@ def _report_or_404(repo: ReportWorkflowStore, session_id: str) -> dict[str, Any]
 
 
 @router.post("/sessions/{session_id}/report", status_code=status.HTTP_201_CREATED)
-def generate_session_report(
+async def generate_session_report(
     session_id: str,
     english_weight: float | None = None,
     language_gate: bool = False,
     perspective: str = "manager",
     skills: str = "",
     max_development_areas: int = 3,
+    judge: bool = True,
     repo: ReportWorkflowStore = Depends(get_repo),
 ) -> dict[str, Any]:
     """Generate (or regenerate) this session's report and store it.
@@ -864,6 +886,11 @@ def generate_session_report(
     competencies it is scored against. The toggles are stamped into the
     report's provenance because a report scored with English weighted in is not
     comparable to one without it.
+
+    `judge=false` produces the deterministic report alone — every section, with
+    the sentences code composes from the measurements instead of the ones a
+    model writes about them. It is the same report, told more plainly, and it
+    costs nothing to produce.
     """
     session = repo.get_session(session_id)
     if session is None:
@@ -891,7 +918,7 @@ def generate_session_report(
     # catalog, so the ground truth is fetched rather than assumed.
     candidate = repo.get_candidate(session.candidate_id)
 
-    report = reporting.generate(
+    report = await reporting.generate(
         interview,
         session,
         candidate,
@@ -905,6 +932,7 @@ def generate_session_report(
             "skills": [s.strip() for s in skills.split(",") if s.strip()],
             "max_development_areas": max_development_areas,
         },
+        judge=judge,
     )
     repo.save_report(session_id, report)
     return report
@@ -920,14 +948,22 @@ def get_session_report(
 
 @router.get("/sessions/{session_id}/report.html")
 def get_session_report_html(
-    session_id: str, repo: ReportWorkflowStore = Depends(get_repo)
+    session_id: str,
+    detail: bool = False,
+    repo: ReportWorkflowStore = Depends(get_repo),
 ) -> Response:
     """The stored report as a self-contained HTML page.
 
     The console embeds this rather than re-implementing the layout, so what a
     trainer reads on screen and what comes out of the print dialog are the same
     document rendered once.
+
+    `detail` appends the working — every signal with its measurement, the
+    question acts, the bias check and the full basis panel. It is a *render*
+    argument rather than a stored option because the report is a pure function
+    of the stored JSON: there is one set of numbers, offered at two depths, and
+    switching depth must never be able to change one.
     """
     report = _report_or_404(repo, session_id)
-    html = render.to_html(AssessmentReport.model_validate(report))
+    html = render.to_html(AssessmentReport.model_validate(report), detail=detail)
     return Response(content=html, media_type="text/html; charset=utf-8")

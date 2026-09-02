@@ -98,11 +98,6 @@ a {
   color: #fff;
 }
 
-.rail .ri:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
 .rail .ri svg {
   width: 20px;
   height: 20px;

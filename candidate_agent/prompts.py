@@ -67,6 +67,13 @@ SYSTEM_GUARDRAILS = """HARD RULES (violations make the output invalid):
     Do not invent employers, universities, certifications, or products.
 11. The name must be realistic and culturally varied. Do not reuse the sample
     names in this prompt.
+12. "presented_gender" must say how the name and identity you just wrote read:
+    "woman", "man", or "neutral" if it genuinely reads as neither. It is a
+    description of your own output, not a separate choice — a persona named
+    Tanvi is "woman", one named Rakesh is "man". The persona is cast in a
+    speaking voice chosen from this, so a wrong answer makes the candidate
+    sound like someone else. If HOW THIS PERSONA COMES ACROSS states a gender
+    presentation, both the name and this field must match it.
 
 TONE: write the persona from the outside, as casting notes. Specific over
 flattering. No hedging, no "may" or "might" — this person either does the thing
@@ -82,8 +89,13 @@ Required Skills: {skills_required}
 Experience Level: {experience_level}
 Company Type: {company_type}
 Location Type: {job_location_type}
+Location: {location}
+Department: {department}
+Reports to: {manager_level}
 Interview Duration: {duration_minutes} minutes
 Interview Type: {interview_type}
+Role facts the interviewer must be able to state clearly:
+{clarity_facts_block}
 
 === ARCHETYPE (FIXED — do not reinterpret) ===
 Key: {archetype_key}
@@ -149,6 +161,8 @@ set must never be confusable by name.
 Write:
 - name, headline (one line, how a recruiter would summarize them), background
   (2-3 sentences of concrete history), years_experience
+- presented_gender: how the name and identity you just wrote read — "woman",
+  "man", or "neutral". This picks the persona's speaking voice
 - verdict_rationale: why this person deserves "{verdict}" for THIS job,
   in two sentences, referencing the actual required skills
 - verbal_tics and sample_phrases matching the fixed speech profile
@@ -192,15 +206,39 @@ def build_user_prompt(
     must_discover: list[dict[str, Any]],
     expectation_note: str,
     avoid_names: list[str] | None = None,
+    location: str = "",
+    department: str = "",
+    manager_level: str = "",
+    clarity_facts: list[dict[str, str]] | None = None,
 ) -> str:
-    """Render the casting prompt for one archetype and job spec."""
+    """Render the casting prompt for one archetype and job spec.
+
+    ``location``, ``department``, ``manager_level`` and ``clarity_facts`` are
+    stored on every interview but used to stop at the control plane. They are
+    what makes one job spec concretely different from another, and the casting
+    model writes the persona's background, motivation and opening line — so
+    withholding them produced personas that were interchangeable between
+    interviews.
+    """
     adjacent_note = (
         "You MAY additionally add skills from this persona's own stronger stack "
         "at any level up to 10 — those extra entries are not clamped."
         if allows_adjacent_strength
         else "Do not add skills beyond the required list."
     )
+    # A fact with an empty statement is not on this interview's checklist
+    # (`evaluation_agent.schema.ClarityFact`), so it is not something the
+    # persona should expect to hear either.
+    facts = [
+        f"- {str(f.get('key', '')).strip()}: {str(f.get('statement', '')).strip()}"
+        for f in (clarity_facts or [])
+        if str(f.get("statement", "")).strip()
+    ]
     return USER_PROMPT_TEMPLATE.format(
+        location=location.strip() or "(not specified)",
+        department=department.strip() or "(not specified)",
+        manager_level=manager_level.strip() or "(not specified)",
+        clarity_facts_block="\n".join(facts) or "(none)",
         realism_directives=realism_directives,
         job_title=job_title,
         jd=jd,
@@ -328,13 +366,44 @@ bluff — but do not become competent.
 """
 
 
-def build_voice_system_prompt(system_prompt: str, contract_dict: dict[str, Any]) -> str:
+#: The opening line is authored at cast time and stored on the session. In text
+#: mode the control plane writes it as turn 0; in voice mode nobody can write a
+#: turn on the persona's behalf, so the only way to deliver it is to tell the
+#: model to say it. Appended, never interpolated into the contract above.
+OPENING_BLOCK = """
+THE FIRST THING YOU SAY
+Before anything else — before any greeting you would have improvised, before
+answering anything — your very first utterance on this call is this line, close
+to verbatim:
+
+"{opening_line}"
+
+Say it once, in your own voice and at your own pace, and then stop and let the
+interviewer respond. Do not explain it, do not preface it, and do not repeat it
+later in the call.
+"""
+
+
+def build_voice_system_prompt(
+    system_prompt: str,
+    contract_dict: dict[str, Any],
+    *,
+    opening_line: str = "",
+) -> str:
     """Compile the voice-session instructions: the contract, then spoken-mode rules.
 
     Mirrors :func:`build_session_system_prompt` exactly — ``system_prompt`` is
     injected verbatim and only appended to — so the same persona runs in text
     and in voice. The rules interpolated below all come from the compiled
     contract, never from the model.
+
+    Args:
+        system_prompt: The compiled contract prompt. Injected verbatim.
+        contract_dict: Turn policy and voice directives from the same contract.
+        opening_line: The persona's stored opening line. Appended as an explicit
+            instruction when present, because a spoken session has no turn 0 to
+            write it into. Empty on hand-built contracts, which then simply
+            greet the interviewer however the persona would.
     """
     policy = contract_dict.get("turn_policy") or {}
     directives = contract_dict.get("voice_directives") or {}
@@ -365,4 +434,7 @@ def build_voice_system_prompt(system_prompt: str, contract_dict: dict[str, Any])
     preamble = VOICE_MODE_PREAMBLE.format(
         length_rule=length_rule, pause_rule=pause_rule, barge_rule=barge_rule
     )
-    return f"{system_prompt}\n{preamble}"
+    opening = (
+        OPENING_BLOCK.format(opening_line=opening_line.strip()) if opening_line.strip() else ""
+    )
+    return f"{system_prompt}\n{preamble}{opening}"

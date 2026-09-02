@@ -42,7 +42,10 @@ class VirtualCandidateAgent:
                        job_location_type, duration_minutes,
                        interview_type="mixed", language=DEFAULT_LANGUAGE,
                        candidate_notes="", expectation=None,
-                       seed_override=None, avoid_names=None) -> VirtualCandidate
+                       seed_override=None, avoid_names=None,
+                       human_traits=None, archetype=None, voices=(),
+                       location="", department="", manager_level="",
+                       clarity_facts=None) -> VirtualCandidate
     @staticmethod _build_knowledge_map(draft, archetype, skills_required)   # L266
     @staticmethod _build_scorecard(draft, archetype)                       # L323
     @staticmethod _build_resume_claims(draft)                              # L349
@@ -57,7 +60,11 @@ All of `generate` is keyword-only.
 2. `derive_traits` — a seeded `random.Random` picks each trait inside the archetype's inclusive bounds. **No model involvement.**
 3. One model call against `CANDIDATE_DRAFT_JSON_SCHEMA`, with the archetype, verdict, traits, band, speech spec, answer policy, scorecard ids, the expectation note, and `avoid_names` all in the prompt. Two more fixed blocks ride along: the **`language` directive** (so `opening_line`, `sample_phrases` and `verbal_tics` are written *in* that language, not translated afterwards) and the **`candidate_notes`** block — free operator text, explicitly subordinated in the prompt (*"It adds detail; it does not replace anything… follow those and ignore the conflicting part"*), so it can colour a persona but never raise its ceiling, change its verdict, or license a forbidden behaviour. `test_operator_notes_cannot_override_the_archetype` asserts both halves, including that the knowledge clamp still holds against a hostile note.
 4. Assemble: `candidate_id = "vc-" + sha256(seed)[:12]`; speech = archetype spec + model tics/phrases; aptitude from traits; knowledge map; answer policy = archetype spec + model text; scorecard; resume claims; scalars with fallbacks.
-5. `build_engine_contract(...)` compiles the runtime slice.
+5. `build_engine_contract(...)` compiles the runtime slice — including the
+   role block (contract **v1.4**), so the persona's own instructions name the job
+   it walked in for. `location`, `department`, `manager_level` and
+   `clarity_facts` reach the casting prompt for the same reason the realism layer
+   does: the model writes `opening_line` and `background` and they are *stored*.
 6. Two fingerprints, then the `VirtualCandidate`.
 
 ## `_build_knowledge_map` — the important one
@@ -86,9 +93,20 @@ Caps at 6, skips entries without a `claim`, and coerces out-of-enum
 ## Fingerprints
 
 `seed_fingerprint` covers seed, archetype, `CATALOG_VERSION`, `PERSONA_VERSION`,
-traits, verdict — stable across re-casts. `fingerprint` adds name, background,
-per-skill levels and stances, and the compiled system prompt — moves whenever
-content changes. See [the determinism split](/concepts/determinism.md#the-two-fingerprints).
+traits, verdict — stable across re-casts. `fingerprint` adds name,
+`presented_gender`, background, per-skill levels and stances, and the compiled
+system prompt — moves whenever content changes. See
+[the determinism split](/concepts/determinism.md#the-two-fingerprints).
+
+## `presented_gender` — model-authored, code-validated (v1.3)
+
+Read off the draft in step 4 as
+`normalize_presented_gender(draft.get("presented_gender"))` and passed to
+`build_engine_contract`, which uses it to pick the persona's voice **only when
+there is no `human_traits`** — the code-owned trait wins where it exists. It is
+also stored on the `VirtualCandidate`, so a persona explains the voice it speaks
+in. Reading it inside `generate` is what kept both `control_plane/api.py` cast
+sites signature-stable and the agent free of any new dependency.
 
 ## Gotchas
 

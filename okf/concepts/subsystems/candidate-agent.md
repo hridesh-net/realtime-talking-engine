@@ -35,7 +35,7 @@ and then plays that persona through a live typed interview. Imports only `llm`.
 | `engine_contract.py` (215 ln) | [Compiles the runtime slice](/concepts/modules/candidate-agent-engine-contract.md) and the system prompt |
 | `schema.py` (254 ln) | [`VirtualCandidate`, `EngineContract`, the draft schema](/concepts/contracts/virtual-candidate.md) |
 | `session.py` (95 ln) | [`CandidateSessionAgent.reply(...)`](/concepts/modules/candidate-agent-session.md) — one persona turn, stateless |
-| `voice.py` (125 ln) | [`build_realtime_session(...)`](/concepts/modules/candidate-agent-voice.md) — the persona's spoken session config |
+| `voice.py` | [`build_voice_session(...)`](/concepts/modules/candidate-agent-voice.md) — the persona's spoken session config, compiled per provider (OpenAI Realtime or Gemini Live) |
 | `prompts.py` (345 ln) | Casting-director persona, 11 hard rules, user prompt builder, `expectation_note()`, `build_session_system_prompt()` |
 | `trait_dimensions.py` | Compose an archetype or a `HumanTraitProfile` from fixed presets instead of hand-writing one — see below |
 
@@ -171,6 +171,20 @@ registered, `POST /sessions` resolves an enrolled persona from the **database
 first** and only falls back to the catalog. The UI's "Compose" tab
 (`ui/src/PersonaComposer.jsx`, inside `InterviewDetail.jsx`) is the human-facing
 side of this.
+
+### The job spec reaches both prompts (contract v1.4, 2026-09-01)
+
+The same argument, for the thing this subsystem is *named* after. Until v1.4 no
+job-spec field reached either prompt in full: the compiled `system_prompt` never
+named the role at all, and the casting prompt carried the title, JD and skills
+but not `location`, `department`, `manager_level` or the interview's
+`clarity_facts`. The result was personas that were interchangeable between
+interviews for completely different jobs — the one failure this package exists to
+avoid. `_role_section` now emits **THE ROLE YOU ARE INTERVIEWING FOR** into the
+runtime prompt (only when a `job_title` was passed), and `build_user_prompt`
+carries the rest into casting. See
+[the engine contract](/concepts/contracts/engine-contract.md) for the section and
+the code-owned `jd_precis`.
 
 ### Why casting sees the realism layer
 

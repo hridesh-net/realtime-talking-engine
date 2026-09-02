@@ -38,6 +38,19 @@ sources:
 > `GET /sessions/{id}/report.html` returns the engine's self-contained page —
 > which the console embeds rather than re-drawing, so the screen and the print
 > output are one document. See [Report engine](/concepts/subsystems/report-engine.md).
+>
+> Two newer parameters. `POST .../report?judge=false` produces the report with
+> the sentences code composes from the measurements instead of the ones the
+> judge writes about them — same numbers, no model call, no cost. It is the
+> fallback when no judge provider is configured, which the endpoint takes
+> silently rather than 500ing a button that has always produced a report.
+> `GET .../report.html?detail=1` appends the working: the readiness index and
+> summary, every signal with its measurement, the bias check and the full basis
+> panel. (The question acts are on the report itself now, so the working no
+> longer repeats them.) It is
+> a **render** argument, not a stored option — the report is a pure function of
+> the stored JSON, so switching depth cannot change a number, and there is one
+> stored artifact rather than two.
 
 FastAPI, router prefix `/api/v1`, tag `interviews`. Served by
 `control_plane.main:build_app` (factory), default port **8081**
@@ -135,6 +148,26 @@ The live text interview. See
 | `POST` | `/api/v1/sessions/{id}/realtime` | `TurnWorkflowStore` | **201** / 404 / 409 / 410 / **502** | Mints the browser's ephemeral credential. 502 when the *vendor* refuses — that is their answer, not a bug here. |
 | `POST` | `/api/v1/sessions/{id}/transcript` | `SessionStore` | **201** / 404 / 409 / 422 | Records a turn **without** generating a reply. `{speaker, text}`. |
 
+`RealtimeCredentialResponse` (`POST /sessions/{id}/realtime`):
+
+| Field | Notes |
+|---|---|
+| `session_id` | |
+| `client_secret` | Ephemeral, scoped to one session, expires. On Gemini this is the auth-token name and doubles as the JS SDK's `apiKey`. |
+| `expires_at` | Unix seconds; connect before this. |
+| `model` | The realtime model minted against. |
+| `provider` | `gemini` or `openai` — selects the browser's transport. |
+| `call_url` | Where to POST the SDP offer. **Empty** for providers whose SDK owns the endpoint (Gemini). |
+| `voice` | Derived from the persona; stable across sessions. |
+| `stt_source` | Who transcribes the interviewer, for the UI's status line: the STT model id on OpenAI, `gemini-live (in-session)` on Gemini. |
+| `noise_reduction` | Vendor-side denoising profile (`near_field` on OpenAI); empty when the vendor applies none. |
+| `client_config` | Non-secret connect parameters the browser passes to the vendor SDK verbatim; `{}` on the WebRTC path. Never the prompt, the opening line or the ceilings. |
+
+`provider`, `stt_source`, `noise_reduction` and `client_config` are read off the
+compiled session document by `candidate_agent.voice.session_facts`, so the
+handler never branches on a provider name. See
+[Realtime voice](/concepts/contracts/realtime-voice.md).
+
 ### Recording
 
 | Method | Path | Port used | Status | Notes |
@@ -155,7 +188,7 @@ The live call never passes through this service — see
 does, via the chunk endpoints above — out of band from the live call, off its
 latency path.) Two more consequences visible in the API:
 
-* **A voice session has no pre-written turn 0.** `POST /sessions` with `modality: "voice"` returns `turns: []`; the persona *speaks* its opening line and the browser reports it back through `/transcript` like any other turn. Writing it server-side too would duplicate turn 0 and shift every `elapsed_ms` the report reads.
+* **A voice session has no pre-written turn 0.** `POST /sessions` with `modality: "voice"` returns `turns: []`; the persona *speaks* its opening line — carried into the sealed instructions and nudged into being spoken by the browser — and the browser reports it back through `/transcript` like any other turn. Writing it server-side too would duplicate turn 0 and shift every `elapsed_ms` the report reads.
 * **`/transcript` still stamps the clock here.** The browser knows when it *received* a transcript, which is not when it was said and is not comparable across two managers on two networks.
 
 `GET /interviews/{id}/sessions` returns `[]` for an unknown interview rather

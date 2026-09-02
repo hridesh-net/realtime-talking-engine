@@ -56,6 +56,13 @@ the router. `main()` runs uvicorn against `control_plane.main:build_app` with
 Five provider functions — `get_repo()`, `get_expectation_agent()`,
 `get_candidate_agent()`, `get_session_agent()`, `get_role_facts_agent()` — wired
 with `Depends(...)`, plus `get_realtime_broker()` for the voice path.
+
+`mint_realtime_credential` compiles the session document through
+`build_voice_session(..., provider=broker.provider, voices=broker.voices,
+transcribe_model=resolve_transcribe_model())`, hands it to the broker, and fills
+the response from `session_facts(config)` — so the handler works the same for a
+WebRTC provider and a WebSocket one and never branches on a provider name. See
+[Realtime voice](/concepts/contracts/realtime-voice.md).
 Override these in tests rather than patching modules;
 `tests/test_session.py` does exactly that.
 
@@ -73,6 +80,17 @@ refuses to: the session record, the transcript, turn indexes, timestamps, and
 when a turn happens. The agent is handed a contract and a list of turns and
 returns a string. See [Session transcript](/concepts/contracts/session-transcript.md)
 and [Run an interview](/concepts/runbooks/run-an-interview.md).
+
+**Casting inside `POST /sessions` is the same cast enrollment does
+(2026-09-01).** When the requested archetype is not yet enrolled the handler
+casts it on the spot — and it used to do so with `expectation=None` and a
+hardcoded `interview_type="mixed"`, ignoring the interview's stored expectation
+document as well as its location, department, reporting line and role facts. The
+"Create & chat" path therefore produced a weaker, less grounded persona than
+enrolling the identical archetype through `POST .../candidates`. It now reads
+`repo.get_expectation(...)` and passes the whole job spec, which is why
+`SessionWorkflowStore` gained `ExpectationStore`
+([storage ports](/concepts/contracts/storage-ports.md)).
 
 For a `voice` session it also owns the recorded audio artifact — chunk
 ordering, finalization, and where the bytes land on disk — uploaded by the

@@ -14,6 +14,10 @@ import { generateReport, getReport, reportHtmlUrl } from './api'
 export default function ReportView({ session, onClose, onGenerated }) {
   const [report, setReport] = useState(null)
   const [busy, setBusy] = useState(false)
+  // The working — signal tables, question acts, the basis panel — is off by
+  // default. It is what a trainer opens to check a number, and what made the
+  // old report unreadable for the manager acting on one.
+  const [detail, setDetail] = useState(false)
   // Bumped when an analysis finishes, so the report offers to pick it up.
   const [analysed, setAnalysed] = useState(0)
   const [error, setError] = useState(null)
@@ -71,6 +75,13 @@ export default function ReportView({ session, onClose, onGenerated }) {
           )}
           {report && (
             <>
+              <button
+                className={`btn sm ${detail ? 'primary' : ''}`}
+                onClick={() => setDetail((d) => !d)}
+                title="Every signal with its measurement, the question acts and the basis panel"
+              >
+                {detail ? '▾ Hide working' : '▸ Show working'}
+              </button>
               <button className="btn sm" onClick={onPrint}>📄 Download PDF</button>
               <button
                 className={`btn sm ${analysed ? 'primary' : ''}`}
@@ -119,7 +130,7 @@ export default function ReportView({ session, onClose, onGenerated }) {
           <iframe
             ref={frame}
             title="Session report"
-            src={reportHtmlUrl(session.id)}
+            src={reportHtmlUrl(session.id, detail)}
             style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 520, border: 0, display: 'block' }}
           />
         </>

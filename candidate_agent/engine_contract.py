@@ -26,6 +26,7 @@ from candidate_agent.schema import (
     SpeechProfile,
     UnlockSpec,
 )
+from llm.gemini_live import GEMINI_FEMALE_VOICES, GEMINI_LIVE_VOICES, GEMINI_MALE_VOICES
 
 #: Behaviours no persona may exhibit, regardless of archetype. The engine
 #: enforces these as hard stops — they exist to keep the session usable and to
@@ -530,9 +531,81 @@ def casting_realism_note(traits: HumanTraitProfile | None) -> str:
         f"{traits.region}, gender presentation {_english(traits.gender_presentation)}, age "
         f"{traits.age_band}, notice period {_english(traits.notice_period)}, "
         f"{traits.offers_in_hand} offer(s) in hand. The name and background you write must "
-        "be consistent with all of that."
+        "be consistent with all of that, and presented_gender must match the gender "
+        "presentation stated here."
     )
     return _bullets(lines)
+
+
+#: How much of the job description reaches the persona's runtime prompt. Long
+#: enough to carry what the role actually is, short enough that it cannot crowd
+#: out the persona's own behavioural instructions.
+JD_PRECIS_LIMIT = 400
+
+
+def jd_precis(jd: str, limit: int = JD_PRECIS_LIMIT) -> str:
+    """Shorten a job description to something a speech model can hold in mind.
+
+    Code-owned and deterministic — no model call. A JD is operator free text of
+    unbounded length, and the compiled system prompt is the one artifact whose
+    bytes are pinned by ``ENGINE_CONTRACT_VERSION``; letting a model summarise
+    it here would make the same interview compile a different prompt each cast.
+
+    Whitespace is normalised first (an operator's line breaks are not meaning),
+    then the text is cut at the last sentence end inside ``limit``. When there
+    is no sentence boundary to cut at, it is hard-cut at ``limit`` — no
+    ellipsis, nothing appended, so the result is always a substring of the
+    normalised input.
+    """
+    text = " ".join(jd.split())
+    if len(text) <= limit:
+        return text
+    window = text[:limit]
+    cut = max(window.rfind("."), window.rfind("!"), window.rfind("?"))
+    if cut > 0:
+        return window[: cut + 1].strip()
+    return window.strip()
+
+
+def _role_section(
+    *,
+    job_title: str,
+    jd: str,
+    company_type: str,
+    experience_level: str,
+    job_location_type: str,
+    location: str,
+) -> str:
+    """The role this persona is interviewing for, or nothing at all.
+
+    Empty string when ``job_title`` is empty, so a persona compiled without a
+    job spec produces a byte-identical prompt to before this section existed —
+    the same rule ``_realism_section`` follows.
+
+    Without this block every persona answered from its background alone, which
+    is why two interviews with completely different job specs produced
+    interchangeable candidates: nothing about the *job* ever reached the
+    runtime prompt.
+    """
+    if not job_title.strip():
+        return ""
+
+    parts = [p for p in (experience_level, company_type, job_location_type) if p]
+    if location:
+        parts.append(f"based in {location}")
+    qualifier = f" ({', '.join(parts)})" if parts else ""
+
+    lines = [
+        "THE ROLE YOU ARE INTERVIEWING FOR",
+        f"{job_title}{qualifier}.",
+    ]
+    precis = jd_precis(jd)
+    if precis:
+        lines.append(precis)
+    lines.append(
+        "Everything you say about your experience and motivation is anchored to THIS role."
+    )
+    return "\n".join(lines) + "\n\n"
 
 
 def _compile_system_prompt(
@@ -547,6 +620,12 @@ def _compile_system_prompt(
     policy: AnswerPolicy,
     human_traits: HumanTraitProfile | None = None,
     language: str = DEFAULT_LANGUAGE,
+    job_title: str = "",
+    jd: str = "",
+    company_type: str = "",
+    experience_level: str = "",
+    job_location_type: str = "",
+    location: str = "",
 ) -> str:
     """Build the realtime model's system instruction. Injected verbatim."""
     knowledge_lines = []
@@ -565,6 +644,14 @@ def _compile_system_prompt(
         else "You wait for the interviewer to finish before answering."
     )
     phrases = "\n".join(f'- "{p}"' for p in speech.sample_phrases) or "- (none)"
+    role = _role_section(
+        job_title=job_title,
+        jd=jd,
+        company_type=company_type,
+        experience_level=experience_level,
+        job_location_type=job_location_type,
+        location=location,
+    )
 
     return f"""You are {name}, a job candidate being interviewed by a human interviewer.
 {headline}
@@ -573,7 +660,7 @@ BACKGROUND
 {background}
 Years of experience: {years_experience}.
 
-HOW YOU TALK
+{role}HOW YOU TALK
 {LANGUAGE_DIRECTIVES.get(language, LANGUAGE_DIRECTIVES[DEFAULT_LANGUAGE])}
 Pace: {speech.pace}. Verbosity: {speech.verbosity}. Register: {speech.formality}.
 Tone: {speech.tone}.
@@ -645,6 +732,12 @@ _FALLBACK_STALLS: tuple[str, ...] = (
 #: `tts_voice_id` is picked from the same list the engine itself falls back to
 #: when a contract omits it.
 #:
+#: Re-exported, not redeclared: the list is owned by `llm.gemini_live`, which is
+#: also the roster the live voice session advertises. Two copies of an
+#: order-sensitive tuple is exactly the drift `tts_voice_id` cannot survive —
+#: the voice is chosen once at cast time from *this* list and spoken months
+#: later from *that* one, so they have to be the same object.
+#:
 #: **Ordered and append-only, on pain of breaking every already-cast
 #: persona.** `pick_voice` selects `hash(candidate_id) % len(voices)`, so the
 #: choice is a function of this list's *order and length*, not just its
@@ -653,39 +746,9 @@ _FALLBACK_STALLS: tuple[str, ...] = (
 #: (`okf/concepts/determinism.md`). Reordering this list, or inserting a voice
 #: anywhere but the end, changes the modulus result for candidate ids that
 #: were never re-cast, silently repointing the voice of every persona already
-#: compiled against the old ordering. New voices may only be appended.
-GEMINI_TTS_VOICES: tuple[str, ...] = (
-    "Zephyr",
-    "Puck",
-    "Charon",
-    "Kore",
-    "Fenrir",
-    "Leda",
-    "Orus",
-    "Aoede",
-    "Callirrhoe",
-    "Autonoe",
-    "Enceladus",
-    "Iapetus",
-    "Umbriel",
-    "Algieba",
-    "Despina",
-    "Erinome",
-    "Algenib",
-    "Rasalgethi",
-    "Laomedeia",
-    "Achernar",
-    "Alnilam",
-    "Schedar",
-    "Gacrux",
-    "Pulcherrima",
-    "Achird",
-    "Zubenelgenubi",
-    "Vindemiatrix",
-    "Sadachbia",
-    "Sadaltager",
-    "Sulafat",
-)
+#: compiled against the old ordering. New voices may only be appended — in
+#: `llm/gemini_live.py`.
+GEMINI_TTS_VOICES: tuple[str, ...] = GEMINI_LIVE_VOICES
 
 
 def pick_voice(candidate_id: str, voices: Sequence[str]) -> str:
@@ -700,6 +763,73 @@ def pick_voice(candidate_id: str, voices: Sequence[str]) -> str:
         raise ValueError("no voices offered")
     digest = hashlib.sha256(candidate_id.encode()).hexdigest()
     return voices[int(digest[:16], 16) % len(voices)]
+
+
+#: The values the casting model may declare in `presented_gender`. `neutral` is
+#: a real answer — the authored identity reads as neither — and maps to the full
+#: roster, the same branch `non_binary` and `unspecified` take.
+PRESENTED_GENDER_VALUES: frozenset[str] = frozenset({"woman", "man", "neutral"})
+
+
+def normalize_presented_gender(value: object) -> str:
+    """Validate the model's `presented_gender` down to a value code will act on.
+
+    The one field in this story the model authors, so it is the one that needs
+    a gate. Anything outside `PRESENTED_GENDER_VALUES` — a missing key, `None`,
+    "female", a sentence — becomes `""`, which
+    `voices_for_presentation` treats exactly like `neutral`: the full roster.
+
+    **It never raises.** A model that returns a bad enum value has still written
+    a usable persona, and losing the whole cast over the voice hint would be a
+    worse failure than picking from thirty voices instead of fourteen.
+    """
+    if isinstance(value, str) and value in PRESENTED_GENDER_VALUES:
+        return value
+    return ""
+
+
+def voices_for_presentation(voices: Sequence[str], gender_presentation: str) -> Sequence[str]:
+    """Narrow the roster to the voices that match how the persona presents.
+
+    Code-owned, like `pick_voice` itself and for the same reason: which voice a
+    persona speaks in is part of the compiled contract, so the rule that picks
+    it has to be a function, not a judgement. A persona whose profile says
+    ``gender presentation: woman`` speaking in a man's voice is the same class
+    of casting-time incoherence as one cast under a man's name — the interviewer
+    hears a contradiction the persona document never contained.
+
+    ``woman`` and ``man`` filter to the vendor-classified subset
+    (`llm.gemini_live.GEMINI_FEMALE_VOICES` / `GEMINI_MALE_VOICES`, imported
+    rather than restated — one home per fact). Everything else returns the
+    roster unchanged: ``non_binary`` and ``unspecified`` from
+    `HumanTraitProfile`, ``neutral`` from the casting draft, and the empty
+    string a bad draft value validates down to. There is no vendor-neutral
+    subset to narrow to, and inventing one would be this module deciding what
+    non-binary sounds like.
+
+    It takes the *presentation*, not the source, so one rule serves both the
+    code-owned trait and the model-declared one — `build_engine_contract` picks
+    which of the two to hand it.
+
+    **Order is preserved**, because `pick_voice` hashes modulo the sequence's
+    length and indexes into it — the result is a function of order as well as
+    membership. A roster carrying voices outside both sets (a test roster, or
+    the OpenAI names) narrows to nothing under a gendered presentation, so the
+    filter falls back to the full roster rather than raising: a voice that is
+    merely un-classified is better than no voice at all.
+
+    **Already-cast personas are unaffected.** `tts_voice_id` is computed once at
+    cast time and stored in the contract; it is never recomputed at session
+    time. Only personas cast from here on are gender-matched — an existing
+    persona keeps the voice its managers already know it by.
+    """
+    if gender_presentation == "woman":
+        subset = [v for v in voices if v in GEMINI_FEMALE_VOICES]
+    elif gender_presentation == "man":
+        subset = [v for v in voices if v in GEMINI_MALE_VOICES]
+    else:
+        return voices
+    return subset or voices
 
 
 def compile_precompiled_beliefs(knowledge_map: list[SkillKnowledge]) -> list[PrecompiledBelief]:
@@ -837,11 +967,35 @@ def build_engine_contract(
     policy: AnswerPolicy,
     opening_line: str,
     human_traits: HumanTraitProfile | None = None,
+    presented_gender: str = "",
     language: str = DEFAULT_LANGUAGE,
     voices: Sequence[str] = (),
+    job_title: str = "",
+    jd: str = "",
+    company_type: str = "",
+    experience_level: str = "",
+    job_location_type: str = "",
+    location: str = "",
 ) -> EngineContract:
     """Compile the runtime contract the Go engine consumes for one persona."""
-    tts_voice_id = pick_voice(candidate_id, voices) if voices else ""
+    # The voice is picked from the subset that matches how this persona
+    # presents, then hashed as before — so it is still a stable function of
+    # `candidate_id`, just over a smaller ordered roster.
+    #
+    # Precedence: `human_traits.gender_presentation` is code-owned, composed
+    # from fixed presets and never seen by the model, so it wins outright when
+    # a persona carries a realism layer. Most personas do not — the fixed
+    # catalog archetypes cast with `human_traits=None` — and for those the only
+    # thing that knows how the identity reads is whatever wrote the name, which
+    # is the casting model. Hence `presented_gender`, validated here rather
+    # than trusted.
+    presentation = (
+        human_traits.gender_presentation
+        if human_traits is not None
+        else normalize_presented_gender(presented_gender)
+    )
+    offered = voices_for_presentation(voices, presentation) if voices else voices
+    tts_voice_id = pick_voice(candidate_id, offered) if offered else ""
     if voices and (not tts_voice_id or tts_voice_id not in voices):
         # Defence in depth: `pick_voice` already guarantees this by
         # construction (it indexes into `voices`), but `tts_voice_id` is
@@ -866,6 +1020,12 @@ def build_engine_contract(
             policy=policy,
             human_traits=human_traits,
             language=language,
+            job_title=job_title,
+            jd=jd,
+            company_type=company_type,
+            experience_level=experience_level,
+            job_location_type=job_location_type,
+            location=location,
         ),
         opening_line=opening_line,
         voice_directives={**_speech_directives(speech, aptitude), "language": language},

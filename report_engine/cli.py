@@ -31,6 +31,11 @@ def main(argv: list[str] | None = None) -> int:
         help="weight English into the index (omit for advisory only)",
     )
     parser.add_argument(
+        "--detail",
+        action="store_true",
+        help="append the working: every signal, the question acts and the basis panel",
+    )
+    parser.add_argument(
         "--no-language-gate",
         action="store_true",
         help="score a non-English session anyway, with a stamped warning",
@@ -46,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_report(bundle)
 
     if args.out:
-        args.out.write_text(to_html(report), encoding="utf-8")
+        args.out.write_text(to_html(report, detail=args.detail), encoding="utf-8")
     if args.json:
         args.json.write_text(to_json(report), encoding="utf-8")
     if not args.out and not args.json:

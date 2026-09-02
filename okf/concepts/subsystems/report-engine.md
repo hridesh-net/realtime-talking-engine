@@ -6,13 +6,18 @@ resource: /report_engine
 tags: [report, evaluation, manager-assessment, deterministic, signals, standalone]
 generated:
   by: claude-opus-5
-  at: "2026-08-26T00:00:00Z"
+  at: "2026-08-27T00:00:00Z"
 verified:
   - by: claude-opus-5
-    at: "2026-08-26T00:00:00Z"
+    at: "2026-08-27T00:00:00Z"
 status: draft
 sources:
   - resource: /report_engine/score.py
+  - resource: /report_engine/judge.py
+  - resource: /report_engine/validate.py
+  - resource: /report_engine/narrate.py
+  - resource: /report_engine/render.py
+  - resource: /report_engine/acts.py
   - resource: /report_engine/acts.py
   - resource: /report_engine/signals
   - resource: /report_engine/schema.py
@@ -25,9 +30,10 @@ report. **The specification lives in
 [`docs/REPORT_ENGINE_SCORING_SPEC.md`](/references/report-engine-spec.md)**; this
 page is the routing card for the code.
 
-`status: draft` because phases 1–5 of the spec's build order are built (the
-complete deterministic report) and phases 6–7 are not: no judge pass, and no
-audio-derived English module.
+`status: draft` because phases 1–6 of the spec's build order are built and
+phase 7 is not: there is no audio-derived English module. Phase 6, the judge,
+landed 2026-08-27 — see [Determinism split](/concepts/determinism.md) for what
+it is and is not allowed to author.
 
 ## Why it imports nothing first-party
 
@@ -46,13 +52,59 @@ file and writes a report, touching no database and no network.
 assembling a bundle from `control_plane.db`, from a plain turn list, or from the
 worked example in `tests/fixtures/demo_turns.json`.
 
-## Two halves: counted and heard
+## What the reader gets
 
-A report is built from two kinds of signal, and it says which is which on every
-row. **Counted** signals are computed from the stored transcript by code and are
-reproducible. **Heard** signals come from the
+**The section list is the hiring manager's, not the engine's.** She named five
+things and the default render is exactly those, in this order:
+
+1. **Competency scorecard** — the four rubric criteria at `x/4` with a weight, a
+   narrative and up to three plain-language bullets each.
+2. **Q&A** — every question she asked, with its time, verbatim, and one tag.
+3. **BEI questions** — the behavioural ones asked, and the ones that came out as
+   hypotheticals instead.
+4. **Strengths & gaps** — two columns, each item quoted.
+5. **Areas to improve** — numbered, each with the sentence to say instead.
+
+**The readiness index and the summary paragraph are not on her pages.** Both are
+still computed, stored and stamped exactly as before — spec section 9's
+comparability rules depend on the index existing — and both are printed in the
+working, where a trainer reviewing the session will look. She asked for the four
+competencies rather than one number rolled up from them, and a headline score
+nobody asked for is a headline score that gets argued about.
+
+Signal tables, the bias check, the basis panel and that overview are the
+**working**, off by default: `to_html(report, detail=True)`, or `?detail=1` on
+the HTML endpoint.
+
+That is a reversal, and it is worth saying why. The previous default opened with
+*How this report was produced* and ran six pages, most of them tables; a hiring
+manager called it difficult to read, which it was. The working did not become
+less true, it became a second click. What stays on the page unconditionally is
+the footer's basis line — how many signals were counted, heard and judged — for
+the reason in the next section.
+
+**The question acts are rendered once.** The working's old five-column question
+table is gone: the report itself now lists every question, and two renderings of
+the same acts would be two places for one fact to be wrong in. The Q&A list also
+translates the classifier's vocabulary — nobody being coached should have to
+know what `double_barrelled` means to read their own report, so it prints as
+*two questions in one*, and `situational` prints as *hypothetical*.
+
+**BEI needs no new signal.** `behavioural` and `situational` are two of the six
+types `acts.classify` already assigns, so the section is a view over the same
+data the score uses, never a second opinion about it.
+
+Scores are computed on the 0–10 scale the spec calibrated and *displayed* out of
+four. Rescaling the numbers rather than their display would mean re-deriving
+every threshold against a scale no study used.
+
+## Three kinds of signal, and it says which on every row
+
+**Counted** (`source="measured"`) signals are computed from the stored transcript
+by code and are reproducible. **Heard** (`assessed`) signals come from the
 [audio analysis](/concepts/subsystems/analysis-agent.md) and rest on a model's
-reading of the recording.
+reading of the recording. **Judged** signals come from the report judge reading
+the transcript, and every claim under one carries a span matched word for word.
 
 The distinction is not cosmetic. On a real session the counted fairness detector
 returned **10/10, "no protected topics detected"**, on an interview containing
@@ -64,25 +116,42 @@ read the language actually spoken.
 Every report carries a **basis panel** stating how many signals were counted
 versus heard, which model and instruction version produced the analysis, the
 languages heard, and how many anchors were discarded. A trainer acting on a
-number is owed that in the reader's language.
+number is owed that in the reader's language. The panel itself moved behind
+`detail`; a one-line version of it did not, and is printed in the footer of every
+report — the 10/10 above is exactly why a reader must never have to opt in to
+learning which half of a number was heard.
 
 ## The determinism split, restated
 
 Code owns every count, ratio, threshold comparison, sub-score, criterion score
 and the readiness index; segmentation; question-act extraction and typing;
 confidence downgrades; and the recommended next persona. Re-running on a stored
-session must produce byte-identical output — `tests/test_report_engine.py`
-asserts it on both the JSON and the HTML.
+session **with no judge** must produce byte-identical output —
+`tests/test_report_engine.py` asserts it on both the JSON and the HTML, and that
+is still the regression harness.
 
-Nothing here calls a model today. When the judge lands (spec phase 6) it will
-own reasoning prose and quote selection only, and code will veto any claim whose
-evidence span is not found verbatim in the transcript.
+The judge owns prose and quote selection only. Code vetoes any claim whose
+evidence span is not in the transcript verbatim, refuses a `surfaced` verdict
+credited to the manager's own words, and rejects prose stating a number — the
+numbers are computed here and printed beside the sentence, so a judge free to
+write them too could contradict them. A vetoed claim falls back to the sentence
+`narrate.py` composed from the measurement, so a veto costs polish and never
+costs a section. The full table is in
+[Determinism split](/concepts/determinism.md).
 
 ## The pipeline
 
 ```
-bundle -> language gate -> question acts -> segments -> signals -> scores -> render
+bundle -> language gate -> question acts -> segments -> signals -> scores
+       -> narrate -> [judge -> validate -> rescore] -> render
 ```
+
+The judge is a *decoration pass*, not a step inside `build_report`: the
+deterministic report is built first and complete, then `judge.apply` overlays
+what survives the veto. A `must_discover` verdict that survives becomes a
+`discovery_surfaced` signal and the report is **rebuilt** through
+`build_report(bundle, extra_signals=[...])` rather than patched, so every number
+downstream of it is still derived in one place.
 
 | Module | Owns |
 |---|---|
@@ -94,6 +163,9 @@ bundle -> language gate -> question acts -> segments -> signals -> scores -> ren
 | `transfer.py` | the only place a raw measurement becomes a score |
 | `score.py` | aggregation, confidence, findings, next practice |
 | `coach.py` | the behaviour-level line and the sentence to say instead |
+| `narrate.py` | the sentences code composes from the measurements alone |
+| `judge.py` | the one model call — spec section 6 |
+| `validate.py` | the veto: verbatim spans, who spoke, no numbers in prose |
 | `render.py` | JSON and a self-contained HTML page |
 | `packs/` | dated jurisdiction and competency packs |
 
@@ -138,6 +210,20 @@ criterion and scales the rubric's four by `1 − w`) and
 `scoring_options.language_gate`. **Both break comparability**, so both are
 stamped on `Provenance` and any cohort view must segment on them rather than
 average across settings.
+
+## Why the judge does not break "imports nothing"
+
+Spec section 10 wrote `ALLOWED_IMPORTS["report_engine"] = {"llm"}` because the
+judge needs a model. The code kept `set()`. The model arrives instead as a
+**structural type** — `judge.JudgeModel` is a `Protocol` with one method, and
+`llm.base.StructuredModel` satisfies it without either package knowing about the
+other. `control_plane/reporting.py`, which already imports both, does the wiring.
+
+The consequence, stated plainly: **the CLI cannot run the judge.** It has no way
+to build a model, so `python -m report_engine bundle.json` is always the
+deterministic report. That is the price of the standalone property, and it is
+also what keeps the offline path honest — the thing the regression suite runs is
+the thing the CLI runs.
 
 ## Related
 

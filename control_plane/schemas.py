@@ -414,15 +414,33 @@ class RealtimeCredentialResponse(BaseModel):
     Everything the browser needs to open a speech-to-speech session, and nothing
     it does not. The persona instructions are baked into the minted credential
     vendor-side, so they are deliberately **not** returned here — a client that
-    could read them could also edit them.
+    could read them could also edit them. ``client_config`` is the one field a
+    client is handed to pass back to the vendor, and it carries only connect
+    parameters (transcription toggles, turn detection, resumption) — never the
+    prompt, the opening line, or the ceilings.
     """
 
     session_id: str
     client_secret: str = Field(..., description="Ephemeral. Expires; scoped to one session.")
     expires_at: int = Field(..., description="Unix seconds. Connect before this.")
     model: str
-    call_url: str = Field(..., description="POST the SDP offer here with the secret as bearer.")
+    provider: str = Field(..., description="Which talker: selects the browser's transport.")
+    call_url: str = Field(
+        default="",
+        description="POST the SDP offer here with the secret as bearer. "
+        "Empty for providers whose SDK owns the endpoint.",
+    )
     voice: str = Field(..., description="Derived from the persona; stable across sessions.")
+    stt_source: str = Field(
+        default="", description="Who transcribes the interviewer, for the UI's status line."
+    )
+    noise_reduction: str = Field(
+        default="", description="Vendor-side denoising profile; empty when the vendor applies none."
+    )
+    client_config: dict = Field(
+        default_factory=dict,
+        description="Non-secret connect parameters the browser passes to the vendor SDK verbatim.",
+    )
 
 
 class VoiceCapabilityResponse(BaseModel):

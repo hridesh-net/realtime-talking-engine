@@ -21,9 +21,9 @@ func sampleBytes(t *testing.T) []byte {
 
 // legacySampleBytes is a genuine v1.0 contract, predating precompiled_beliefs,
 // stall_phrases, pregate_lexicon, unlock_spec and tts_voice_id. Kept
-// alongside the current v1.3 sample so the engine's promise to still accept
+// alongside the current sample so the engine's promise to still accept
 // v1.0-v1.2 and degrade to the single-model path is tested against a real
-// fixture, not a v1.3 sample with its version string overwritten (which
+// fixture, not a current sample with its version string overwritten (which
 // would leave the v1.3 fields populated and prove nothing about degradation).
 func legacySampleBytes(t *testing.T) []byte {
 	t.Helper()
@@ -42,8 +42,8 @@ func TestParse_SampleRoundTrips(t *testing.T) {
 		t.Fatalf("Parse(sample) returned error: %v", err)
 	}
 
-	if c.ContractVersion != "v1.3" {
-		t.Errorf("ContractVersion = %q, want v1.3", c.ContractVersion)
+	if c.ContractVersion != "v1.6" {
+		t.Errorf("ContractVersion = %q, want v1.6", c.ContractVersion)
 	}
 	if c.CandidateID != "vc-0c4aff82e1cb" {
 		t.Errorf("CandidateID = %q, want vc-0c4aff82e1cb", c.CandidateID)

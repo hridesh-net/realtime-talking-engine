@@ -29,10 +29,14 @@ PROVIDERS: dict[str, Callable[[str, float, str], StructuredModel]] = {
 CHAT_PROVIDERS: dict[str, Callable[[str, float, str], ChatModel]] = {
     "gemini": GeminiChatModel, "openai": OpenAIChatModel}
 API_KEY_VARS   = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
+FALLBACK_API_KEY_VARS = {"gemini": ("GEMINI_API_KEY2",)}   # tried on a key-shaped failure
 DEFAULT_MODEL_IDS = {"gemini": "gemini-3.7-flash", "openai": "gpt-4o-mini"}  # pinned, not `-latest`
 REALTIME_PROVIDERS: dict[str, Callable[[str, str], RealtimeBroker]] = {
-    "openai": OpenAIRealtimeBroker}          # deliberately PARTIAL
-DEFAULT_REALTIME_MODEL_IDS = {"openai": "gpt-realtime-2"}
+    "gemini": GeminiLiveBroker,              # deliberately PARTIAL;
+    "openai": OpenAIRealtimeBroker}          # ORDER decides the default
+DEFAULT_REALTIME_MODEL_IDS = {"gemini": "gemini-3.1-flash-live-preview",
+                              "openai": "gpt-realtime-2"}
+DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe"   # OpenAI voice path only
 ROLE_PREFIXES  = {"expectation": "EXPECTATION", "candidate": "CANDIDATE",
                   "session": "SESSION", "judge": "JUDGE",
                   "role_facts": "ROLE_FACTS", "voice": "VOICE"}
@@ -43,6 +47,7 @@ def build_model(role: str, temperature: float) -> StructuredModel
 def build_chat_model(role: str, temperature: float) -> ChatModel
 def realtime_providers_available() -> list[str]
 def build_realtime_broker(role: str = "voice") -> RealtimeBroker
+def resolve_transcribe_model() -> str
 ```
 
 Two registries, one per [model port](/concepts/contracts/chat-model.md), keyed
@@ -75,12 +80,36 @@ stripped and falsiness-checked), which is what makes the blank entries in
 * Both builders re-read the key after `resolve_provider` already checked it, via the shared `_credential` helper — the second check is marked `# pragma: no cover`.
 * **`build_realtime_broker` does not use `resolve_provider`.** It resolves against `REALTIME_PROVIDERS` alone, because the configured text provider may have no realtime API — falling through to it would fail at mint time with an error about the wrong thing. An explicit `VOICE_PROVIDER` naming a provider without realtime support is rejected up front, by name.
 * `realtime_providers_available()` exists so the UI can ask *before* offering a Voice button. No key configured is a configuration answer (`available: false`), not an error.
+* **`REALTIME_PROVIDERS` order is behaviour, not tidiness.** With no `VOICE_PROVIDER` set, `build_realtime_broker` takes `available[0]` — so putting `gemini` first is what makes Gemini Live the default talker in a deployment holding both keys. `VOICE_PROVIDER=openai` keeps the WebRTC path.
+* **`resolve_transcribe_model()` is a bare env read, not a role.** `TRANSCRIBE_MODEL` names a *transcriber*, not a provider, and it applies to the OpenAI voice path alone — Gemini Live transcribes both sides in-session. It lives here because env reads live here: `candidate_agent.voice` is handed the answer rather than reaching for `os.environ` itself.
 * `judge` is a live role prefix with no consumer yet. Setting `JUDGE_MODEL` today changes nothing; it is here so the evaluation layer lands without an env-var migration.
 * `role_facts` backs the [evaluation agent](/concepts/subsystems/evaluation-agent.md)'s checklist drafting at temperature 0.1 — extraction, so pin it to a steady model rather than a creative one.
+
+## More than one key per provider
+
+`_credentials(provider)` returns the primary from `API_KEY_VARS` followed by
+whatever `FALLBACK_API_KEY_VARS` names, empties and whitespace dropped. Every
+`build_*` function then constructs **one adapter per key** and, when there is
+more than one, wraps them in the matching class from
+[`llm/failover.py`](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01).
+With a single key — the normal case — the bare adapter is returned and no
+wrapper exists.
+
+Two invariants this must not break, both pinned by `tests/test_architecture.py`:
+
+* **The tables still hold vendor classes.** Wrapping happens *after* the lookup,
+  never inside `PROVIDERS` / `REALTIME_PROVIDERS`, because the LSP tests assert
+  those constructors take `(model_id, temperature, api_key)` and
+  `(model_id, api_key)`.
+* **A fallback key is not a configuration.** `resolve_provider`,
+  `realtime_providers_available` and `audio_analysis_available` read
+  `API_KEY_VARS` only, so `GEMINI_API_KEY2` on its own leaves Gemini unavailable
+  — as it should, since there is nothing to fall back *from*.
 
 ## Adding a provider
 
 One row in each of `PROVIDERS`, `CHAT_PROVIDERS`, `API_KEY_VARS`, and
 `DEFAULT_MODEL_IDS`, plus **two** classes in `llm/` — one per port. Nothing downstream changes;
 `test_ocp_new_provider_needs_no_agent_change` proves it by registering one at
-runtime.
+runtime. A row in `FALLBACK_API_KEY_VARS` is optional and independent: it gives
+that provider a second key with no other change anywhere.

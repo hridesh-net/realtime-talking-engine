@@ -211,11 +211,16 @@ class EnrollmentStore(InterviewStore, ExpectationStore, CandidateStore, Protocol
 
 
 @runtime_checkable
-class SessionWorkflowStore(InterviewStore, CandidateStore, SessionStore, Protocol):
+class SessionWorkflowStore(
+    InterviewStore, ExpectationStore, CandidateStore, SessionStore, Protocol
+):
     """Composition for opening a session.
 
     Reads the interview, casts or reuses the persona, then opens the session
-    against it.
+    against it. Carries :class:`ExpectationStore` for the same reason
+    :class:`EnrollmentStore` does: a persona cast here is grounded in the
+    interview's expectation document, so this handler casts the same persona
+    enrollment would rather than a weaker one.
     """
 
 

@@ -18,7 +18,10 @@ from candidate_agent import archetypes
 from candidate_agent.schema import VirtualCandidate
 from control_plane.schemas import InterviewResponse, SessionResponse
 from evaluation_agent.rubric import DEFAULT_RUBRIC
-from report_engine.schema import SessionBundle
+from llm.base import ModelError
+from llm.factory import build_model
+from report_engine import judge as report_judge
+from report_engine.schema import AssessmentReport, SessionBundle
 from report_engine.score import build_report
 
 #: Role families the competency pack knows about. The job card in the pivot plan
@@ -162,7 +165,7 @@ def build_bundle(
     )
 
 
-def generate(
+async def generate(
     interview: InterviewResponse,
     session: SessionResponse,
     candidate: VirtualCandidate | None = None,
@@ -172,8 +175,16 @@ def generate(
     english_weight: float | None = None,
     language_gate: bool = True,
     report_config: dict[str, Any] | None = None,
+    judge: bool = True,
 ) -> dict[str, Any]:
-    """Build the bundle, run the engine, and return the report as plain JSON."""
+    """Build the bundle, run the engine, and return the report as plain JSON.
+
+    The judge is one model call and it writes prose only — every number in the
+    result is still the engine's. It is skipped when no provider is configured
+    and when the caller asks for the deterministic report, and a judge that
+    fails is not allowed to cost the manager their report: the composed
+    sentences are already on it, so the call is best-effort by design.
+    """
     bundle = build_bundle(
         interview,
         session,
@@ -185,8 +196,25 @@ def generate(
         report_config=report_config,
     )
     report = build_report(bundle)
+    if judge:
+        report = await _judged(report, bundle)
     dumped: dict[str, Any] = report.model_dump(mode="json")
     return dumped
+
+
+async def _judged(report: AssessmentReport, bundle: SessionBundle) -> AssessmentReport:
+    """Run the judge over a scored report, or hand back the one code composed."""
+    try:
+        model = build_model("judge", report_judge.TEMPERATURE)
+    except (ModelError, RuntimeError, ValueError):
+        # No judge provider configured. The report is complete without one and
+        # its footer says so, which is better than a 500 on a button that has
+        # always produced a report.
+        return report
+    try:
+        return await report_judge.apply(report, bundle, model)
+    except ModelError:
+        return report
 
 
 def build_analysis_context(

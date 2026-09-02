@@ -9,6 +9,12 @@ Model IDs are config, never hardcoded — see ``.env.example``.
 Two registries, one per port. They are keyed identically on purpose: a provider
 is only "supported" once it can serve both a structured call and a chat turn,
 and an architecture test asserts the tables stay in step.
+
+A provider may have more than one credential (see ``FALLBACK_API_KEY_VARS``).
+When it does, every build function here constructs one adapter per key and wraps
+them in the matching class from :mod:`llm.failover`, so a key-shaped failure
+retries on the next key without anything downstream knowing. With one key —
+still the normal case — the bare adapter is returned and no wrapper exists.
 """
 
 from __future__ import annotations
@@ -17,7 +23,14 @@ import os
 from collections.abc import Callable
 
 from llm.base import AudioModel, ChatModel, ModelError, RealtimeBroker, StructuredModel
+from llm.failover import (
+    FailoverAudioModel,
+    FailoverChatModel,
+    FailoverRealtimeBroker,
+    FailoverStructuredModel,
+)
 from llm.gemini import GeminiAudioModel, GeminiChatModel, GeminiModel
+from llm.gemini_live import GeminiLiveBroker
 from llm.openai_model import OpenAIChatModel, OpenAIModel
 from llm.openai_realtime import OpenAIRealtimeBroker
 
@@ -48,7 +61,13 @@ AUDIO_PROVIDERS: dict[str, Callable[[str, float, str], AudioModel]] = {
 #: provider that cannot serve one. A provider missing here simply has no voice
 #: mode; `test_ocp_realtime_table_is_a_documented_subset` asserts it is a subset
 #: of PROVIDERS rather than equal to it.
+#:
+#: **Order is behaviour**: `build_realtime_broker` auto-detects by taking the
+#: first row whose credential is present, so gemini leading makes Gemini Live
+#: the default talker wherever both keys are set. `VOICE_PROVIDER=openai`
+#: selects the WebRTC path explicitly.
 REALTIME_PROVIDERS: dict[str, Callable[[str, str], RealtimeBroker]] = {
+    "gemini": GeminiLiveBroker,
     "openai": OpenAIRealtimeBroker,
 }
 
@@ -56,13 +75,36 @@ REALTIME_PROVIDERS: dict[str, Callable[[str, str], RealtimeBroker]] = {
 #: speech model is a different product line from the text model, and pointing
 #: one at the other's id fails at mint time.
 DEFAULT_REALTIME_MODEL_IDS: dict[str, str] = {
+    "gemini": "gemini-3.1-flash-live-preview",
     "openai": "gpt-realtime-2",
 }
 
+#: Transcriber for the interviewer's own speech on the **OpenAI** path. Gemini
+#: Live transcribes both sides inside the session, so it needs no such model —
+#: which is why this is one env var rather than a per-provider table.
+DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe"
+
 #: Provider name -> environment variable holding its credential.
+#:
+#: This is the variable that decides whether a provider is **configured** —
+#: `resolve_provider`, `realtime_providers_available` and `audio_analysis_available`
+#: all read exactly this one. A fallback key on its own is not a configuration.
 API_KEY_VARS: dict[str, str] = {
     "gemini": "GEMINI_API_KEY",
     "openai": "OPENAI_API_KEY",
+}
+
+#: Provider name -> extra credential variables, tried in order after the primary
+#: when a call fails for a reason that names the *key* rather than the request.
+#: See `llm/failover.py` for what counts and why only some failures do.
+#:
+#: Gemini only, because Gemini is where it hurts: free-tier quota resets on the
+#: project's clock, not ours, and a rate-limited key takes down casting, the live
+#: session and the Voice button at once. Adding a row here is the whole cost of
+#: giving another provider the same treatment — nothing below branches on the
+#: provider name.
+FALLBACK_API_KEY_VARS: dict[str, tuple[str, ...]] = {
+    "gemini": ("GEMINI_API_KEY2",),
 }
 
 #: Pinned deliberately rather than pointed at a moving alias like
@@ -115,6 +157,16 @@ def resolve_provider(role: str) -> str:
     raise ModelError(f"no provider credentials found; set {wanted}")
 
 
+def resolve_transcribe_model() -> str:
+    """The speech-to-text model the OpenAI voice path transcribes with.
+
+    Env reads live in this module, so `candidate_agent.voice` is handed the
+    answer rather than reaching for `os.environ` itself. Ignored entirely on
+    the Gemini path, which transcribes in-session.
+    """
+    return (os.getenv("TRANSCRIBE_MODEL") or "").strip() or DEFAULT_TRANSCRIBE_MODEL
+
+
 def resolve_model_id(role: str, provider: str) -> str:
     """Resolve the model ID for ``role``, falling back to the provider default."""
     prefix = ROLE_PREFIXES.get(role)
@@ -132,6 +184,22 @@ def _credential(provider: str) -> str:
     return api_key
 
 
+def _credentials(provider: str) -> list[str]:
+    """Every key for ``provider``, primary first, empties dropped.
+
+    One entry is the normal case and stays the normal case: the callers below
+    return the bare adapter for it, so a single-key deployment carries no
+    failover machinery at all.
+    """
+    keys = [_credential(provider)]
+    keys += [
+        key
+        for var in FALLBACK_API_KEY_VARS.get(provider, ())
+        if (key := (os.getenv(var) or "").strip())
+    ]
+    return keys
+
+
 def build_model(role: str, temperature: float) -> StructuredModel:
     """Construct the configured structured-output model for ``role``.
 
@@ -143,7 +211,10 @@ def build_model(role: str, temperature: float) -> StructuredModel:
         ModelError: No usable provider is configured.
     """
     provider = resolve_provider(role)
-    return PROVIDERS[provider](resolve_model_id(role, provider), temperature, _credential(provider))
+    model_id = resolve_model_id(role, provider)
+    keys = _credentials(provider)
+    built = [PROVIDERS[provider](model_id, temperature, key) for key in keys]
+    return built[0] if len(built) == 1 else FailoverStructuredModel(provider, built)
 
 
 def build_chat_model(role: str, temperature: float) -> ChatModel:
@@ -157,9 +228,10 @@ def build_chat_model(role: str, temperature: float) -> ChatModel:
         ModelError: No usable provider is configured.
     """
     provider = resolve_provider(role)
-    return CHAT_PROVIDERS[provider](
-        resolve_model_id(role, provider), temperature, _credential(provider)
-    )
+    model_id = resolve_model_id(role, provider)
+    keys = _credentials(provider)
+    built = [CHAT_PROVIDERS[provider](model_id, temperature, key) for key in keys]
+    return built[0] if len(built) == 1 else FailoverChatModel(provider, built)
 
 
 def build_audio_model(role: str, temperature: float) -> AudioModel:
@@ -175,9 +247,10 @@ def build_audio_model(role: str, temperature: float) -> AudioModel:
             f"provider {provider!r} cannot analyse audio; "
             f"set ANALYSIS_PROVIDER to one of {sorted(AUDIO_PROVIDERS)}"
         )
-    return AUDIO_PROVIDERS[provider](
-        resolve_model_id(role, provider), temperature, _credential(provider)
-    )
+    model_id = resolve_model_id(role, provider)
+    keys = _credentials(provider)
+    built = [AUDIO_PROVIDERS[provider](model_id, temperature, key) for key in keys]
+    return built[0] if len(built) == 1 else FailoverAudioModel(provider, built)
 
 
 def audio_analysis_available() -> bool:
@@ -231,4 +304,9 @@ def build_realtime_broker(role: str = "voice") -> RealtimeBroker:
     model_id = (os.getenv(f"{prefix}_MODEL") if prefix else None) or DEFAULT_REALTIME_MODEL_IDS[
         provider
     ]
-    return REALTIME_PROVIDERS[provider](model_id, _credential(provider))
+    # Wrapped *after* the table lookup, never in it: `REALTIME_PROVIDERS` holds
+    # the vendor brokers and the architecture tests pin their `(model_id,
+    # api_key)` constructor shape.
+    keys = _credentials(provider)
+    built = [REALTIME_PROVIDERS[provider](model_id, key) for key in keys]
+    return built[0] if len(built) == 1 else FailoverRealtimeBroker(provider, built)
