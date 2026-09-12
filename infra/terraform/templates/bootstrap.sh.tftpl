@@ -167,6 +167,11 @@ OPENAI_API_KEY=$${OPENAI_API_KEY}
 CONTROL_PLANE_DB=$${DATA_MOUNT}/db/control_plane.db
 CONTROL_PLANE_PORT=${control_plane_port}
 RECORDINGS_DIR=$${DATA_MOUNT}/recordings
+LLM_MODEL=${control_plane_llm_model}
+CONTROL_PLANE_SHARED_SECRET=$${CONTROL_PLANE_SHARED_SECRET}
+%{ if portal_origin != "" ~}
+CORS_ALLOWED_ORIGINS=${portal_origin}
+%{ endif ~}
 EOF
 
 cat >"$${ENV_DIR}/engined.env" <<EOF

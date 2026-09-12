@@ -24,7 +24,7 @@ Elastic IP ── EC2 instance (t4g.small, public subnet, no NAT)
                  │    ├─ /engine/* (strip prefix, WS-aware) -> 127.0.0.1:8080 (engine)
                  │    └─ everything else        -> static ui/dist, SPA fallback
                  ├─ control-plane.service (venv python -m control_plane.main)
-                 ├─ engined.service (-dev-sample-contract, see below)
+                 ├─ engined.service (fetches personas from the control plane)
                  └─ data volume (gp3, separate, prevent_destroy) at
                       /var/lib/interview-watcher/{db,recordings,spool}
 ```
@@ -33,17 +33,21 @@ Voice media (WebRTC) never transits this infrastructure — the browser
 talks directly to OpenAI. There is no TURN server, no media ports, and no
 bandwidth planning here.
 
-## Known interim state: `-dev-sample-contract`
+## How engined talks to the control plane
 
-`engined` has no control-plane `ContractSource` yet (implementation-plan
-task 46) and **refuses to boot** without `-dev-sample-contract`. With that
-flag, every session gets the one checked-in sample persona, not a real one
-derived from the job spec. This is accepted, not hidden: it's a Terraform
-variable, `engine_dev_sample_contract` (default `true`), with the same
-explanation next to its declaration in `variables.tf` and baked into
-`engined.service` via `templates/engined.service.tftpl`. Flip it to `false`
-only once a real `ContractSource` exists — `engined` will then refuse to
-start until one is wired up, which is the correct failure mode.
+`engined` fetches each session's persona from
+`GET /api/v1/candidates/{id}/engine-contract` and reports the finished
+session to `POST /api/v1/sessions/{id}/ingest`, both on the loopback
+`CONTROL_PLANE_BASE_URL` and both authenticated with
+`CONTROL_PLANE_SHARED_SECRET` as a bearer token. The same SSM parameter is
+written into **both** env files by `bootstrap.sh`, because the control
+plane refuses those two routes (503) when its copy is unset. An ingest the
+control plane cannot take is spooled under `SPOOL_DIR/ingest` on the data
+volume and drained the next time `engined` starts.
+
+The earlier `-dev-sample-contract` switch (one checked-in persona for every
+session) is gone: `engined` now refuses to start without a reachable
+control-plane configuration instead.
 
 ## Prerequisites
 
@@ -211,6 +215,25 @@ media relay, since voice never transits this infra) and any Route 53
 hosted-zone cost (this stack creates a record in an existing zone, not the
 zone itself).
 
+### Data volume capacity — recordings now carry video
+
+The session recording is no longer audio-only: the manager's camera rides in the
+same WebM (350 kbps VP8 alongside the Opus), which is roughly **190 MB per
+session-hour** against ~30 MB/h before — about 6x.
+
+`data_volume_gb` stays at **20 GB**, and that volume holds the **SQLite database
+as well as** `RECORDINGS_DIR`. So roughly **100 session-hours fills it**, and
+when it fills the control plane stops writing *anything* — not just recordings.
+Retention is indefinite and deletion is manual by decision (see
+`okf/concepts/contracts/session-recording.md`), so nothing reclaims that space on
+its own.
+
+`data_volume_gb` in `infra/terraform/variables.tf` is the knob. A gp3 volume can
+be grown in place (`modify-volume`, then extend the filesystem) without
+recreating the instance, and at $0.0912/GB-mo each extra 10 GB is ~$0.91/mo — so
+the practical response to filling it is to raise the number, not to prune.
+**Watch free space on the data volume**; there is no alarm on it today.
+
 ### `use_spot`
 
 `var.use_spot` (default `false`) switches the instance to a Spot request,
@@ -252,7 +275,7 @@ comes back up.
   until that changes.
 - Everything else in the spec (VPC shape, security group rules, IAM
   policy scoping, S3 lifecycle rules, SSM secret handling, the routing
-  contract, `-dev-sample-contract` as a visible switch, the data-volume
+  contract, the data-volume
   `prevent_destroy`, `use_spot`, IMDSv2, the AMI SSM lookup) is implemented
   as specified.
 

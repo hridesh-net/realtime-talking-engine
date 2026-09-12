@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -116,3 +117,8 @@ type ContractSource interface {
 	// ingest.SessionID — the engine may retry.
 	NotifyIngest(ctx context.Context, ingest SessionIngest) error
 }
+
+// ErrContractNotFound reports that the control plane has no candidate by
+// that id. Distinct from an unreachable control plane: a missing persona is
+// the caller's problem and maps to 404, not to a gateway error.
+var ErrContractNotFound = errors.New("ports: engine contract not found")

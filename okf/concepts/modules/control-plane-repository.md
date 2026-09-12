@@ -5,9 +5,11 @@ description: The SQLite adapter implementing every storage port — inserts, ups
 resource: /control_plane/repository.py
 tags: [repository, sqlite, storage, adapter]
 generated:
-  by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  by: claude-opus-5
+  at: "2026-09-12T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
@@ -23,9 +25,9 @@ sources:
 ---
 # control_plane/repository.py
 
-589 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
-`ExpectationStore`, `CandidateStore`, `SessionStore`, and `RecordingStore`
-structurally — it imports none of them.
+783 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
+`ExpectationStore`, `CandidateStore`, `SessionStore`, `RecordingStore`,
+`AnalysisStore` and `ReportStore` structurally — it imports none of them.
 
 # Schema
 
@@ -55,8 +57,20 @@ class InterviewRepository:
     def append_recording_chunk(self, session_id, seq, mime_type, data) -> RecordingMeta
     def finalize_recording(self, session_id) -> RecordingMeta | None
     def get_recording_meta(self, session_id) -> RecordingMeta | None
-    def read_recording(self, session_id) -> tuple[RecordingMeta, bytes] | None
+    def open_recording(self, session_id) -> tuple[RecordingMeta, Path] | None
+    def begin_analysis(self, session_id) -> AnalysisMeta
+    def complete_analysis(self, session_id, analysis) -> AnalysisMeta
+    def fail_analysis(self, session_id, error) -> AnalysisMeta
+    def get_analysis(self, session_id) -> dict | None
+    def get_analysis_meta(self, session_id) -> AnalysisMeta | None
+    def save_report(self, session_id, report) -> ReportMeta
+    def get_report(self, session_id) -> dict | None
+    def get_report_meta(self, session_id) -> ReportMeta | None
 ```
+
+The analysis and report methods are listed for completeness only — this card
+does not yet explain them. See [Audio analysis agent](/concepts/subsystems/analysis-agent.md)
+and [Report engine](/concepts/subsystems/report-engine.md) for what they store.
 
 `recordings_dir` defaults to `recordings_dir_from_env()` (`RECORDINGS_DIR`,
 default `recordings`) but is overridable in the constructor — `tests/test_recording.py`
@@ -85,7 +99,19 @@ draft never reaches disk.
 
 * **`append_recording_chunk`** — one `with self.conn:` transaction, same pattern as `append_turn`. `seq == 0` and no existing row: creates `session_recordings`, writes the file (`self._recordings_dir / f"{session_id}.webm"`, opened `"wb"`), `next_seq = 1`. Any other `seq`: must equal the stored `next_seq` or raises `ValueError` (the handler turns that into 409); file opened `"ab"`, `byte_size` and `next_seq` incremented in the same `UPDATE`. Raises on a `status == 'complete'` row too — the finalize guard, not a separate check. **Disk write happens inside the SQL transaction's critical section but is not itself transactional** — a crash between the file write and the `UPDATE`/`INSERT` commit is possible in principle; not exercised by the tests, and the same caveat the JSON-column upserts don't have to think about because they never touch the filesystem.
 * **`finalize_recording`** — `UPDATE ... SET status='complete' WHERE session_id = ? AND status = 'recording'`, then re-reads. The `WHERE status='recording'` guard is what makes re-finalizing not move `updated_at` — a matched-zero-rows `UPDATE` on an already-complete row is a true no-op, not a rewrite with the same values.
-* **`read_recording`** — one `SELECT` plus `(self._recordings_dir / row["storage_key"]).read_bytes()`. No size cap, no streaming — the whole file loads into memory. Fine at practice-interview scale (single-digit minutes of Opus-compressed audio); the thing to revisit if recordings get long or concurrent reads get frequent.
+* **`open_recording`** (2026-09-12, replacing `read_recording`) — one `SELECT` and a path join, `(self._recordings_dir / row["storage_key"])`. **The bytes are never read here.** The old method returned `tuple[RecordingMeta, bytes]` and loaded the whole file into memory, which was fine at single-digit minutes of Opus and stopped being fine when the recording started carrying the manager's camera (~190 MB a session-hour). The two callers now take the path: `GET .../recording` streams it with a `FileResponse`, and the analyse endpoint hands it to ffmpeg. `read_recording` was **deleted**, not kept alongside — it had no caller and no test left. Note what the method does *not* do: no existence check on the path. A row without its file is a broken spool, and a `FileResponse` 500 says so more usefully than a `None` this method's callers would report as "no recording".
+
+## Engine ingest
+
+`store_ingest` is the only method that writes a transcript whole. One
+transaction: create the `sessions` row (engine-minted id) or close the existing
+one (portal-opened id; a mismatch of interview/persona raises
+`IngestConflictError`), delete and rewrite `session_turns` from the engine's
+turn table (`human → manager`, `persona → candidate`, `elapsed_ms = start_ms`,
+`at = started_at + start_ms`, empty text skipped), and upsert
+`session_ingests` with the raw payload — `first_received_at` survives a
+repeat, `received_at` moves. SQLite DDL in `database._SCHEMA`; Postgres in
+`migrations/0002_session_ingests.sql`.
 
 ## Reads
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"skillbrew/engine/internal/ports"
 )
 
 // Handler exposes Manager's create/stop lifecycle as the plan §14 task 8
@@ -30,6 +31,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 // createRequest is the POST /v1/sessions request body.
 type createRequest struct {
 	CandidateID string `json:"candidate_id"`
+	// SessionID is optional. The portal opens the control-plane session
+	// first (it is where the recording lands) and passes its id here, so
+	// the engine's ingest report attaches to that same row instead of
+	// creating a second session for the same interview.
+	SessionID string `json:"session_id"`
 }
 
 // createResponse is the POST /v1/sessions response body.
@@ -56,7 +62,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := h.manager.CreateSession(r.Context(), req.CandidateID)
+	info, err := h.manager.CreateSessionWithID(r.Context(), req.CandidateID, req.SessionID)
 	if err != nil {
 		h.writeCreateError(w, err)
 		return
@@ -77,8 +83,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 // upstream dependency failure outside the caller's control, mapped to 502.
 func (h *Handler) writeCreateError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrEmptyCandidateID), errors.Is(err, ErrContractRejected):
+	case errors.Is(err, ErrEmptyCandidateID), errors.Is(err, ErrContractRejected), errors.Is(err, ErrInvalidSessionID):
 		h.writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ports.ErrContractNotFound):
+		h.writeError(w, http.StatusNotFound, err.Error())
 	default:
 		h.logger.Error("session: create failed", "err", err)
 		h.writeError(w, http.StatusBadGateway, "could not create session")

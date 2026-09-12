@@ -6,8 +6,10 @@ resource: /analysis_agent
 tags: [analysis, audio, multimodal, persona, manager-assessment]
 generated:
   by: claude-opus-5
-  at: "2026-08-26T00:00:00Z"
+  at: "2026-09-12T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-26T00:00:00Z"
 status: draft
@@ -129,6 +131,20 @@ alongside Caddy, for the same reason and with the same shape.
 with Opus, so an ffmpeg build without the `matroska,webm` demuxer or the `opus`
 decoder satisfies `shutil.which` and then fails on the first real recording.
 Check the decoders, not just the binary.
+
+**The recording may carry a video track, and only one call site cares
+(2026-09-12).** `duration_ms`'s decode fallback passes **`-vn`** — it skips
+decoding the manager's camera, and it pins the reported length to the *audio*, so
+a camera that starts before the mic and stops after it cannot push a window past
+the end of what the model is given to hear. `cut()` and
+`scripts/transcribe_recording.py` were deliberately **not** given the flag: both
+write WAV, the WAV muxer selects no video stream, and a flag that changes nothing
+is exactly the inert guard this repo's bar forbids. Pinned by
+`test_duration_of_a_video_recording_is_the_length_of_its_audio`, which builds a
+real live-mode VP8+Opus WebM with 150 s of video over 100 s of audio; on ffmpeg 8
+the un-flagged command already answers 100 s, so the test states the behavioural
+contract the deployed (unpinned, static, differently-versioned) build must meet
+rather than pretending to guard the flag.
 
 ## Related
 

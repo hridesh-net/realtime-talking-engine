@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.uber.org/goleak"
 
 	"skillbrew/engine/internal/fakes"
+	"skillbrew/engine/internal/ports"
 	"skillbrew/engine/internal/session"
 )
 
@@ -198,4 +201,43 @@ func TestHTTPStopSession_NotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
+}
+
+// TestHTTPCreateSession_UnknownCandidateIs404: a persona the control plane
+// does not have is the caller's problem, and the status must say so rather
+// than reporting the control plane as unreachable.
+func TestHTTPCreateSession_UnknownCandidateIs404(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	mux, _, cs := newHandler(t)
+	cs.SetFetchError(fmt.Errorf("controlplane: candidate %q: %w", "nope", ports.ErrContractNotFound))
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/sessions",
+		strings.NewReader(`{"candidate_id":"nope"}`)))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHTTPCreateSession_HonoursTheCallersSessionID: the portal opens the
+// control-plane session first and passes its id, so the ingest lands on the
+// same row as the recording.
+func TestHTTPCreateSession_HonoursTheCallersSessionID(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	mux, mgr, _ := newHandler(t)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/sessions",
+		strings.NewReader(`{"candidate_id":"vc-test-1","session_id":"portal-42"}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d; body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"session_id":"portal-42"`) {
+		t.Fatalf("body = %s, want the caller's session id echoed", rec.Body.String())
+	}
+	if err := mgr.StopSession(context.Background(), "portal-42"); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	_ = mgr.Drain(context.Background())
 }

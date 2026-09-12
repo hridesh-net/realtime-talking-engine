@@ -83,6 +83,53 @@ func TestPersonaAudioIsForwardedToTheMediaConnection(t *testing.T) {
 	}
 }
 
+// TestRecorderCapturesBothChannelsAndMirrorsBargeInTruncation proves the
+// recording seam observes the same human/persona audio and heard boundary as
+// the live turn loop. Recording must not depend on the browser transport: it
+// is the durable interview record even when browser delivery later sheds a
+// frame.
+func TestRecorderCapturesBothChannelsAndMirrorsBargeInTruncation(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	recorder := fakes.NewFakeRecorder(ports.RecordingInfo{})
+	a, clock, _ := newActorWithDeps(true, Deps{Recorder: recorder})
+	defer a.timers.cancelAll()
+
+	speaker := fakes.NewFakeSpeaker()
+	sess, err := speaker.Start(context.Background(), ports.SessionCfg{SessionID: "sess-1"})
+	if err != nil {
+		t.Fatalf("start speaker: %v", err)
+	}
+	a.speaking = sess
+	a.state = StateSpeaking
+
+	human := ports.Frame{PCM: []byte{1, 2}, SampleRateHz: 16000}
+	a.handleMic(context.Background(), micFrame{Frame: human})
+
+	persona := ports.Frame{PCM: make([]byte, 24000*2), SampleRateHz: defaultSampleRate}
+	a.handleSpeakerEvent(context.Background(), ports.AudioDelta{
+		Frame:      persona,
+		ResponseID: "response-1",
+		ItemID:     "item-1",
+	})
+
+	if got := recorder.HumanFrames(); len(got) != 1 || string(got[0].PCM) != string(human.PCM) {
+		t.Fatalf("human frames = %#v, want one captured mic frame", got)
+	}
+	if got := recorder.PersonaWrites(); len(got) != 1 || got[0].ItemID != "item-1" || len(got[0].Frame.PCM) != len(persona.PCM) {
+		t.Fatalf("persona writes = %#v, want item-1 audio", got)
+	}
+
+	clock.Advance(500 * time.Millisecond)
+	a.playout.heartbeat("item-1", 500, clock.Now())
+	a.bargeIn(context.Background())
+
+	truncations := recorder.Truncations()
+	if len(truncations) != 1 || truncations[0].ItemID != "item-1" || truncations[0].HeardMs != 500 {
+		t.Fatalf("recording truncations = %#v, want item-1 at 500 ms", truncations)
+	}
+}
+
 // TestPlayoutIsTrackedByItemIDSoHeartbeatsCanMatch matters because the browser
 // echoes back the item id it was sent. Tracking a response id instead means no
 // heartbeat ever matches, and heardMs silently degrades to "assume it all
@@ -175,7 +222,7 @@ func TestASpeechOnsetInterruptsAPersonaThatYields(t *testing.T) {
 func TestWithNoTranscriberTheEnergyDetectorEndsTheTurn(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	a, _, log := newActorWithDeps(true, Deps{})
+	a, clock, log := newActorWithDeps(true, Deps{})
 	defer a.timers.cancelAll()
 	ctx := context.Background()
 
@@ -199,6 +246,27 @@ func TestWithNoTranscriberTheEnergyDetectorEndsTheTurn(t *testing.T) {
 	}
 	if !strings.Contains(log.String(), "degraded_end_of_turn") {
 		t.Fatal("the degraded end-of-turn path left no trace in the event log")
+	}
+
+	// Each degraded turn carries only its own words. Nothing on this path
+	// ever produced a non-final partial, which was the only thing that
+	// cleared the utterance, so before the fix every later question's
+	// record began with every earlier one.
+	clock.Advance(time.Minute)
+	a.handleTimer(ctx, fireNext(t, a)) // the opening clip plays out
+	if a.state != StateListening {
+		t.Fatalf("state = %s, want LISTENING after the clip", a.state)
+	}
+	a.handleSpeakerEvent(ctx, ports.InputTranscript{Text: "first "})
+	a.handleSpeakerEvent(ctx, ports.InputTranscript{Text: "question"})
+	a.handleSpeechOnset(ctx, ports.VADEvent{Started: false, EnergyDB: -60})
+	records := a.Turns()
+	last := records[len(records)-1]
+	if last.Speaker != speakerHuman || last.Text != "first question" {
+		t.Fatalf("human turn = %+v, want the accumulated fragments", last)
+	}
+	if a.utterance != "" {
+		t.Fatalf("utterance %q survived end-of-turn; the next question would carry it", a.utterance)
 	}
 }
 
@@ -372,8 +440,8 @@ func (b *slowStallBank) Warm(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
-func (b *slowStallBank) PickStall() (ports.PCM16Audio, int, bool) {
-	return ports.PCM16Audio{}, 0, false
+func (b *slowStallBank) PickStall() (ports.PCM16Audio, string, bool) {
+	return ports.PCM16Audio{}, "", false
 }
 func (b *slowStallBank) OpeningLine() (ports.PCM16Audio, bool) { return ports.PCM16Audio{}, false }
 
@@ -398,7 +466,7 @@ func TestTheOpeningLineClipActuallyReachesTheBrowser(t *testing.T) {
 		t.Fatalf("warm: %v", err)
 	}
 
-	d := a.playClip(ctx, "Hi, I'm Mateo.")
+	d := playOpening(ctx, a, "Hi, I'm Mateo.")
 
 	if d != time.Second {
 		t.Fatalf("clip duration = %v, want 1s measured from the clip itself", d)
@@ -422,10 +490,48 @@ func TestAMissingClipStillTimesTheTurn(t *testing.T) {
 	defer a.timers.cancelAll()
 	a.mediaConn = acceptFakeMedia(t)
 
-	if d := a.playClip(context.Background(), "Hi there."); d <= 0 {
+	if d := playOpening(context.Background(), a, "Hi there."); d <= 0 {
 		t.Fatalf("duration = %v with no clip; the turn would never end", d)
 	}
 	if !strings.Contains(log.String(), "clip_unavailable") {
 		t.Fatal("running without a clip left no trace in the event log")
+	}
+}
+
+// TestTheSpeakersTranscriptFeedsTheThinkerWhileTheInterviewerTalks is the
+// diagram's input transcription on the degraded path: with no independent
+// Transcriber, the Speaker's own fragments are the live stream, and they
+// must reach the Thinker while the interviewer is still talking rather than
+// sit in the utterance until the energy detector ends the turn.
+func TestTheSpeakersTranscriptFeedsTheThinkerWhileTheInterviewerTalks(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	thinker := fakes.NewFakeThinker()
+	a, _, _ := newActorWithDeps(true, Deps{Thinker: thinker})
+	defer a.release()
+	ctx := context.Background()
+	a.state = StateListening
+
+	a.handleSpeakerEvent(ctx, ports.InputTranscript{Text: "How would "})
+	a.handleSpeakerEvent(ctx, ports.InputTranscript{Text: "you scale Redis?"})
+
+	if got := thinker.Partials(); len(got) != 2 || got[1] != "How would you scale Redis?" {
+		t.Fatalf("Thinker partials = %#v, want the cumulative question", got)
+	}
+	if a.turns.open == nil || a.turns.open.Speaker != speakerHuman {
+		t.Fatal("the interviewer's turn must open on the first fragment, so start_ms is when they began")
+	}
+
+	// A fragment trailing the energy detector's end-of-turn belongs to the
+	// question that just ended, not to the next one.
+	a.handleSpeechOnset(ctx, ports.VADEvent{Started: false, EnergyDB: -60})
+	a.beginAnswer(ctx, "test")
+	a.handleSpeakerEvent(ctx, ports.InputTranscript{Text: " Under load."})
+	records := a.Turns()
+	if last := records[len(records)-1]; last.Speaker != speakerHuman || last.Text != "How would you scale Redis? Under load." {
+		t.Fatalf("human record = %+v, want the late fragment appended", last)
+	}
+	if a.utterance != "" {
+		t.Fatalf("utterance = %q; a late fragment must not seed the next question", a.utterance)
 	}
 }

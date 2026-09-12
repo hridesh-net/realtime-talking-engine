@@ -1,4 +1,4 @@
-"""Offline tests for the three additions the SkillBrew portal needs.
+"""Offline tests for what the SkillBrew portal needs from this API.
 
 The portal talks to this service from another origin through a shared axios
 layer it does not own, and that layer makes two demands this API did not meet:
@@ -12,6 +12,10 @@ Every test here asserts the *additive* half of that: the status codes, the
 already sees, and the new keys sit next to them. No network, no model call --
 `build_app(":memory:")` with the repository overridden, the same way
 `tests/test_recording.py` does it.
+
+The last group is not additive but a fix: the portal launcher opens a session
+whose clock matches the interview's configured length, which the session
+schema's own bound used to forbid.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from control_plane import main as main_module
 from control_plane.database import init_db
 from control_plane.main import build_app, cors_allowed_origins, install_error_envelope
 from control_plane.repository import InterviewRepository
+from control_plane.schemas import MAX_INTERVIEW_MINUTES
 from tests.test_control_plane_candidates_api import FakeModel
 from tests.test_session import FakeChatModel
 
@@ -190,6 +195,69 @@ def test_a_status_code_that_forbids_a_body_gets_no_envelope(code: int):
 
     assert resp.status_code == code
     assert resp.content == b""
+
+
+# ---------------------------------------------------------------------------
+# The session clock bound
+# ---------------------------------------------------------------------------
+
+
+def test_the_launcher_may_open_a_session_as_long_as_the_interview(client):
+    """`planned_minutes` must accept the interview's own `duration_minutes`.
+
+    The portal launcher sends `planned_minutes = interview.config.duration_minutes`
+    so the session clock matches the configured length. The default interview is
+    60 minutes, and the session cap used to be 45 — so every default interview
+    failed with `body.planned_minutes: Input should be less than or equal to 45`.
+    The old console always sent 20, which is why nothing caught it.
+    """
+    interview = client.post("/api/v1/interviews", json=_INTERVIEW).json()
+    duration = interview["config"]["duration_minutes"]
+    assert duration == 60, "the default interview is 60 minutes; this test is about that default"
+    client.post(f"/api/v1/interviews/{interview['id']}/candidates", json={})
+
+    created = client.post(
+        "/api/v1/sessions",
+        json={
+            "interview_id": interview["id"],
+            "archetype": "cooperative_trap",
+            "planned_minutes": duration,
+            "modality": "voice",
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    assert client.get(f"/api/v1/sessions/{created.json()['id']}").json()["planned_minutes"] == 60
+
+
+def test_the_session_clock_is_bounded_by_the_longest_interview(client):
+    """The bound is shared with `duration_minutes`, so the two cannot drift.
+
+    181 is one minute past what an interview may be configured for, so it is
+    past what a session may be planned for.
+    """
+    assert MAX_INTERVIEW_MINUTES == 180
+    interview = client.post("/api/v1/interviews", json=_INTERVIEW).json()
+    client.post(f"/api/v1/interviews/{interview['id']}/candidates", json={})
+
+    too_long = client.post(
+        "/api/v1/sessions",
+        json={
+            "interview_id": interview["id"],
+            "archetype": "cooperative_trap",
+            "planned_minutes": MAX_INTERVIEW_MINUTES + 1,
+        },
+    )
+
+    assert too_long.status_code == 422, too_long.text
+    assert "planned_minutes" in too_long.json()["message"]
+
+    # And an interview may not be configured past it either.
+    over_long_interview = client.post(
+        "/api/v1/interviews",
+        json={**_INTERVIEW, "config": {"duration_minutes": MAX_INTERVIEW_MINUTES + 1}},
+    )
+    assert over_long_interview.status_code == 422, over_long_interview.text
 
 
 # ---------------------------------------------------------------------------

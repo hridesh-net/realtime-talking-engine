@@ -28,10 +28,12 @@ from candidate_agent import archetypes as catalog
 from candidate_agent.schema import ENGINE_CONTRACT_VERSION, EngineContract, VirtualCandidate
 from control_plane.schemas import (
     CandidateEnrollRequest,
+    IngestReceipt,
     InterviewResponse,
     RealtimeCredentialResponse,
     RecordingMeta,
     SessionCreateRequest,
+    SessionIngest,
     SessionResponse,
     SessionSummary,
     TranscriptAppendRequest,
@@ -111,6 +113,19 @@ EXPORTS = [
         "expectation_output_schema.json",
         InterviewExpectation,
         "Interviewer expectation document for one interview.",
+    ),
+    (
+        "session_ingest_schema.json",
+        SessionIngest,
+        "Body for POST /api/v1/sessions/{session_id}/ingest — the Go engine's "
+        "single write-back for a finished voice session. Engine-only: sent with "
+        "the shared secret as a bearer token. Idempotent on session_id.",
+    ),
+    (
+        "session_ingest_receipt_schema.json",
+        IngestReceipt,
+        "Response to POST /api/v1/sessions/{session_id}/ingest: the session's "
+        "final state on the control plane. 201 on first delivery, 200 on a repeat.",
     ),
 ]
 

@@ -96,6 +96,8 @@ status: stable
 | `engine/internal/session/` | [Live-session engine](/concepts/subsystems/engine.md) — the turn loop and the actor; start at its state table |
 | `engine/internal/audio/` | [Live-session engine](/concepts/subsystems/engine.md) — sample domain: resampler, onset detection, jitter buffer, send ring |
 | `engine/internal/transport/` | [Live-session engine](/concepts/subsystems/engine.md) — `wsfallback` carries live traffic today; `webrtc` is a placeholder |
+| `engine/internal/controlplane/` | [Session ingest](/concepts/contracts/session-ingest.md) — the HTTP `ContractSource`: contract fetch, ingest report with retry and spool |
+| `control_plane/migrations/` | [Storage ports](/concepts/contracts/storage-ports.md) — Postgres DDL, one numbered file per change; `0002` is the ingest table |
 | `engine/internal/vendors/gemini/` | [Live-session engine](/concepts/subsystems/engine.md) — the Speaker, over the Gemini **Live** API. Read its live-verified facts before changing it |
 | `engine/internal/vendors/` (others) | [Live-session engine](/concepts/subsystems/engine.md) — reasoning adapters and TTS; only `cmd/engined` may import any of them |
 | `engine/internal/stall/` | [Live-session engine](/concepts/subsystems/engine.md) — pre-synthesized opening line and stall clips |

@@ -15,15 +15,18 @@ does not import or subclass anything here.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from candidate_agent.schema import VirtualCandidate
 from control_plane.schemas import (
     AnalysisMeta,
+    IngestReceipt,
     InterviewCreateRequest,
     InterviewResponse,
     RecordingMeta,
     ReportMeta,
+    SessionIngest,
     SessionResponse,
     SessionSummary,
     Turn,
@@ -149,8 +152,20 @@ class RecordingStore(Protocol):
         """Return the recording's metadata, or None when it does not exist."""
         ...
 
-    def read_recording(self, session_id: str) -> tuple[RecordingMeta, bytes] | None:
-        """Return the recording's metadata and its bytes, or None."""
+    def open_recording(self, session_id: str) -> tuple[RecordingMeta, Path] | None:
+        """Return the recording's metadata and the file holding it, or None.
+
+        A **path**, not bytes: a recording now carries the manager's camera as
+        well as the two audio channels — roughly 190 MB per session-hour — and
+        neither serving it nor analysing it should pull that through the API
+        process's heap. The caller streams from the path or hands it to ffmpeg.
+
+        The file is the live spool; nothing in this service moves or prunes it
+        (see the retention decision in `okf/concepts/contracts/session-recording.md`),
+        so the path stays valid for as long as the recording exists. When
+        recordings move to the object store this becomes a stream and the range
+        handling moves with them.
+        """
         ...
 
 
@@ -197,6 +212,37 @@ class ReportStore(Protocol):
         ...
 
 
+class IngestConflictError(ValueError):
+    """The session id is already held by a different interview or persona."""
+
+
+@runtime_checkable
+class IngestStore(Protocol):
+    """Persistence for the Go engine's end-of-session write-back.
+
+    One method, deliberately: the ingest replaces the session's transcript and
+    closes it in a single transaction, and it is idempotent on the session id
+    because the engine retries. Turn indexes come from the engine's own turn
+    table here — the engine's clock is the time base for a voice session, the
+    same way :class:`SessionStore` is for a text one.
+    """
+
+    def store_ingest(
+        self,
+        ingest: SessionIngest,
+        *,
+        archetype: str,
+        opening_line: str,
+        planned_minutes: int,
+    ) -> IngestReceipt:
+        """Create or close the session, replace its turns, keep the raw payload.
+
+        Raises :class:`IngestConflictError` when the session exists under a
+        different interview or persona.
+        """
+        ...
+
+
 class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol):
     """Composition for handlers that read an interview and write its expectation."""
 
@@ -221,6 +267,17 @@ class SessionWorkflowStore(
     :class:`EnrollmentStore` does: a persona cast here is grounded in the
     interview's expectation document, so this handler casts the same persona
     enrollment would rather than a weaker one.
+    """
+
+
+@runtime_checkable
+class IngestWorkflowStore(InterviewStore, CandidateStore, IngestStore, Protocol):
+    """What the ingest handler needs.
+
+    The interview (for the session's planned length), the persona (for the
+    archetype and opening line it answers for), and the ingest store itself.
+    Not :class:`SessionStore` — the engine's turn table is written whole, never
+    appended to.
     """
 
 

@@ -67,6 +67,23 @@ func (t *turnTable) begin(turn int, speaker string, now time.Time) {
 	}
 }
 
+// amendLast appends text to the most recent closed record for speaker. It
+// exists for the degraded ASR path, where the Speaker's transcript of the
+// interviewer can trail the energy detector's end-of-turn by a fragment: the
+// words belong to the question that just ended, not to the next one.
+func (t *turnTable) amendLast(speaker, text string) bool {
+	if text == "" {
+		return false
+	}
+	for i := len(t.records) - 1; i >= 0; i-- {
+		if t.records[i].Speaker == speaker {
+			t.records[i].Text += text
+			return true
+		}
+	}
+	return false
+}
+
 // appendText adds transcript text to the open turn.
 func (t *turnTable) appendText(text string) {
 	if t.open == nil || text == "" {

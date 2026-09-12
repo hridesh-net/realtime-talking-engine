@@ -55,6 +55,7 @@ run "live session (offline)"        $PY -m pytest tests/test_session.py -q
 run "voice session (offline)"       $PY -m pytest tests/test_voice.py -q
 run "session recording (offline)"   $PY -m pytest tests/test_recording.py -q
 run "portal compat (offline)"       $PY -m pytest tests/test_portal_compat.py -q
+run "engine ingest (offline)"       $PY -m pytest tests/test_engine_ingest.py -q
 run "trait composition (offline)"   $PY -m pytest tests/test_trait_dimensions.py -q
 run "custom personas (offline)"     $PY -m pytest tests/test_custom_persona_integration.py -q
 run "candidates API (offline)"      $PY -m pytest tests/test_control_plane_candidates_api.py -q

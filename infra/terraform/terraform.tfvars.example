@@ -23,7 +23,6 @@ data_volume_gb = 20
 
 # The Go engine has no control-plane ContractSource yet and refuses to boot
 # without this; see its description in variables.tf before changing it.
-engine_dev_sample_contract = true
 
 # --- Model IDs (required by engine/internal/config; no code default) -----
 speaker_model_id = "gemini-2.0-flash-live-001"

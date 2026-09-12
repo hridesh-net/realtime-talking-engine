@@ -5,9 +5,11 @@ description: Every control-plane endpoint — paths, bodies, responses, and stat
 resource: /control_plane/api.py
 tags: [contract, api, fastapi, rest]
 generated:
-  by: claude-opus-5/okf-curator
-  at: "2026-09-10T12:00:00Z"
+  by: claude-opus-5
+  at: "2026-09-12T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
@@ -89,7 +91,8 @@ when a candidate is assigned, so `resume_probing.required` is currently always
 | `POST` | `/api/v1/interviews/{id}/candidates` | `EnrollmentStore` | **201** / 404 / 422 | **Calls the model, once per archetype or custom persona.** Body optional. |
 | `GET` | `/api/v1/interviews/{id}/candidates` | `CandidateStore` | 200 | |
 | `GET` | `/api/v1/candidates/{cid}` | `CandidateStore` | 200 / 404 | Full [persona](/concepts/contracts/virtual-candidate.md). |
-| `GET` | `/api/v1/candidates/{cid}/engine-contract` | `CandidateStore` | 200 / 404 | [Runtime slice](/concepts/contracts/engine-contract.md). |
+| `GET` | `/api/v1/candidates/{cid}/engine-contract` | `CandidateStore` | 200 / 401 / 404 / 503 | [Runtime slice](/concepts/contracts/engine-contract.md). **Engine-only**: `Authorization: Bearer <CONTROL_PLANE_SHARED_SECRET>`; 401 on a wrong token, 503 when the service has no secret configured. |
+| `POST` | `/api/v1/sessions/{id}/ingest` | `IngestWorkflowStore` | **201** / 200 / 401 / 404 / 409 / 422 / 503 | [Session ingest](/concepts/contracts/session-ingest.md) — the Go engine's write-back. Same bearer gate. 201 first delivery, 200 on a repeat (idempotent on `session_id`, record replaced), 409 when the session belongs to another interview or persona. |
 | `GET` | `/api/v1/candidates/{cid}/scorecard` | `CandidateStore` | 200 / 404 | Ground-truth key. **Never give this to the persona's model.** |
 | `DELETE` | `/api/v1/candidates/{cid}` | `CandidateStore` | **204** / 404 | |
 
@@ -176,12 +179,14 @@ handler never branches on a provider name. See
 |---|---|---|---|---|
 | `POST` | `/api/v1/sessions/{id}/recording/chunks?seq=N` | `RecordingWorkflowStore` | **201** / 404 / 409 / 422 | Body: raw bytes, **or** `multipart/form-data` with a file field named `chunk`. `seq` must equal the recording's `next_seq` → 409 otherwise. `seq=0` creates the row and the `Content-Type` — the request's on the raw path, the *part's* on the multipart one — becomes the stored `mime_type`. 409 on a non-`voice` session, or once the recording is `complete`. 422 on an empty body or an empty part, and on a multipart body with no `chunk` field. |
 | `POST` | `/api/v1/sessions/{id}/recording/finalize` | `RecordingStore` | 200 / 404 | No body. Idempotent — a second call returns the same record, `updated_at` unmoved. 404 when there is no recording for the session. |
-| `GET` | `/api/v1/sessions/{id}/recording` | `RecordingStore` | 200 / 404 | Serves the audio bytes, `Content-Type` from the stored `mime_type`. Serves a **partial** recording too (`status='recording'`) — a crashed session's partial file is the honest artifact, not a 404. |
+| `GET` | `/api/v1/sessions/{id}/recording` | `RecordingStore` | 200 / **206** / 404 | A Starlette **`FileResponse`** streamed off disk — never loaded into memory (a recording carrying the manager's camera is ~190 MB an hour). `Content-Type` from the stored `mime_type`, so a video recording comes back as `video/webm;codecs=vp8,opus`. `Content-Disposition: inline; filename="session-{id}.webm"` — `inline` is set explicitly because Starlette defaults to `attachment`. Answers a **`Range`** request with 206 + `Content-Range` (and 416 when unsatisfiable), which is what lets a `<video>` probe and seek. Serves a **partial** recording too (`status='recording'`) — a crashed session's partial file is the honest artifact, not a 404. |
 
 Browser-produced, `voice` sessions only — see
 [Session recording](/concepts/contracts/session-recording.md) for the chunk
-protocol, the channel layout, and why the browser (not this service, not the
-Go engine) is the one recording. `SessionResponse.recording` carries the same
+protocol, the channel layout, the retention decision, and why the browser (not
+this service, not the Go engine) is the one recording. The container may carry a
+**video** track (the manager's camera, from the SkillBrew portal); the API is
+unchanged by that — the mime the client sent on `seq=0` is the mime it gets back. `SessionResponse.recording` carries the same
 [`RecordingMeta`](/concepts/contracts/session-recording.md) shape when one
 exists; `SessionSummary.has_recording` is a cheaper boolean for the list view.
 

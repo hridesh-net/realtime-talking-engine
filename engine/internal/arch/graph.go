@@ -180,6 +180,7 @@ var forbiddenPackagePrefixes = []string{
 	"internal/vendors",
 	"internal/transport",
 	"internal/store",
+	"internal/controlplane",
 }
 
 // vendorsSharedPrefix is the one package tree under internal/vendors/ that

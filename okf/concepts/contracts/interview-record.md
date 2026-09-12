@@ -5,9 +5,11 @@ description: The job spec accepted at creation and the interview record returned
 resource: /control_plane/schemas.py
 tags: [contract, api, pydantic]
 generated:
-  by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  by: claude-opus-5
+  at: "2026-09-12T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5/okf-curator
@@ -23,7 +25,7 @@ sources:
 
 ```python
 class InterviewConfigInput(BaseModel):
-    duration_minutes: int = 60          # gt=0, le=180
+    duration_minutes: int = 60          # gt=0, le=MAX_INTERVIEW_MINUTES (180)
     question_mode: str = "AI"           # AI | HYBRID | MANUAL
     interview_mode: str = "STANDARD"    # STANDARD | DEEP
 
@@ -81,10 +83,26 @@ does not replace anything"* — and the knowledge clamp in
 what the note said. `test_operator_notes_cannot_override_the_archetype` covers
 both halves.
 
-**`proctoring` is recorded and never enforced.** No camera is accessed at any
-setting. The field exists so the screen matches the specification and so the
-setting is captured, but identity capture is deliberately deferred until data
-retention is decided. Do not wire a camera to it without that decision.
+**`proctoring` is recorded and never enforced, and nothing will ever be wired to
+it.** The field exists so the screen matches the specification and so the setting
+is captured. It was written with a gate on it — *"identity capture is deliberately
+deferred until data retention is decided; do not wire a camera to it without that
+decision"* — and on **2026-09-12 that gate was resolved, against wiring it up**:
+
+* The retention decision was taken. Recordings, video included, are **kept
+  indefinitely and deleted by hand**, stated explicitly in
+  [Session recording](/concepts/contracts/session-recording.md).
+* A camera *is* now captured on voice sessions — but **unconditionally, and
+  independently of this field**. It is the manager's own camera on a practice
+  call, not identity proctoring of a candidate, and gating it on a setting whose
+  meaning is "proctor the candidate" would have conflated two different things.
+* The portal no longer sends `proctoring` at all. The **column stays**, with its
+  default `"off"`: dropping it means a migration, a console change and a schema
+  re-export, none of which were on the path of this change. It is a follow-up,
+  listed in `docs/VIDEO_SESSION_TAB_PLAN.md` §8.
+
+So `proctoring` is now a **vestigial field**: written, stored, read by nothing,
+and with its one plausible future use explicitly assigned elsewhere.
 
 Every enum-ish field is a Pydantic `pattern`, and the same values are re-asserted
 as SQLite `CHECK` constraints — see [Database schema](/concepts/contracts/database-schema.md).
@@ -102,6 +120,7 @@ The `interview_assignments` table is reserved for it.
 * `status` is only ever written as `scheduled`; the CHECK constraint allows `in_progress`, `completed`, `failed`, `cancelled`, but nothing transitions it.
 * `ai_persona` is the **legacy** seeded persona, populated only when `mode == "training_interviewer"`, by `control_plane/persona.py`. It is unrelated to [virtual candidates](/concepts/contracts/virtual-candidate.md), which are the current mechanism. Two persona systems coexist.
 * `duration_minutes` feeds the expectation's phase table, which has exact templates for 30/45/60 and linear scaling otherwise.
+* `duration_minutes`' ceiling is `schemas.MAX_INTERVIEW_MINUTES`, shared with `SessionCreateRequest.planned_minutes` — the portal launcher opens a session with this interview's `duration_minutes`, so a lower session cap rejects a valid interview. Move the constant, never one field. See [Session transcript](/concepts/contracts/session-transcript.md).
 * `skills_required` strings are matched **case-insensitively but exactly** by the candidate agent's knowledge map, and re-emitted with the original spelling. Renaming a skill between interview creation and enrollment produces a persona missing that skill.
 
 ## Related

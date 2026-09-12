@@ -40,6 +40,9 @@ const (
 	// cmdConnectFailed delivers a fatal connect failure (no Speaker within
 	// budget). Carries Err; the actor winds down with end_reason "error".
 	cmdConnectFailed
+	// cmdTranscriberFailed marks a previously-connected ASR stream as gone.
+	// The session remains alive and falls back to the Speaker transcript.
+	cmdTranscriberFailed
 )
 
 // attachOutcome is what a cmdAttachTransport reply carries back to the
@@ -104,8 +107,9 @@ type heartbeat struct {
 // thinkerNote carries one reasoning-model note into the actor, scoped to the
 // turn it was requested for so a late note cannot drive the next turn.
 type thinkerNote struct {
-	Note ports.Note
-	Turn int
+	Note           ports.Note
+	Turn           int
+	ContextVersion uint64
 }
 
 // pregateVerdict is the deterministic pre-gate's classification of the

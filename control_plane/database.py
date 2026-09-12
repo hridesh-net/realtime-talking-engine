@@ -197,6 +197,16 @@ CREATE TABLE IF NOT EXISTS interview_expectations (
 -- Go engine's Finalizer becomes the producer). Channel semantics are contract:
 -- left = the manager's mic, right = the persona -- the same split as the
 -- engine Recorder port's WriteHuman/WritePersona.
+CREATE TABLE IF NOT EXISTS session_ingests (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    payload TEXT NOT NULL,
+    engine_version TEXT NOT NULL,
+    contract_fingerprint TEXT NOT NULL,
+    end_reason TEXT NOT NULL,
+    first_received_at TEXT NOT NULL,
+    received_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS session_recordings (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'recording' CHECK (status IN ('recording', 'complete')),

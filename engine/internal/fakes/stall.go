@@ -2,6 +2,7 @@ package fakes
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"skillbrew/engine/internal/ports"
@@ -49,17 +50,18 @@ func (b *FakeStallBank) Warm(ctx context.Context) error {
 }
 
 // PickStall implements ports.StallBank, returning clips in order and
-// wrapping around. ok is false when the bank has no clips.
-func (b *FakeStallBank) PickStall() (ports.PCM16Audio, int, bool) {
+// wrapping around, each with the phrase "stall clip N" for its index. ok is
+// false when the bank has no clips.
+func (b *FakeStallBank) PickStall() (ports.PCM16Audio, string, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.pickCalls++
 	if len(b.clips) == 0 {
-		return ports.PCM16Audio{}, 0, false
+		return ports.PCM16Audio{}, "", false
 	}
 	idx := b.nextIdx % len(b.clips)
 	b.nextIdx++
-	return b.clips[idx], idx, true
+	return b.clips[idx], fmt.Sprintf("stall clip %d", idx), true
 }
 
 // OpeningLine implements ports.StallBank.

@@ -30,12 +30,13 @@ type FakeThinker struct {
 	script  []NoteScriptEntry
 	nextIdx int
 
-	started  bool
-	persona  ports.PersonaCtx
-	partials []string
-	notes    []time.Time
-	resets   []string
-	closed   bool
+	started   bool
+	persona   ports.PersonaCtx
+	partials  []string
+	snapshots []ports.HarnessSnapshot
+	notes     []time.Time
+	resets    []string
+	closed    bool
 }
 
 // NewFakeThinker returns a FakeThinker whose successive RequestNote calls
@@ -67,6 +68,21 @@ func (t *FakeThinker) FeedPartial(ctx context.Context, text string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.partials = append(t.partials, text)
+	return nil
+}
+
+// SetHarnessSnapshot implements ports.Thinker, retaining a defensive copy of
+// the canonical conversation context supplied before a note request.
+func (t *FakeThinker) SetHarnessSnapshot(ctx context.Context, snapshot ports.HarnessSnapshot) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.snapshots) > 0 && snapshot.Version < t.snapshots[len(t.snapshots)-1].Version {
+		return nil
+	}
+	t.snapshots = append(t.snapshots, cloneHarnessSnapshot(snapshot))
 	return nil
 }
 
@@ -134,6 +150,22 @@ func (t *FakeThinker) Partials() []string {
 	out := make([]string, len(t.partials))
 	copy(out, t.partials)
 	return out
+}
+
+// HarnessSnapshots returns snapshots in publication order.
+func (t *FakeThinker) HarnessSnapshots() []ports.HarnessSnapshot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]ports.HarnessSnapshot, len(t.snapshots))
+	for i, snapshot := range t.snapshots {
+		out[i] = cloneHarnessSnapshot(snapshot)
+	}
+	return out
+}
+
+func cloneHarnessSnapshot(snapshot ports.HarnessSnapshot) ports.HarnessSnapshot {
+	snapshot.Turns = append([]ports.HarnessTurn(nil), snapshot.Turns...)
+	return snapshot
 }
 
 // NoteDeadlines returns every deadline passed to RequestNote, in call

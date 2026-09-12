@@ -151,7 +151,10 @@ func TestSuccessiveStallsDoNotRepeatImmediately(t *testing.T) {
 	_, first, _ := b.PickStall()
 	_, second, _ := b.PickStall()
 	if first == second {
-		t.Fatalf("two successive stalls both returned clip %d; the persona sounds like a recording", first)
+		t.Fatalf("two successive stalls both returned %q; the persona sounds like a recording", first)
+	}
+	if first != phrases[0] || second != phrases[1] {
+		t.Fatalf("stall phrases = %q, %q; want the contract's own words in contract order", first, second)
 	}
 }
 

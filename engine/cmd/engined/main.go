@@ -14,12 +14,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"skillbrew/engine/internal/config"
 	"skillbrew/engine/internal/contract"
-	"skillbrew/engine/internal/fakes"
+	"skillbrew/engine/internal/controlplane"
 	"skillbrew/engine/internal/gate"
 	"skillbrew/engine/internal/ledger"
 	"skillbrew/engine/internal/obs"
@@ -28,6 +29,7 @@ import (
 	"skillbrew/engine/internal/transport/wsfallback"
 	"skillbrew/engine/internal/vendors/gemini"
 	"skillbrew/engine/internal/vendors/geminitts"
+	"skillbrew/engine/internal/vendors/openaitx"
 	"skillbrew/engine/internal/vendors/thinkerllm"
 )
 
@@ -40,6 +42,10 @@ const mediaPath = "/v1/media/ws"
 // HTTP server to drain in-flight requests and for live sessions to stop
 // before exiting anyway.
 const shutdownTimeout = 30 * time.Second
+
+// version names the engine build in every ingest report. Set at link time:
+// go build -ldflags "-X main.version=$(git rev-parse --short HEAD)".
+var version = "dev"
 
 // readHeaderTimeout bounds how long the HTTP server waits to read a
 // request's headers, closing slow-header connections rather than holding a
@@ -61,9 +67,6 @@ func main() {
 // gracefully either way.
 func run(logger *slog.Logger) error {
 	addr := flag.String("addr", ":8080", "address the engine's HTTP server listens on")
-	sampleContract := flag.Bool("dev-sample-contract", false,
-		"serve the checked-in sample persona to every session instead of fetching "+
-			"from the control plane; development only")
 
 	// cfg is non-nil even if the load below fails (see Load's doc comment):
 	// every optional field still carries its default or env-derived value,
@@ -90,23 +93,20 @@ func run(logger *slog.Logger) error {
 		"session_duration_cap", cfg.SessionDurationCap,
 	)
 
-	// internal/controlplane's HTTP ContractSource (plan §14 task 46) does not
-	// exist yet, so the only source available is the checked-in sample
-	// persona. Serving that is correct for the walking skeleton and wrong for
-	// anything else: it hands every candidate_id the same person, which would
-	// invalidate every training session while looking perfectly healthy.
-	// Refusing to start without an explicit opt-in keeps that failure loud —
-	// a placeholder that boots silently is one nobody removes.
-	if !*sampleContract {
-		return errors.New(
-			"engined: no control-plane ContractSource yet (plan task 46); " +
-				"pass -dev-sample-contract to run against the checked-in sample persona")
-	}
-	logger.Warn("serving the checked-in sample persona to every session — development only")
-	contractSource, err := fakes.NewSampleContractSource()
+	contractSource, err := controlplane.New(cfg.ControlPlaneBaseURL, cfg.ControlPlaneSharedSecret.Reveal(), logger,
+		controlplane.WithSpoolDir(filepath.Join(cfg.SpoolDir, "ingest")))
 	if err != nil {
-		return fmt.Errorf("engined: load sample contract source: %w", err)
+		return fmt.Errorf("engined: control plane client: %w", err)
 	}
+	// Anything the last run could not deliver goes first, before this run
+	// takes sessions: an ingest that sat in the spool across a restart is a
+	// session the control plane still believes is running.
+	if delivered, err := contractSource.DrainSpool(context.Background()); err != nil {
+		logger.Warn("engined: ingest spool drain incomplete", "delivered", delivered, "err", err)
+	} else if delivered > 0 {
+		logger.Info("engined: delivered spooled ingests", "count", delivered)
+	}
+	session.EngineVersion = version
 
 	// The WebSocket/PCM transport is process-wide, not per-session: it holds
 	// the ticket registry that binds an arriving socket to the MediaConn
@@ -123,9 +123,9 @@ func run(logger *slog.Logger) error {
 	// ledger and which reasoning model back them is decided exactly here.
 	//
 	// This factory stays cheap and non-network, per DepsFactory's own
-	// contract: it hands back ports, it does not dial. There is still no
-	// real Transcriber/Judge/StallBank/Recorder/Finalizer adapter yet (those
-	// land in later milestones), so those fields are left nil here — legal
+	// contract: it hands back ports, it does not dial. The independent
+	// Transcriber is constructed here when its configuration is present;
+	// Judge/Recorder/Finalizer remain optional and are left nil — legal
 	// per the connect failure classification: Speaker and Transport are the
 	// two that are fatal once a client actually tries to attach a transport,
 	// and the rest degrade.
@@ -170,6 +170,15 @@ func run(logger *slog.Logger) error {
 		} else {
 			logger.Warn("no Thinker configured; sessions run single-model",
 				"have_model_id", cfg.ThinkerModelID != "")
+		}
+		// The independent ASR stream is optional and non-fatal. Keep the
+		// Speaker's input transcript as the actor fallback when either the
+		// configured ASR model or its OpenAI credential is unavailable.
+		if cfg.ASRModelID != "" && !cfg.OpenAIAPIKey.IsZero() {
+			deps.Transcriber = openaitx.New(cfg.ASRModelID, cfg.OpenAIAPIKey.Reveal(), logger)
+		} else {
+			logger.Warn("no independent Transcriber configured; using Speaker input transcript fallback",
+				"have_model_id", cfg.ASRModelID != "")
 		}
 		return deps, nil
 	}

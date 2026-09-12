@@ -3,14 +3,23 @@
 Everything here runs without a model or an API key: the harness is pure, and it
 owns the parts that must never drift — where a window's timestamps land, which
 anchors are rejected, and how the two halves of the judgement are weighted.
+
+The one exception is the duration test at the bottom, which builds a real WebM
+and shells out to `ffmpeg`/`ffprobe`. That is still offline — ffmpeg is a local
+subprocess, not a vendor — and the behaviour it pins can only be seen through
+the real decoder. It skips when ffmpeg is absent.
 """
 
+import json
+import shutil
+import subprocess
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 
 from analysis_agent import harness, prompts
-from analysis_agent.audio import OVERLAP_MS, WINDOW_MS, plan
+from analysis_agent.audio import OVERLAP_MS, WINDOW_MS, duration_ms, plan
 from analysis_agent.schema import (
     ANALYSIS_INSTRUCTIONS_VERSION,
     EXPECTATION_COVERAGE_WEIGHT,
@@ -346,3 +355,80 @@ def test_the_persona_the_manager_faced_reaches_the_prompt():
     assert "The evasive candidate" in block
     assert "honesty" in block
     assert "on_pressure" in block
+
+
+# ------------------------------------------------------- duration, on video ----
+
+
+def _build_video_fixture(path: Path) -> None:
+    """A live-mode VP8+Opus WebM: 150 s of video over 100 s of audio.
+
+    `-live 1` is what makes this fixture worth building rather than mocking: it
+    writes the WebM the way `MediaRecorder` does, as a stream with no duration in
+    the header, so `ffprobe -show_format` reports none and `duration_ms` is
+    forced down its decode fallback — the path the browser's recordings always
+    take.
+    """
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=150:size=320x240:rate=15",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=100",
+            "-c:v",
+            "libvpx",
+            "-c:a",
+            "libopus",
+            "-live",
+            "1",
+            "-f",
+            "webm",
+            str(path),
+        ],
+        capture_output=True,
+        check=True,
+    )
+
+
+@pytest.mark.skipif(
+    not shutil.which("ffmpeg") or not shutil.which("ffprobe"),
+    reason="ffmpeg/ffprobe not on PATH; duration_ms shells out to both",
+)
+def test_duration_of_a_video_recording_is_the_length_of_its_audio(tmp_path):
+    """A camera track longer than the audio must not stretch the reported length.
+
+    The manager's camera starts before the mic is armed and stops after the call
+    ends, so the container's video is genuinely longer than its audio. The decode
+    fallback takes the *last* `time=` ffmpeg prints; if that came from the video
+    stream the analysis would plan a window past the end of the audio and anchor
+    claims at moments with nothing in them.
+
+    On the ffmpeg here (8.x) the un-flagged command already reports the audio
+    length, so this does not prove `-vn` is load-bearing on *this* machine. The
+    assertion is the behavioural contract: the deployed host installs an
+    unpinned static build from johnvansickle.com, ffmpeg's progress reporting has
+    changed between majors, and whatever version lands there has to answer
+    100 s for this file.
+    """
+    fixture = tmp_path / "camera-and-mic.webm"
+    _build_video_fixture(fixture)
+
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_format", "-of", "json", str(fixture)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "duration" not in json.loads(probe.stdout)["format"], (
+        "the fixture must have no header duration, or it never reaches the fallback"
+    )
+
+    assert duration_ms(fixture) == pytest.approx(100_000, abs=100)

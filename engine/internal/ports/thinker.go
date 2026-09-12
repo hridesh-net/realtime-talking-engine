@@ -14,6 +14,28 @@ type PersonaCtx struct {
 	LedgerSummary string
 }
 
+// HarnessTurn is one bounded, finalized turn from the live conversation.
+// Human and persona text are kept together so a Thinker can reason over what
+// was actually said on both sides, not only over predicted claims.
+type HarnessTurn struct {
+	Turn    int
+	Human   string
+	Persona string
+}
+
+// HarnessSnapshot is the canonical, versioned conversation history supplied to
+// a Thinker: the finalized turns *before* CurrentTurn, human and persona text
+// together. The current turn's question is not in it — that arrives live
+// through FeedPartial. Version identifies the finalized history: it changes
+// only when a turn finalizes, never on an interim ASR revision, so two
+// snapshots with equal Version carry the same history and an implementation
+// must treat the second as a no-op rather than restarting its reasoning.
+type HarnessSnapshot struct {
+	Version     uint64
+	CurrentTurn int
+	Turns       []HarnessTurn
+}
+
 // UnlockAssessment is the Thinker's per-turn judgement of whether
 // unlock_condition has been met. The Thinker only assesses; the session
 // actor owns the monotonic flip.
@@ -50,6 +72,13 @@ type Thinker interface {
 	// FeedPartial streams an in-progress interviewer utterance in as it is
 	// transcribed, so the Thinker is never cold at end-of-turn.
 	FeedPartial(ctx context.Context, text string) error
+	// SetHarnessSnapshot replaces the bounded canonical conversation history
+	// used by the next RequestNote. The actor publishes it when a persona
+	// turn closes and again at defer time. Implementations must ignore an
+	// older Version (a late revision must never rewind reasoning) and must
+	// keep in-flight speculation when the Version is unchanged (the defer
+	// republish must not make the Thinker cold at end-of-turn).
+	SetHarnessSnapshot(ctx context.Context, snapshot HarnessSnapshot) error
 	// RequestNote asks for a structured note before deadline. The returned
 	// channel delivers at most one Note and is never sent to after
 	// deadline; a miss is the caller's responsibility to detect via its own

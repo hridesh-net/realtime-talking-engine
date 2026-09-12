@@ -30,6 +30,7 @@ type Bank struct {
 
 	mu         sync.Mutex
 	clips      []ports.PCM16Audio
+	clipTexts  []string
 	openClip   ports.PCM16Audio
 	hasOpening bool
 	lastPick   int
@@ -107,17 +108,19 @@ func (b *Bank) Warm(ctx context.Context) error {
 	// Kept in contract order rather than completion order, so the same
 	// contract always numbers its clips the same way.
 	var clips []ports.PCM16Audio
+	var texts []string
 	for i := range rendered {
 		if ok[i] {
 			clips = append(clips, rendered[i])
+			texts = append(texts, b.phrases[i])
 		}
 	}
 	if openErr != nil {
-		b.storeLocked(clips, ports.PCM16Audio{}, false)
+		b.storeLocked(clips, texts, ports.PCM16Audio{}, false)
 		return openErr
 	}
 
-	b.storeLocked(clips, opening, haveOpening)
+	b.storeLocked(clips, texts, opening, haveOpening)
 	if len(clips) < len(b.phrases) {
 		b.logger.Warn("stall: bank warmed partially",
 			"got", len(clips), "want", len(b.phrases))
@@ -152,28 +155,31 @@ func (b *Bank) synthesize(ctx context.Context, text string) (ports.PCM16Audio, e
 	return ports.PCM16Audio{}, lastErr
 }
 
-func (b *Bank) storeLocked(clips []ports.PCM16Audio, opening ports.PCM16Audio, haveOpening bool) {
+func (b *Bank) storeLocked(clips []ports.PCM16Audio, texts []string, opening ports.PCM16Audio, haveOpening bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.clips = clips
+	b.clipTexts = texts
 	b.openClip = opening
 	b.hasOpening = haveOpening
 }
 
-// PickStall returns a clip, avoiding the one used last.
+// PickStall returns a clip and its phrase, avoiding the one used last.
 //
-// Avoiding an immediate repeat is the whole reason the index is returned: a
-// persona that says "let me think about that" twice in a row sounds like a
-// recording, which is exactly the illusion the stall bank exists to protect.
-func (b *Bank) PickStall() (ports.PCM16Audio, int, bool) {
+// Avoiding an immediate repeat matters: a persona that says "let me think
+// about that" twice in a row sounds like a recording, which is exactly the
+// illusion the stall bank exists to protect. The phrase travels with the clip
+// because a partly-warmed bank compacts its clips, so an index into the
+// contract's phrase list would name the wrong words.
+func (b *Bank) PickStall() (ports.PCM16Audio, string, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.clips) == 0 {
-		return ports.PCM16Audio{}, 0, false
+		return ports.PCM16Audio{}, "", false
 	}
 	idx := (b.lastPick + 1) % len(b.clips)
 	b.lastPick = idx
-	return b.clips[idx], idx, true
+	return b.clips[idx], b.clipTexts[idx], true
 }
 
 // OpeningLine returns the pre-synthesized opening line.

@@ -126,6 +126,7 @@ different per-role provider sends the wrong model id. Prefer the per-role vars.
 | `DATABASE_URL` | `postgresql:///interview_watcher` | Postgres DSN. Read by `database.open_pool()` and by the migration runner. Nothing in the request path uses it yet |
 | `SPOOL_DIR` | `spool` | Local disk buffer for in-flight session artifacts before upload. Shared with the Go engine, which spools its bundle into the same directory |
 | `CONTROL_PLANE_PORT` | `8081` | Bind port |
+| `CONTROL_PLANE_SHARED_SECRET` | *(empty)* | Shared with the Go engine, which sends it as a bearer token on `GET /candidates/{id}/engine-contract` and `POST /sessions/{id}/ingest`. Same value in both processes' environments. **Unset, those two routes answer 503** — voice sessions cannot start, by design |
 | `CORS_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to call this API cross-origin. **Empty or unset installs no CORS middleware at all** — the console under `ui/` is same-origin and needs none, and a wildcard would let any page on the internet call this service with the caller's cookies. Set it to the portal's origin to serve it, e.g. `http://localhost:3002`. Whitespace around each entry is trimmed |
 | `RECORDINGS_DIR` | `recordings` | Where browser-uploaded voice-session audio lands, one file per session. Local disk on this host only — see [Session recording](/concepts/contracts/session-recording.md) for the consent/retention decisions. Retention is manual; nothing purges it. |
 

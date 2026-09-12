@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import tempfile
+import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    Header,
     HTTPException,
     Request,
     Response,
@@ -20,6 +22,7 @@ from fastapi import (
 # subclass FastAPI builds for declared parameters, and an isinstance check
 # against it silently rejects every part a hand-read form produces.
 from starlette.datastructures import UploadFile
+from starlette.responses import FileResponse
 
 from analysis_agent import AnalysisContext, AudioAnalysisAgent
 from candidate_agent import archetypes as archetype_catalog
@@ -43,6 +46,8 @@ from control_plane.ports import (
     EnrollmentStore,
     ExpectationStore,
     ExpectationWorkflowStore,
+    IngestConflictError,
+    IngestWorkflowStore,
     InterviewStore,
     RecordingStore,
     RecordingWorkflowStore,
@@ -56,6 +61,7 @@ from control_plane.schemas import (
     AnalysisMeta,
     CandidateEnrollRequest,
     CustomPersonaSpec,
+    IngestReceipt,
     InterviewCreateRequest,
     InterviewResponse,
     RealtimeCredentialResponse,
@@ -63,6 +69,7 @@ from control_plane.schemas import (
     RoleFact,
     RoleFactsRequest,
     SessionCreateRequest,
+    SessionIngest,
     SessionResponse,
     SessionSummary,
     TranscriptAppendRequest,
@@ -376,15 +383,88 @@ def get_candidate(candidate_id: str, repo: CandidateStore = Depends(get_repo)) -
     return candidate
 
 
-@router.get("/candidates/{candidate_id}/engine-contract", response_model=EngineContract)
+def require_engine_secret(authorization: str | None = Header(default=None)) -> None:
+    """Admit the Go engine, and only it, to the engine-facing routes.
+
+    The engine and this service share one secret (``CONTROL_PLANE_SHARED_SECRET``
+    in both env files; the same SSM parameter in production) and the engine
+    sends it as a bearer token. An unset secret refuses rather than admits:
+    the contract is the persona's whole runtime brief and the ingest rewrites a
+    session's transcript, and a deployment that forgot the secret should find
+    out from a 503 in the engine's log, not from an open endpoint.
+    """
+    expected = os.getenv("CONTROL_PLANE_SHARED_SECRET", "")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="engine access is not configured: CONTROL_PLANE_SHARED_SECRET is unset",
+        )
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(token.strip(), expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="engine credential rejected"
+        )
+
+
+@router.get(
+    "/candidates/{candidate_id}/engine-contract",
+    response_model=EngineContract,
+    dependencies=[Depends(require_engine_secret)],
+)
 def get_engine_contract(
     candidate_id: str, repo: CandidateStore = Depends(get_repo)
 ) -> EngineContract:
-    """What the Go interview-candidate engine pulls to run this persona."""
+    """What the Go interview-candidate engine pulls to run this persona. Engine-only."""
     candidate = repo.get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="candidate not found")
     return candidate.engine_contract
+
+
+@router.post(
+    "/sessions/{session_id}/ingest",
+    response_model=IngestReceipt,
+    dependencies=[Depends(require_engine_secret)],
+)
+def ingest_session(
+    session_id: str,
+    ingest: SessionIngest,
+    response: Response,
+    repo: IngestWorkflowStore = Depends(get_repo),
+) -> IngestReceipt:
+    """The Go engine's single write-back for a finished voice session.
+
+    Idempotent on the session id: a retry replaces the record and answers 200
+    where the first delivery answered 201. The session row is created when the
+    engine minted its own id and reused when the portal opened it first.
+    """
+    if ingest.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="session_id in the path and the body disagree",
+        )
+    interview = repo.get(ingest.interview_id)
+    if not interview:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+    candidate = repo.get_candidate(ingest.candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="candidate not found")
+    if candidate.interview_id != ingest.interview_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="candidate belongs to a different interview",
+        )
+    try:
+        receipt = repo.store_ingest(
+            ingest,
+            archetype=candidate.archetype,
+            opening_line=candidate.engine_contract.opening_line,
+            planned_minutes=interview.config.duration_minutes,
+        )
+    except IngestConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    response.status_code = status.HTTP_200_OK if receipt.duplicate else status.HTTP_201_CREATED
+    return receipt
 
 
 @router.get("/candidates/{candidate_id}/scorecard", response_model=InterviewerScorecard)
@@ -766,20 +846,28 @@ def finalize_recording(session_id: str, repo: RecordingStore = Depends(get_repo)
 
 @router.get("/sessions/{session_id}/recording")
 def get_recording(session_id: str, repo: RecordingStore = Depends(get_repo)) -> Response:
-    """Serve the session's recorded audio bytes.
+    """Serve the session's recording, streamed off disk.
 
     Serves a partial recording (``status == 'recording'``) too -- the honest
     artifact of a crashed or abandoned session, rather than a 404 that hides
     that a recording exists.
+
+    ``FileResponse`` rather than a ``Response`` holding the bytes: the container
+    now carries the manager's camera as well as the audio, and it also answers
+    ``Range`` with a 206, which is what lets a ``<video>`` element probe and seek
+    instead of downloading the whole session first. ``content_disposition_type``
+    is set explicitly because Starlette defaults to ``attachment`` and this
+    endpoint has always served ``inline``.
     """
-    found = repo.read_recording(session_id)
+    found = repo.open_recording(session_id)
     if not found:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="recording not found")
-    meta, data = found
-    return Response(
-        content=data,
+    meta, path = found
+    return FileResponse(
+        path,
         media_type=meta.mime_type,
-        headers={"Content-Disposition": f'inline; filename="session-{session_id}.webm"'},
+        filename=f"session-{session_id}.webm",
+        content_disposition_type="inline",
     )
 
 
@@ -828,7 +916,7 @@ def start_analysis(
     if interview is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
 
-    found = repo.read_recording(session_id)
+    found = repo.open_recording(session_id)
     if found is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -839,17 +927,17 @@ def start_analysis(
     if existing and existing.status == "running":
         return existing
 
-    # The recording lives outside SQLite; hand the agent a real file rather than
-    # bytes, so a long recording is not held in memory while it is windowed.
-    _, data = found
-    scratch = Path(tempfile.gettempdir()) / f"analysis-{session_id}.webm"
-    scratch.write_bytes(data)
+    # The agent is given the spool file itself. Nothing in this service moves,
+    # renames or prunes a recording (retention is manual by decision), so the
+    # path stays valid for the length of the background task -- and a copy would
+    # only be an hour of video written twice and never cleaned up.
+    _, recording_path = found
 
     context = reporting.build_analysis_context(
         interview, session, repo.get_candidate(session.candidate_id)
     )
     started = repo.begin_analysis(session_id)
-    background.add_task(_run_analysis, repo, agent, session_id, scratch, context)
+    background.add_task(_run_analysis, repo, agent, session_id, recording_path, context)
     return started
 
 

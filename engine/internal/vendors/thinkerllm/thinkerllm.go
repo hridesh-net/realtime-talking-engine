@@ -58,6 +58,9 @@ type Thinker struct {
 	persona ports.PersonaCtx
 	// question is the interviewer's utterance so far.
 	question string
+	// harness is the latest canonical, bounded transcript snapshot. It is
+	// replaced before each note request and never read from the actor directly.
+	harness ports.HarnessSnapshot
 	// speculation is the in-flight or completed guess for the current
 	// question. Replaced whenever the question materially grows.
 	speculation *attempt
@@ -100,6 +103,7 @@ func (t *Thinker) Start(_ context.Context, persona ports.PersonaCtx) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.persona = persona
+	t.harness = ports.HarnessSnapshot{}
 	t.closed = false
 	return nil
 }
@@ -124,6 +128,30 @@ func (t *Thinker) FeedPartial(ctx context.Context, text string) error {
 		return nil
 	}
 	t.startSpeculationLocked(ctx, text)
+	return nil
+}
+
+// SetHarnessSnapshot replaces the canonical transcript context for future
+// reasoning. A changed history invalidates any speculation started from the
+// old one — a guess reasoned over the wrong conversation is worth nothing.
+// The same history under a new current turn is not a change: the actor
+// republishes at defer time, and abandoning the mid-question speculation there
+// would make every defer a cold call, which is the latency the whole design
+// exists to avoid. The actor separately guards late notes by turn and version.
+func (t *Thinker) SetHarnessSnapshot(ctx context.Context, snapshot ports.HarnessSnapshot) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed || snapshot.Version < t.harness.Version {
+		return nil
+	}
+	changed := snapshot.Version != t.harness.Version
+	t.harness = cloneHarnessSnapshot(snapshot)
+	if changed {
+		t.abandonSpeculationLocked()
+	}
 	return nil
 }
 
@@ -202,11 +230,17 @@ func (t *Thinker) startSpeculationLocked(ctx context.Context, question string) {
 	att := &attempt{done: make(chan struct{}), cancel: cancel}
 	t.speculation = att
 	persona := t.persona
+	harness := cloneHarnessSnapshot(t.harness)
 
 	go func() {
 		defer close(att.done)
-		att.note, att.err = t.generate(callCtx, persona, question)
+		att.note, att.err = t.generate(callCtx, persona, harness, question)
 	}()
+}
+
+func cloneHarnessSnapshot(snapshot ports.HarnessSnapshot) ports.HarnessSnapshot {
+	snapshot.Turns = append([]ports.HarnessTurn(nil), snapshot.Turns...)
+	return snapshot
 }
 
 // abandonSpeculationLocked cancels the in-flight guess.

@@ -70,7 +70,7 @@ def _tables(dsn: str) -> set[str]:
 def test_apply_builds_the_schema_on_a_fresh_database(fresh_dsn: str) -> None:
     applied = migrate.apply(fresh_dsn, REAL_MIGRATIONS)
 
-    assert applied == [1]
+    assert applied == [1, 2]
     tables = _tables(fresh_dsn)
     assert "schema_migrations" in tables
     for expected in (
@@ -82,6 +82,7 @@ def test_apply_builds_the_schema_on_a_fresh_database(fresh_dsn: str) -> None:
         "session_analyses",
         "session_reports",
         "session_recordings",
+        "session_ingests",
         "interview_assignments",
         "ai_personas",
     ):
@@ -91,12 +92,12 @@ def test_apply_builds_the_schema_on_a_fresh_database(fresh_dsn: str) -> None:
 def test_the_ledger_records_the_files_checksum(fresh_dsn: str) -> None:
     migrate.apply(fresh_dsn, REAL_MIGRATIONS)
 
-    (version, name, checksum), *rest = _rows(
-        fresh_dsn, "SELECT version, name, checksum FROM schema_migrations"
+    rows = _rows(
+        fresh_dsn, "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
     )
-    assert not rest
-    assert (version, name) == (1, "initial")
-    assert checksum == migrate.discover(REAL_MIGRATIONS)[0].checksum
+    discovered = migrate.discover(REAL_MIGRATIONS)
+    assert [(v, n) for v, n, _ in rows] == [(1, "initial"), (2, "session_ingests")]
+    assert [c for _, _, c in rows] == [m.checksum for m in discovered]
 
 
 def test_check_is_clean_after_apply(fresh_dsn: str) -> None:
@@ -117,18 +118,18 @@ def test_re_applying_is_a_no_op(fresh_dsn: str) -> None:
     migrate.apply(fresh_dsn, REAL_MIGRATIONS)
 
     assert migrate.apply(fresh_dsn, REAL_MIGRATIONS) == []
-    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 1
+    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 2
 
 
 def test_an_unapplied_extra_file_is_pending_not_drift(
     fresh_dsn: str, migrations_copy: Path
 ) -> None:
     migrate.apply(fresh_dsn, migrations_copy)
-    (migrations_copy / "0002_later.sql").write_text("CREATE TABLE later (id text PRIMARY KEY);\n")
+    (migrations_copy / "0003_later.sql").write_text("CREATE TABLE later (id text PRIMARY KEY);\n")
 
     with psycopg.connect(fresh_dsn, autocommit=True) as conn:
         state = migrate.status(conn, migrations_copy)
-    assert [m.filename for m in state.pending] == ["0002_later.sql"]
+    assert [m.filename for m in state.pending] == ["0003_later.sql"]
     assert state.drift == []
 
     code = migrate.main(["--check", "--dsn", fresh_dsn, "--migrations-dir", str(migrations_copy)])
@@ -163,7 +164,7 @@ def test_a_migration_that_fails_midway_records_nothing_for_itself(
     fresh_dsn: str, migrations_copy: Path
 ) -> None:
     """The whole file is one transaction, so a half-run file leaves no trace."""
-    (migrations_copy / "0002_broken.sql").write_text(
+    (migrations_copy / "0003_broken.sql").write_text(
         "CREATE TABLE half_built (id text PRIMARY KEY);\n"
         "CREATE TABLE half_built (id text PRIMARY KEY);\n"  # same name: raises
     )
@@ -171,8 +172,8 @@ def test_a_migration_that_fails_midway_records_nothing_for_itself(
     with pytest.raises(psycopg.Error):
         migrate.apply(fresh_dsn, migrations_copy)
 
-    # 0001 ran before 0002 and stays applied; 0002 recorded nothing at all.
-    assert [row[0] for row in _rows(fresh_dsn, "SELECT version FROM schema_migrations")] == [1]
+    # 0001 and 0002 ran before 0003 and stay applied; 0003 recorded nothing at all.
+    assert [row[0] for row in _rows(fresh_dsn, "SELECT version FROM schema_migrations")] == [1, 2]
     assert "half_built" not in _tables(fresh_dsn)
     assert "interviews" in _tables(fresh_dsn)
 
@@ -196,7 +197,7 @@ def test_the_advisory_lock_serialises_two_runners(fresh_dsn: str, migrations_cop
     would die on a duplicate relation or a duplicate ledger key. With it, the
     loser waits, re-reads under the lock, and finds the work already done.
     """
-    (migrations_copy / "0002_slow.sql").write_text(
+    (migrations_copy / "0003_slow.sql").write_text(
         "SELECT pg_sleep(0.75);\nCREATE TABLE lock_probe (id text PRIMARY KEY);\n"
     )
     migrate.apply(fresh_dsn, REAL_MIGRATIONS)  # get 0001 out of the way
@@ -220,9 +221,9 @@ def test_the_advisory_lock_serialises_two_runners(fresh_dsn: str, migrations_cop
 
     assert not errors, f"a runner raised: {errors}"
     every = sorted(v for result in results for v in result)
-    assert every == [2], "version 2 was applied more than once"
+    assert every == [3], "version 3 was applied more than once"
     assert "lock_probe" in _tables(fresh_dsn)
-    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 2
+    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 3
 
 
 # ---------------------------------------- the two foreign-key decisions ----

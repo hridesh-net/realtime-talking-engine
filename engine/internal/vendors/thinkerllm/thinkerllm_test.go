@@ -238,6 +238,95 @@ func TestTheLedgerReachesTheReasoningModel(t *testing.T) {
 	}
 }
 
+func TestTheHarnessSnapshotReplacesContextAndIncludesPersonaOutput(t *testing.T) {
+	defer verifyNoEngineLeaks(t)
+
+	srv, calls, prompt := noteServer(t, 0, goodNote)
+	th := newThinker(t, srv)
+	ctx := context.Background()
+	_ = th.Start(ctx, ports.PersonaCtx{SystemPrompt: "You are Rohan."})
+	defer th.Close(ctx)
+
+	first := ports.HarnessSnapshot{
+		Version: 1, CurrentTurn: 2,
+		Turns: []ports.HarnessTurn{{Turn: 1, Human: "Tell me about caching", Persona: "I used Redis for speed."}},
+	}
+	if err := th.SetHarnessSnapshot(ctx, first); err != nil {
+		t.Fatalf("set first snapshot: %v", err)
+	}
+	_ = th.FeedPartial(ctx, "how did you scale redis under load")
+	<-th.RequestNote(ctx, time.Now().Add(2*time.Second))
+	firstPrompt := prompt.Load()
+	if firstPrompt == nil || !strings.Contains(*firstPrompt, "I used Redis for speed.") || !strings.Contains(*firstPrompt, "context_version: 1") {
+		t.Fatalf("first harness context missing from prompt: %v", firstPrompt)
+	}
+
+	second := ports.HarnessSnapshot{
+		Version: 2, CurrentTurn: 3,
+		Turns: []ports.HarnessTurn{{Turn: 2, Human: "Describe an outage", Persona: "I would keep the answer vague."}},
+	}
+	if err := th.SetHarnessSnapshot(ctx, second); err != nil {
+		t.Fatalf("set replacement snapshot: %v", err)
+	}
+	_ = th.FeedPartial(ctx, "what did you learn from that outage")
+	<-th.RequestNote(ctx, time.Now().Add(2*time.Second))
+	if calls.Load() < 2 {
+		t.Fatalf("calls = %d, want a new call after context replacement", calls.Load())
+	}
+	secondPrompt := prompt.Load()
+	if secondPrompt == nil || !strings.Contains(*secondPrompt, "I would keep the answer vague.") || !strings.Contains(*secondPrompt, "context_version: 2") {
+		t.Fatalf("replacement harness context missing from prompt: %v", secondPrompt)
+	}
+	if strings.Contains(*secondPrompt, "I used Redis for speed.") {
+		t.Fatal("replacement snapshot retained the old persona output")
+	}
+}
+
+// TestRepublishingTheSameHistoryKeepsTheSpeculationWarm is the latency rule.
+// The actor publishes the history when a persona turn closes and again at
+// defer time; the second publish carries the same version under a new current
+// turn, and if it restarted reasoning every defer would be a cold call under
+// the stall clip — the exact gap the speculative FeedPartial path exists to
+// close.
+func TestRepublishingTheSameHistoryKeepsTheSpeculationWarm(t *testing.T) {
+	defer verifyNoEngineLeaks(t)
+
+	srv, calls, _ := noteServer(t, 0, goodNote)
+	th := newThinker(t, srv)
+	ctx := context.Background()
+	_ = th.Start(ctx, ports.PersonaCtx{SystemPrompt: "You are Rohan."})
+	defer th.Close(ctx)
+
+	history := ports.HarnessSnapshot{
+		Version: 7, CurrentTurn: 2,
+		Turns: []ports.HarnessTurn{{Turn: 1, Human: "Tell me about caching", Persona: "I used Redis for speed."}},
+	}
+	if err := th.SetHarnessSnapshot(ctx, history); err != nil {
+		t.Fatalf("window B publish: %v", err)
+	}
+	_ = th.FeedPartial(ctx, "how did you scale redis under load")
+	waitCalls(t, calls, 1)
+
+	history.CurrentTurn = 3
+	if err := th.SetHarnessSnapshot(ctx, history); err != nil {
+		t.Fatalf("defer-time republish: %v", err)
+	}
+	select {
+	case note, ok := <-th.RequestNote(ctx, time.Now().Add(2*time.Second)):
+		if !ok {
+			t.Fatal("the republish abandoned the speculation and no note arrived")
+		}
+		if note.Text == "" {
+			t.Fatalf("note = %+v", note)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no note within budget")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls = %d, want the single speculative call to have served the request", got)
+	}
+}
+
 func TestResetClearsTheQuestionButKeepsThePersona(t *testing.T) {
 	defer verifyNoEngineLeaks(t)
 

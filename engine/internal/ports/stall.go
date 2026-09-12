@@ -10,11 +10,13 @@ type StallBank interface {
 	// Warm pre-synthesizes every stall clip and the opening line for this
 	// session, ahead of the first turn that might need one.
 	Warm(ctx context.Context) error
-	// PickStall returns one stall clip, its index into the bank (so a
-	// caller can avoid immediate repeats), and whether the bank had a
-	// clip to give. ok is false when Warm has not completed or produced
+	// PickStall returns one stall clip and the phrase it renders, and
+	// whether the bank had a clip to give. The bank avoids an immediate
+	// repeat itself; the phrase is returned because the turn record and the
+	// Thinker's history must carry what the persona actually said while it
+	// bought time. ok is false when Warm has not completed or produced
 	// nothing usable.
-	PickStall() (clip PCM16Audio, index int, ok bool)
+	PickStall() (clip PCM16Audio, phrase string, ok bool)
 	// OpeningLine returns the pre-synthesized opening line, and whether it
 	// is ready.
 	OpeningLine() (PCM16Audio, bool)

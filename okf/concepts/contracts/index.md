@@ -9,6 +9,7 @@ handoff to the Go engine. Read the page before editing the file, and regenerate
 * [InterviewExpectation](/concepts/contracts/interview-expectation.md) - the interviewer's plan document.
 * [VirtualCandidate](/concepts/contracts/virtual-candidate.md) - the full persona document.
 * [EngineContract](/concepts/contracts/engine-contract.md) - the runtime slice the Go engine consumes.
+* [Session ingest](/concepts/contracts/session-ingest.md) - the Go engine's single write-back for a finished voice session, and the shared-secret gate on the engine routes.
 * [StructuredModel](/concepts/contracts/structured-model.md) - the provider-agnostic model port for schema-constrained JSON.
 * [ChatModel](/concepts/contracts/chat-model.md) - the sibling port for free-text conversation turns.
 * [Realtime voice](/concepts/contracts/realtime-voice.md) - the broker port, the ephemeral credential, and the browser-to-vendor media path.

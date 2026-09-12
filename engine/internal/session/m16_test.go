@@ -357,7 +357,7 @@ func TestClipDurationPrefersTheRealClipAndDegradesToAnEstimate(t *testing.T) {
 
 	ctx := context.Background()
 	text := strings.Repeat("word ", 150) // 150 words ≈ one minute, clamped
-	if got := a.playClip(ctx, text); got != 30*time.Second {
+	if got := playOpening(ctx, a, text); got != 30*time.Second {
 		t.Fatalf("estimated duration = %v, want the 30s ceiling with no clip available", got)
 	}
 
@@ -378,7 +378,14 @@ func TestClipDurationPrefersTheRealClipAndDegradesToAnEstimate(t *testing.T) {
 	if !exact {
 		t.Fatal("test setup invalid: the fake clip has no measurable duration")
 	}
-	if got := a.playClip(ctx, text); got != want {
+	if got := playOpening(ctx, a, text); got != want {
 		t.Fatalf("duration = %v, want the clip's own %v when a clip is in hand", got, want)
 	}
+}
+
+// playOpening plays the opening line the way the greeting path does: the
+// bank's clip when it has one, the text estimate otherwise.
+func playOpening(ctx context.Context, a *actor, text string) time.Duration {
+	clip, ok := a.openingClip()
+	return a.playClip(ctx, clip, ok, text, "clip")
 }

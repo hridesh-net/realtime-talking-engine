@@ -7,9 +7,13 @@ way `RECORDINGS_DIR` points the real service at disk.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
+from analysis_agent import AnalysisContext, AudioAnalysisAgent, SessionAnalysis, audio
 from candidate_agent.agent import VirtualCandidateAgent
 from candidate_agent.session import CandidateSessionAgent
 from control_plane import api as api_module
@@ -272,3 +276,95 @@ def test_empty_chunk_is_422(client):
         headers={"Content-Type": "audio/webm"},
     )
     assert resp.status_code == 422
+
+
+def test_a_video_recording_is_stored_and_served_with_the_mime_the_browser_sent(client):
+    """The camera rides in the same recording, so the mime is whatever seq 0 said.
+
+    The chunk endpoint has never validated `Content-Type`, and this is what that
+    buys: the manager's camera arrives as `video/webm;codecs=vp8,opus` in the
+    same chunk protocol and the same row, and comes back out labelled the same
+    way, which is the only thing that tells the player to render a `<video>`.
+    `inline` is asserted because `FileResponse` defaults to `attachment` and
+    would otherwise turn playback into a download.
+    """
+    _, session_id = _open_voice_session(client)
+    posted = client.post(
+        f"/api/v1/sessions/{session_id}/recording/chunks",
+        params={"seq": 0},
+        content=b"vp8-and-opus-bytes",
+        headers={"Content-Type": "video/webm;codecs=vp8,opus"},
+    )
+    assert posted.status_code == 201, posted.text
+    assert posted.json()["mime_type"] == "video/webm;codecs=vp8,opus"
+
+    fetched = client.get(f"/api/v1/sessions/{session_id}/recording")
+    assert fetched.status_code == 200
+    assert fetched.content == b"vp8-and-opus-bytes"
+    assert fetched.headers["content-type"] == "video/webm;codecs=vp8,opus"
+    assert fetched.headers["content-disposition"] == f'inline; filename="session-{session_id}.webm"'
+
+
+def test_a_range_request_gets_a_206_with_only_the_bytes_asked_for(client):
+    """A `<video>` probes with a Range before it plays; a 200 makes it download it all.
+
+    Serving from a `FileResponse` rather than a `Response` full of bytes is what
+    makes this work, so it is asserted here rather than assumed from Starlette.
+    """
+    _, session_id = _open_voice_session(client)
+    client.post(
+        f"/api/v1/sessions/{session_id}/recording/chunks",
+        params={"seq": 0},
+        content=b"0123456789abcdef",
+        headers={"Content-Type": "video/webm;codecs=vp8,opus"},
+    )
+
+    ranged = client.get(f"/api/v1/sessions/{session_id}/recording", headers={"Range": "bytes=0-9"})
+    assert ranged.status_code == 206
+    assert ranged.content == b"0123456789"
+    assert ranged.headers["content-range"] == "bytes 0-9/16"
+    assert ranged.headers["accept-ranges"] == "bytes"
+
+
+class _RecordingPathAgent(AudioAnalysisAgent):
+    """An analysis agent that records the path it was handed and calls no model."""
+
+    def __init__(self) -> None:
+        super().__init__(model=None)
+        self.seen: Path | None = None
+
+    async def analyze(
+        self,
+        recording: Path,
+        context: AnalysisContext,
+        *,
+        window_ms: int = audio.WINDOW_MS,
+    ) -> SessionAnalysis:
+        self.seen = recording
+        return SessionAnalysis()
+
+
+def test_analysis_reads_the_spool_file_and_writes_no_scratch_copy(client, repo, tmp_path):
+    """Analyse hands over the real recording; it used to copy it into /tmp and leak it.
+
+    The copy was written on every analyse and deleted by nothing, so an hour of
+    video would be spooled twice and the second copy would sit on the API host's
+    root volume until someone noticed. Both halves are asserted: the agent gets
+    the spool path, and the old scratch name is not on disk afterwards.
+    """
+    _, session_id = _open_voice_session(client)
+    client.post(
+        f"/api/v1/sessions/{session_id}/recording/chunks",
+        params={"seq": 0},
+        content=b"vp8-and-opus-bytes",
+        headers={"Content-Type": "video/webm;codecs=vp8,opus"},
+    )
+
+    agent = _RecordingPathAgent()
+    client.app.dependency_overrides[api_module.get_analysis_agent] = lambda: agent
+    started = client.post(f"/api/v1/sessions/{session_id}/analyze")
+    assert started.status_code == 202, started.text
+
+    assert agent.seen == tmp_path / f"{session_id}.webm"
+    assert agent.seen.read_bytes() == b"vp8-and-opus-bytes"
+    assert not (Path(tempfile.gettempdir()) / f"analysis-{session_id}.webm").exists()

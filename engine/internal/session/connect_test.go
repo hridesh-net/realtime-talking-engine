@@ -283,6 +283,40 @@ func TestATranscriberFailureDegradesTheSessionInsteadOfEndingIt(t *testing.T) {
 	r.stop(t)
 }
 
+// TestIndependentTranscriberPartialsReachTheThinkerOnce proves the production
+// fan-in path: the independent ASR stream is pumped into the actor mailbox,
+// and each revision is fed to the Thinker exactly once. The Speaker's own
+// input transcript is intentionally present too; it must remain only the
+// fallback recording path while the independent stream is healthy.
+func TestIndependentTranscriberPartialsReachTheThinkerOnce(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	transcriber := fakes.NewFakeTranscriber(
+		ports.Partial{Text: "tell me about reliability", ItemID: "asr-1"},
+		ports.Partial{Text: "tell me about reliability in production", ItemID: "asr-1"},
+	)
+	thinker := fakes.NewFakeThinker()
+	speaker := fakes.NewFakeSpeaker(ports.InputTranscript{
+		Text: "tell me about reliability in production", ItemID: "speaker-1",
+	})
+	r := newConnectRig(t, Deps{Speaker: speaker, Transcriber: transcriber, Thinker: thinker}, connectTestConnectTimeout)
+	defer r.cancel()
+
+	if out := r.attach(t, []byte("offer")); out.Err != nil {
+		t.Fatalf("attach: %v", out.Err)
+	}
+	for i := 0; i < 400; i++ {
+		if got := thinker.Partials(); len(got) == 2 {
+			if got[0] != "tell me about reliability" || got[1] != "tell me about reliability in production" {
+				t.Fatalf("Thinker partials = %#v", got)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("Thinker did not receive exactly two ASR revisions: %#v", thinker.Partials())
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup ownership.
 // ---------------------------------------------------------------------------

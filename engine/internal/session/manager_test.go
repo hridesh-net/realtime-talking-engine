@@ -287,3 +287,54 @@ func TestStopSession_CallerContextCancelledStillStopsSession(t *testing.T) {
 	// deferred goleak check runs.
 	time.Sleep(100 * time.Millisecond)
 }
+
+// TestAStoppedSessionReportsItsIngestToTheControlPlane is the engine's
+// single write-back: when the actor stops, for any reason, its outcome goes
+// to the ContractSource. Before this nothing in the engine ever called
+// NotifyIngest, so a finished interview left no trace on the control plane.
+func TestAStoppedSessionReportsItsIngestToTheControlPlane(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	mgr, cs := newManager(t)
+	got, err := mgr.CreateSessionWithID(context.Background(), "vc-test-1", "portal-sess-1")
+	if err != nil {
+		t.Fatalf("CreateSessionWithID: %v", err)
+	}
+	if got.ID != "portal-sess-1" {
+		t.Fatalf("session id = %q, want the caller's id", got.ID)
+	}
+	if err := mgr.StopSession(context.Background(), got.ID); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	if err := mgr.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	ingests := cs.Ingests()
+	if len(ingests) != 1 {
+		t.Fatalf("ingests = %d, want 1", len(ingests))
+	}
+	in := ingests[0]
+	if in.SessionID != "portal-sess-1" || in.CandidateID == "" || in.InterviewID == "" {
+		t.Fatalf("ingest identity = %+v", in)
+	}
+	if in.EndReason != "interviewer_ended" || in.EngineVersion != session.EngineVersion || in.ContractFingerprint == "" {
+		t.Fatalf("ingest = %+v, want interviewer_ended, the build version, and a fingerprint", in)
+	}
+	if in.EndedAt.Before(in.StartedAt) || in.Metrics["turns"] != 0 {
+		t.Fatalf("ingest timing/metrics = %+v", in)
+	}
+	if in.Turns == nil || in.Degradations == nil {
+		t.Fatal("slices must be present, never nil: the control plane's model declares lists")
+	}
+}
+
+func TestACallerSuppliedSessionIDIsValidated(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	mgr, _ := newManager(t)
+	_, err := mgr.CreateSessionWithID(context.Background(), "vc-test-1", "../etc/passwd")
+	if !errors.Is(err, session.ErrInvalidSessionID) {
+		t.Fatalf("err = %v, want ErrInvalidSessionID", err)
+	}
+}

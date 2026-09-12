@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Live Talking Engine" id="live-talking-engine">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Live Talking Engine — harness and context manager, dual-model" style="text;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="40" width="1520" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Two models, two context sizes: the speech model speaks from a small fast context; the reasoning model holds the full context and steers it." style="text;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;fontSize=14;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="1520" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="user" value="User&#xa;(interviewer, speaking)" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;strokeColor=#666666;strokeWidth=2;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="80" y="210" width="60" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="engine" value="Live Talking Engine" style="swimlane;rounded=1;arcSize=4;startSize=44;html=1;whiteSpace=wrap;fillColor=none;swimlaneFillColor=none;strokeColor=#333333;strokeWidth=2;fontSize=18;fontStyle=1;align=center;verticalAlign=middle;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="380" y="140" width="1200" height="480" as="geometry" />
+        </mxCell>
+
+        <mxCell id="speaker" value="Gemini Live model — speech to speech&#xa;(Speaker)&#xa;&#xa;small, fast context · always owns the voice" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=14;verticalAlign=middle;" vertex="1" parent="engine">
+          <mxGeometry x="40" y="80" width="380" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="thinker" value="Reasoning model&#xa;(Thinker)&#xa;&#xa;holds the full context · steers, never speaks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;fontSize=14;verticalAlign=middle;" vertex="1" parent="engine">
+          <mxGeometry x="40" y="310" width="380" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="harness" value="Harness Context&#xa;(context manager)" style="swimlane;rounded=1;arcSize=4;startSize=54;html=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=15;fontStyle=1;align=center;verticalAlign=middle;pointerEvents=0;" vertex="1" parent="engine">
+          <mxGeometry x="600" y="60" width="540" height="370" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ctx1" value="Candidate Persona" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=13;align=left;spacingLeft=14;" vertex="1" parent="harness">
+          <mxGeometry x="30" y="70" width="480" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx2" value="Interview Details (candidate perspective)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=13;align=left;spacingLeft=14;" vertex="1" parent="harness">
+          <mxGeometry x="30" y="145" width="480" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx3" value="Turns and Rounds (transcripts)&#xa;&lt;i&gt;both live streams land here&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=2;fontSize=13;align=left;spacingLeft=14;" vertex="1" parent="harness">
+          <mxGeometry x="30" y="220" width="480" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ctx4" value="Candidate info (name, gender)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=13;align=left;spacingLeft=14;" vertex="1" parent="harness">
+          <mxGeometry x="30" y="295" width="480" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_audio_out" value="persona audio out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6c8ebf;strokeWidth=2;fontSize=12;fontColor=#40597a;labelBackgroundColor=#ffffff;verticalAlign=bottom;exitX=0;exitY=0.2;exitDx=0;exitDy=0;entryX=1;entryY=0.32;entryDx=0;entryDy=0;" edge="1" parent="1" source="speaker" target="user">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_audio_in" value="interviewer audio in" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6c8ebf;strokeWidth=2;fontSize=12;fontColor=#40597a;labelBackgroundColor=#ffffff;verticalAlign=top;exitX=1;exitY=0.9;exitDx=0;exitDy=0;entryX=0;entryY=0.727;entryDx=0;entryDy=0;" edge="1" parent="1" source="user" target="speaker">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_tx_user" value="&lt;b&gt;input transcription&lt;/b&gt; (user side)&#xa;interviewer's speech, live fragments&#xa;while they are still talking" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#9673a6;strokeWidth=2;fontSize=12;fontColor=#6b4f80;labelBackgroundColor=#ffffff;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="user" target="thinker">
+          <mxGeometry x="0.2" relative="1" as="geometry">
+            <mxPoint as="offset" x="0" y="-26" />
+            <Array as="points">
+              <mxPoint x="30" y="285" />
+              <mxPoint x="30" y="505" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_tx_persona" value="&lt;b&gt;output transcription&lt;/b&gt;&#xa;(persona side) — what the&#xa;Speaker actually spoke, live" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#9673a6;strokeWidth=2;fontSize=12;fontColor=#6b4f80;labelBackgroundColor=#ffffff;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.2;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="speaker" target="thinker">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" x="0" y="-14" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_direction" value="direction&#xa;soft · instant ·&#xa;non-interrupting" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#b85450;strokeWidth=3;fontSize=12;fontStyle=1;fontColor=#8a3b38;labelBackgroundColor=#ffffff;exitX=0.75;exitY=0;exitDx=0;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="thinker" target="speaker">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" x="0" y="14" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_ctx_speaker" value="small context&#xa;(speaking only)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#82b366;strokeWidth=2;fontSize=12;fontColor=#4e6b3d;labelBackgroundColor=#ffffff;exitX=0;exitY=0.2;exitDx=0;exitDy=0;entryX=1;entryY=0.49;entryDx=0;entryDy=0;" edge="1" parent="1" source="harness" target="speaker">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_ctx_thinker" value="full context&#xa;persona · details&#xa;· transcript" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#82b366;strokeWidth=2;fontSize=12;fontColor=#4e6b3d;labelBackgroundColor=#ffffff;exitX=0;exitY=0.8;exitDx=0;exitDy=0;entryX=1;entryY=0.42;entryDx=0;entryDy=0;" edge="1" parent="1" source="harness" target="thinker">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_store" value="writes both live streams into &lt;b&gt;Turns and Rounds&lt;/b&gt;" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#9673a6;strokeWidth=2;fontSize=12;fontColor=#6b4f80;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="thinker" target="harness">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="610" y="590" />
+              <mxPoint x="1250" y="590" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="panel" value="When the Reasoning model (Thinker) sends its direction — two windows, one forbidden case" style="swimlane;rounded=1;arcSize=3;startSize=48;html=1;whiteSpace=wrap;fillColor=none;swimlaneFillColor=none;strokeColor=#333333;strokeWidth=2;fontSize=16;fontStyle=1;align=center;verticalAlign=middle;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="670" width="1520" height="470" as="geometry" />
+        </mxCell>
+
+        <mxCell id="winA" value="&lt;b&gt;Window A — before speaking&lt;/b&gt;&lt;br&gt;&lt;i&gt;the primary path&lt;/i&gt;&lt;br&gt;&lt;br&gt;1. The interviewer's turn ends — the engine closes the activity window.&lt;br&gt;&lt;br&gt;2. The Thinker, which has been reading the live transcript the whole time the interviewer talked, injects its direction as a &lt;b&gt;short plain context note&lt;/b&gt;.&lt;br&gt;&lt;br&gt;3. Only then does the Speaker answer. The note is never spoken — it steers the reply." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=12;align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=8;" vertex="1" parent="panel">
+          <mxGeometry x="30" y="70" width="450" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="winB" value="&lt;b&gt;Window B — once it stops speaking&lt;/b&gt;&lt;br&gt;&lt;i&gt;the catch-up path&lt;/i&gt;&lt;br&gt;&lt;br&gt;1. The Speaker finishes its turn (&lt;i&gt;turnComplete&lt;/i&gt;).&lt;br&gt;&lt;br&gt;2. The Thinker updates the context — what was actually said, and the claims made.&lt;br&gt;&lt;br&gt;3. It queues direction for the &lt;b&gt;next&lt;/b&gt; turn, so Window A already has it ready." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;fontSize=12;align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=8;" vertex="1" parent="panel">
+          <mxGeometry x="535" y="70" width="450" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="winC" value="&lt;b&gt;Never — mid-sentence&lt;/b&gt;&lt;br&gt;&lt;i&gt;the forbidden case&lt;/i&gt;&lt;br&gt;&lt;br&gt;No direction is injected while the Speaker is talking: that is exactly what makes the speaking model &lt;b&gt;blunder or interrupt&lt;/b&gt;.&lt;br&gt;&lt;br&gt;If a correction is truly urgent the engine's only tool is to &lt;b&gt;cancel the response and re-answer&lt;/b&gt; — the exception, not the flow." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=2;fontSize=12;align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=8;dashed=1;" vertex="1" parent="panel">
+          <mxGeometry x="1040" y="70" width="450" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="latency" value="&lt;b&gt;Latency rule — rides on Window A.&lt;/b&gt;&amp;nbsp; The direction target is &lt;b&gt;milliseconds&lt;/b&gt;; the recall phrase is the cover for the rare miss, &lt;b&gt;not the normal path&lt;/b&gt;.&lt;br&gt;&lt;br&gt;&lt;b&gt;We don't want latency.&lt;/b&gt; If the Thinker is not ready the instant the interviewer stops, the Speaker does what a real human does when recalling — &lt;b&gt;buys time in character&lt;/b&gt; with a natural phrase (“let me think…”, “hmm, good question”, “so, when I was at…”) — and the direction lands &lt;b&gt;under that phrase&lt;/b&gt;.&lt;br&gt;&lt;br&gt;&lt;b&gt;Never&lt;/b&gt; a bare pause, &lt;b&gt;never&lt;/b&gt; a robotic gap, &lt;b&gt;never&lt;/b&gt; a canned filler that sounds like a system stalling." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;fontSize=12;align=left;verticalAlign=top;spacingLeft=16;spacingRight=16;spacingTop=8;" vertex="1" parent="panel">
+          <mxGeometry x="30" y="302" width="1460" height="112" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_a_lat" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#d79b00;strokeWidth=2;endArrow=none;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.15;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="panel" source="winA" target="latency">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="panelcap" value="Both windows are silences: the direction lands &lt;b&gt;softly, instantly&lt;/b&gt; and &lt;b&gt;without breaking speech&lt;/b&gt;." style="text;html=1;whiteSpace=wrap;align=center;verticalAlign=middle;fontSize=13;fontColor=#555555;" vertex="1" parent="panel">
+          <mxGeometry x="30" y="424" width="1460" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_ab" value="then" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#666666;strokeWidth=2;fontSize=11;fontColor=#555555;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="panel" source="winA" target="winB">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="notes" value="&lt;b&gt;Notes (from the sketch)&lt;/b&gt;&lt;br&gt;&lt;br&gt;• The Reasoning model gets the realtime transcript from &lt;b&gt;both ends&lt;/b&gt; — &lt;b&gt;input transcription&lt;/b&gt; of the interviewer's speech and &lt;b&gt;output transcription&lt;/b&gt; of what the Speaker actually spoke, both arriving live rather than after the turn — and stores them in the Harness Context under Turns and Rounds.&lt;br&gt;&lt;br&gt;• Without breaking speech, and without making the speaking model blunder or interrupt, it &lt;b&gt;softly and instantly&lt;/b&gt; tells the speech model what to say or speak.&lt;br&gt;&lt;br&gt;• Engine naming: the speech model is the &lt;b&gt;Speaker&lt;/b&gt;, the reasoning model is the &lt;b&gt;Thinker&lt;/b&gt; — one brain, two parts (see okf/concepts/subsystems/engine.md)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacingLeft=16;spacingTop=10;spacingRight=16;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1170" width="1520" height="170" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

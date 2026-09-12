@@ -8,6 +8,10 @@ import "errors"
 // failure.
 var ErrEmptyCandidateID = errors.New("session: candidate_id is required")
 
+// ErrInvalidSessionID rejects a caller-supplied session id the engine will
+// not use as a path segment, file name, or idempotency key.
+var ErrInvalidSessionID = errors.New("session: session_id must be 1-120 characters of [A-Za-z0-9_-]")
+
 // ErrSessionNotFound is returned by Manager.StopSession and Manager.Lookup
 // when no live session matches the given id — either it never existed or it
 // has already been stopped. The HTTP handler maps it to 404 Not Found.

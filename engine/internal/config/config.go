@@ -107,8 +107,9 @@ type Config struct {
 	// TTSModelID is the model behind stall-bank and opening-line
 	// pre-synthesis.
 	TTSModelID string
-	// ASRModelID is the model/engine behind the independent Transcriber
-	// port (vendor or self-hosted, per plan tasks 25-26).
+	// ASRModelID is the model behind the independent Transcriber port —
+	// today an OpenAI Realtime transcription model (vendors/openaitx), which
+	// engined only constructs when this and OPENAI_API_KEY are both set.
 	ASRModelID string
 
 	// S3Bucket is the destination for session bundles (recording,

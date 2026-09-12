@@ -6,8 +6,10 @@ resource: /control_plane/ports.py
 tags: [contract, ports, isp, dip, protocol, object-store, s3]
 generated:
   by: claude-opus-5
-  at: "2026-09-10T18:00:00Z"
+  at: "2026-09-12T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T18:00:00Z"
   - by: claude-opus-5
@@ -75,7 +77,7 @@ class RecordingStore(Protocol):
                                data: bytes) -> RecordingMeta
     def finalize_recording(self, session_id: str) -> RecordingMeta | None
     def get_recording_meta(self, session_id: str) -> RecordingMeta | None
-    def read_recording(self, session_id: str) -> tuple[RecordingMeta, bytes] | None
+    def open_recording(self, session_id: str) -> tuple[RecordingMeta, Path] | None
 
 class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol): ...
 class EnrollmentStore(InterviewStore, ExpectationStore, CandidateStore, Protocol): ...
@@ -120,6 +122,35 @@ in, not `InterviewStore` — the chunk handler needs the session (to check
 See [Session recording](/concepts/contracts/session-recording.md) for the full
 chunk protocol.
 
+**`open_recording` returns a path, not bytes (2026-09-12).** It replaced
+`read_recording`, which returned `tuple[RecordingMeta, bytes]`; that method is
+gone, not deprecated — after the change it had no caller and no test, and a port
+method nobody calls is the kind of thing a future adapter dutifully implements
+for nothing. The reason is the recording now carries the manager's camera,
+roughly 190 MB a session-hour: `GET .../recording` streams it with a
+`FileResponse` (which also answers `Range`) and the analyse endpoint hands the
+path straight to ffmpeg, so neither pulls a whole recording through this
+process's heap. Note the asymmetry with `append_recording_chunk`, which still
+takes `bytes` — a 10 s chunk is ~500 KB and arrives as a request body already.
+
+This is the one port method that will change shape again when recordings move to
+`ObjectStore`: `open()` returns a `ByteSource` stream, not a path, and the range
+answer moves to the store (a presigned or ranged GET). Named here so the next
+change is a planned step and not a surprise.
+
+## `IngestStore` — the one port that writes a transcript whole
+
+`store_ingest(ingest, *, archetype, opening_line, planned_minutes)` is one
+method on purpose. The Go engine's turn table is the time base of a voice
+session the way `SessionStore` is for a text one, so the engine's `start_ms`
+becomes `elapsed_ms` and its timestamps come from the engine's `started_at`,
+not from this side's clock. One transaction creates the session row (engine-
+minted id) or closes the one the portal opened (its id passed to the engine),
+replaces `session_turns`, and upserts `session_ingests` with the raw payload.
+A repeat with the same `session_id` replaces everything and reports
+`duplicate=true`; a repeat naming a different interview or persona raises
+`IngestConflictError`, which the handler turns into 409.
+
 ## Which route uses which
 
 | Route | Port | Why |
@@ -134,6 +165,7 @@ chunk protocol.
 | `POST /sessions/{id}/end`, `GET /sessions/{id}` | `SessionStore` | sessions only |
 | `POST /sessions/{id}/realtime` | `TurnWorkflowStore` | reads the persona's contract to compile the voice session |
 | `POST /sessions/{id}/transcript` | `SessionStore` | writes a turn; generates nothing |
+| `POST /sessions/{id}/ingest` | `IngestWorkflowStore` | reads the interview and the persona, then writes the whole session in one call — deliberately **not** `SessionStore`, whose turn indexing and clock belong to text sessions |
 | `GET /interviews/{id}/sessions` | `SessionStore` | lists sessions; despite the path it never touches interview storage |
 | `POST /sessions/{id}/recording/chunks` | `RecordingWorkflowStore` | checks the session's `modality`, then appends a chunk |
 | `POST /sessions/{id}/recording/finalize`, `GET /sessions/{id}/recording` | `RecordingStore` | recording only — no session check, the recording either exists or does not |

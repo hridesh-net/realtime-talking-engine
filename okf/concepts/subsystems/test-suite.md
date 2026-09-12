@@ -6,7 +6,7 @@ resource: /tests
 tags: [tests, pytest, architecture, determinism]
 generated:
   by: claude-opus-5
-  at: "2026-09-10T19:00:00Z"
+  at: "2026-09-12T00:00:00Z"
 verified:
   - by: claude-opus-5
     at: "2026-09-10T18:00:00Z"
@@ -33,16 +33,22 @@ sources:
   - resource: /tests/test_gemini_live_mint.py
   - resource: /tests/test_recording.py
   - resource: /tests/test_portal_compat.py
+  - resource: /tests/test_engine_ingest.py
   - resource: /tests/test_candidate_agent.py
   - resource: /tests/test_expectation_agent.py
 ---
 # Test suite
 
-> **`tests/test_analysis_agent.py`** (19 tests) covers the analysis harness
+> **`tests/test_analysis_agent.py`** (20 tests) covers the analysis harness
 > without a model or an API key: where a window's timestamps land, which anchors
 > are rejected, and the 60/40 weighting — including the case the design exists
 > for, that a manager who read the room and closed early is not marked down for
-> coverage.
+> coverage. The twentieth is the exception to "pure": it builds a real
+> live-mode VP8+Opus WebM with `ffmpeg` (150 s of video over 100 s of audio) and
+> asserts `duration_ms` answers the **audio** length, which is what stops a
+> camera track longer than the mic from pushing a window past the end of the
+> audio. Still offline — ffmpeg is a local subprocess — and it skips when ffmpeg
+> is not on PATH.
 >
 > **`tests/test_report_engine.py`** (38 tests) covers the report engine and the
 > control-plane seam: determinism on both JSON and HTML, question typing
@@ -217,9 +223,22 @@ repo's real recordings directory.
 
 * **Adapter** — the first chunk creates the recording row and its file; chunks append in order and `byte_size` accumulates; an out-of-order `seq` raises; `finalize` is idempotent and does not move `updated_at` on a repeat call, or on an unknown session (returns `None`); a chunk after finalize raises; `get_session` carries `recording` and `list_sessions` flags `has_recording` correctly before and after the first chunk.
 * **Endpoints** — the full round trip (three chunks → finalize → GET returns the concatenated bytes with the stored `Content-Type`); wrong seq is 409; a text session's chunk POST is 409; an unknown session is 404 on all three routes; a GET before any chunk landed is 404; an empty chunk body is 422.
+* **Video, and serving from disk (2026-09-12)** — a `seq=0` chunk posted as `video/webm;codecs=vp8,opus` is stored with that mime and served back with it, plus `Content-Disposition: inline; filename="session-{id}.webm"` (the `inline` matters: `FileResponse` defaults to `attachment`); a `Range: bytes=0-9` GET returns **206** with `Content-Range` and exactly ten bytes; and `POST .../analyze`, with a fake agent that records the path it was handed, gets the **spool file itself** — asserted against `tmp_path / "{session_id}.webm"` — with no scratch copy left under `tempfile.gettempdir()`. The last two were each confirmed to fail against the previous implementation before being kept.
 
 See [Session recording](/concepts/contracts/session-recording.md) for what
 each of these enforces and why.
+
+### `tests/test_engine_ingest.py`
+
+The Go engine's write-back and the shared-secret gate. Both engine routes
+refuse without the bearer token (401) and refuse when the service has no
+secret (503) — the second case is the one that would otherwise be an open
+endpoint on a misconfigured deploy. A first ingest creates a `voice` session
+whose transcript is the engine's turn table with the engine's clock as time
+base (the empty barged-in turn is skipped); a repeat answers 200 with
+`duplicate=true` and **replaces** the transcript; an ingest for a session the
+portal opened closes that row and keeps its `planned_minutes`; a session under
+another interview is 409; path/body disagreement is 422 and nothing is written.
 
 ### `tests/test_portal_compat.py`
 
@@ -231,6 +250,7 @@ untouched.
 
 * **The error envelope** — a 404, a 409 and a 422 each carry `detail`, `status: false` and `message`; the 422's `detail` is still FastAPI's pydantic error *list* and every error's `loc` and `msg` appears in the one-line `message`; Starlette's own unmatched-route 404 is enveloped too (which only holds because the handler is registered on starlette's `HTTPException`, not FastAPI's subclass); a dict detail becomes a `json.dumps` message; an exception's headers survive; and 204/304 still carry no body.
 * **Multipart chunks** — a three-chunk multipart upload and a three-chunk raw upload produce the same stored bytes, `mime_type`, `byte_size` and `next_seq`, and the same `Content-Type` back out of `GET .../recording`. The 409s (wrong seq, text session), the 404 (unknown session) and the 422 (empty part) are asserted on the multipart path as well, plus the 422 for a multipart body with no `chunk` field.
+* **The session clock bound** — a session opened with the interview's own `duration_minutes` (60 by default, which is what the launcher sends) returns **201** and stores 60, and `MAX_INTERVIEW_MINUTES + 1` is a 422 on both `POST /sessions` and `POST /interviews`. This is the 45-cap regression: the first of the two fails against the old `le=45` with the exact production error.
 * **CORS** — `cors_allowed_origins()` trims and splits the list; a named origin gets a preflight and `access-control-allow-credentials: true` on both the preflight and the real response; an unnamed origin gets no header; and with the variable unset (with `load_dotenv` stubbed, so a developer's own `.env` cannot decide what "unset" means) **no** `access-control-*` header is emitted at all, because no middleware is installed.
 
 Each of these was confirmed to fail against a deliberately broken
@@ -265,11 +285,14 @@ that caused it.
 | Package | What its tests are for |
 |---|---|
 | `internal/arch` | The layering rules themselves, including synthetic fixtures that fail against the *old* code, so each rule is evidence a hole was real rather than a description of one |
-| `internal/session` | The turn loop: state table, timers, barge-in, the connector's failure classification, and the media seam |
+| `internal/session` | The turn loop: state table, timers, barge-in, the connector's failure classification, the media and recorder seams, and the harness context — revision keying, history-only snapshots whose version ignores interim revisions, Window B refreshing the Thinker, the note guard that keeps a trailing "um" from discarding a note, and the latency rule — a ready note lands with no stall clip, a late one is covered by the persona's own phrase then injected, a clip running out leaves silence until the deadline, and a confident turn takes the note inside its pause or answers unaided; plus the degraded path feeding the Thinker from the Speaker's transcript |
 | `internal/audio` | The resampler measured against its quality bar (87–88 dB SNR, 111 dB out-of-band rejection, p99 70 µs/frame), onset detection, jitter concealment, the send ring |
 | `internal/transport/wsfallback` | Ticketed attach over a real socket, resampling, heartbeats, and that `SendAudio` never blocks |
 | `internal/vendors/gemini` | The Speaker adapter driven against a **local WebSocket**, so the riskiest package in the build tests offline; plus the repo's first `//go:build live` tests |
 | `internal/vendors/{thinkerllm,judgellm,geminitts}`, `internal/stall` | Adapter behaviour over `httptest`, and the Judge's 25-case offline fixture |
+| `internal/controlplane` | The HTTP `ContractSource` against `httptest`: the bearer token on every call, 404 → `ports.ErrContractNotFound`, the `Idempotency-Key` and 409-as-delivered on ingest, retry on 5xx then success, no retry on a rejected payload, and spool-then-drain when the control plane is down |
+| `internal/vendors/openaitx` | The Transcriber against a local WebSocket: the GA `session.update` shape, cumulative revisions and one final per item, resampling to 24 kHz; plus a `//go:build live` test that streams a real 16 kHz question (`testdata/`) and expects it back — the only check that can see the vendor rejecting the setup message, which it did for the first draft |
+| `internal/vendors/thinkerllm` | Also: republishing an unchanged harness history keeps the speculative call warm (one HTTP call serves the request), and a changed history replaces the prompt context |
 
 Two conventions are load-bearing here. `internal/session` may not call
 `time.Now`, `time.After` or `time.NewTimer` **even in tests** — the layering gate

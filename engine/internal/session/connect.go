@@ -336,6 +336,38 @@ func pumpSpeakerEvents(
 	}
 }
 
+// pumpTranscriberPartials forwards the independent ASR stream into the
+// actor's owner mailbox. Partials are control, not audio: they are never
+// allowed to block the vendor reader indefinitely, but when the bounded
+// mailbox is full the oldest revision is the least useful one to retain.
+func pumpTranscriberPartials(ctx context.Context, transcriber ports.Transcriber, a *actor) {
+	partials := transcriber.Partials()
+	if partials == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case p, ok := <-partials:
+			if !ok {
+				// A stream ending after connect is a runtime ASR outage,
+				// not a fatal session error. Tell the owner loop to switch
+				// back to the Speaker's input transcript.
+				select {
+				case a.control <- command{Kind: cmdTranscriberFailed, Reason: "stream closed"}:
+				case <-ctx.Done():
+				case <-a.stopped:
+				}
+				return
+			}
+			if offerDrop(a.asrPartial, p) {
+				a.drops.ASRPartials.Add(1)
+			}
+		}
+	}
+}
+
 // pumpMediaConn forwards one media connection's inbound streams into the
 // actor's mailbox.
 //

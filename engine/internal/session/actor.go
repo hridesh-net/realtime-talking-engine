@@ -29,6 +29,16 @@ const pregateDeadline = 250 * time.Millisecond
 // persona-correct behaviour (plan §6 layer 3's floor).
 const thinkerDeadline = 700 * time.Millisecond
 
+// Bounds on the in-character pause a deferred turn waits before covering the
+// gap with a stall clip. The floor gives a note that is already there (the
+// speculation finished while the interviewer was still talking) time to cross
+// the pump; the ceiling keeps a slow-paced persona from sitting silent for
+// most of the Thinker deadline before the cover starts.
+const (
+	stallGraceFloor   = 50 * time.Millisecond
+	stallGraceCeiling = 350 * time.Millisecond
+)
+
 // ledgerRefreshTurns is how often the compact "what you have already said"
 // summary is re-injected into the speech model's context. Realtime models
 // forget the detail of their own audio history; this is cheap insurance.
@@ -59,6 +69,7 @@ type actor struct {
 	timers  *timerSet
 	playout *playoutTracker
 	turns   *turnTable
+	harness *harnessContext
 	// sentences enforces the response's sentence bound, reset per response.
 	sentences sentenceCounter
 	// probedSkill is the pre-gate's classification for the in-flight turn.
@@ -70,6 +81,11 @@ type actor struct {
 	drops        drops
 	// pendingVerdict is the pre-gate result for the utterance in flight.
 	pendingVerdict *pregateVerdict
+	// asrOwnsTurn is set while the independent Transcriber has supplied the
+	// in-flight utterance. If that stream dies mid-question the Speaker's
+	// transcript must not re-supply the same words: the energy detector
+	// now owns the boundary and the Speaker takes over from the next turn.
+	asrOwnsTurn bool
 	// utterance accumulates the interviewer's in-flight speech, so the
 	// pre-gate classifies the whole question rather than one delta.
 	utterance string
@@ -133,8 +149,16 @@ type actor struct {
 
 	// unlocked is monotonic: the Thinker assesses, the actor decides, and
 	// once depth is earned it is never taken back (plan §7).
-	unlocked   bool
-	unlockTurn int
+	unlocked       bool
+	unlockTurn     int
+	unlockEvidence string
+	unlockAt       time.Time
+	// startedAt/endedAt/endReason describe the session's life for the
+	// ingest report. endReason is one of the control plane's enum:
+	// interviewer_ended, abandoned, duration_cap, cost_cap, error.
+	startedAt time.Time
+	endedAt   time.Time
+	endReason string
 	// lastLedgerInject and lastCeilingAssert drive the two cadences above.
 	lastLedgerInject  int
 	lastCeilingAssert int
@@ -197,6 +221,7 @@ func newActor(
 		timers:         newTimerSet(clock, fires),
 		playout:        newPlayoutTracker(defaultSampleRate),
 		turns:          newTurnTable(clock.Now()),
+		harness:        newHarnessContext(defaultHarnessCapacity),
 		stopped:        make(chan struct{}),
 
 		control:      make(chan command, controlBufferSize),
@@ -366,6 +391,8 @@ func (a *actor) run(ctx context.Context, done chan<- struct{}) {
 	// not anyone is still receiving; close(done) runs last, so by the time
 	// callers unblock on it every collaborator this run reached is closed.
 	defer close(done)
+	a.startedAt = a.clock.Now()
+	defer a.markEnded()
 	defer a.drainPendingConnect()
 	defer a.closeCollaborators()
 	defer a.timers.cancelAll()
@@ -407,6 +434,7 @@ func (a *actor) run(ctx context.Context, done chan<- struct{}) {
 		case f := <-a.timerFire:
 			a.handleTimer(ctx, f)
 		case p := <-a.asrPartial:
+			a.asrOwnsTurn = true
 			a.handlePartial(ctx, p)
 		case v := <-a.pregate:
 			a.handlePregate(ctx, v)
@@ -448,6 +476,11 @@ func (a *actor) handle(ctx context.Context, cmd command) bool {
 	case cmdConnectFailed:
 		a.handleConnectFailed(ctx, cmd.Err)
 		return true
+	case cmdTranscriberFailed:
+		if a.transcriber != nil {
+			a.transcriber = nil
+			a.recordDegradation(degradedASR)
+		}
 	}
 	return false
 }
@@ -575,6 +608,9 @@ func (a *actor) handleConnected(ctx context.Context, out *connectOutcome) {
 		a.recordDegradation(degradedStall)
 	}
 	go pumpSpeakerEvents(ctx, a.speaking, a.speakerAudio, a.speakerCtrl, &a.drops)
+	if a.transcriber != nil {
+		go pumpTranscriberPartials(ctx, a.transcriber, a)
+	}
 	if a.mediaConn != nil {
 		// Started here rather than at attach: until the Speaker is up there
 		// is nothing to do with the interviewer's audio, and forwarding it
@@ -586,6 +622,7 @@ func (a *actor) handleConnected(ctx context.Context, out *connectOutcome) {
 // handleConnectFailed winds the session down, in character, on a fatal
 // connect failure — no Speaker within budget means no interview.
 func (a *actor) handleConnectFailed(ctx context.Context, err error) {
+	a.endReason = endReasonError
 	a.emit("connect_failed", map[string]any{"err": err.Error()})
 	a.windDown(ctx, "error")
 }
@@ -621,7 +658,23 @@ func (a *actor) handleTimer(ctx context.Context, f timerFire) {
 		a.emit("pregate_race_lost", nil)
 		a.beginAnswer(ctx, "pregate race lost")
 	case timerPause:
-		a.createResponse(ctx, "pause elapsed")
+		//exhaustive:ignore -- the pause is armed in exactly two states.
+		switch a.state {
+		case StateDeferred:
+			// The Thinker was not ready the instant the interviewer
+			// stopped, and the in-character pause has run out: buy time
+			// the way a candidate does, with words, never with silence.
+			a.beginStall(ctx)
+		default:
+			// A CONFIDENT turn's pause elapsed before the note arrived.
+			// The Speaker answers unaided — that is what CONFIDENT means;
+			// the direction was a bonus inside the natural pause, not a
+			// thing to wait for.
+			if a.turnGate != nil {
+				a.emit("note_late", map[string]any{"turn": a.turn, "state": a.state.String()})
+			}
+			a.createResponse(ctx, "pause elapsed")
+		}
 	case timerThinker:
 		// The stall clip bought 700 ms and the reasoning model did not
 		// answer. The contract's own directive stands in — still the
@@ -632,9 +685,21 @@ func (a *actor) handleTimer(ctx context.Context, f timerFire) {
 		// these are not vendor responses, so no ResponseDone arrives, and
 		// ResponseDone is SPEAKING's only legal exit.
 		a.playout.close(a.clock.Now())
-		a.closePersonaTurn(false, 0)
+		if a.state == StateStalling {
+			// The stall clip ran out before the note or the deadline.
+			// The persona stays quiet in character until one of them
+			// arrives — the accepted silence-after-a-stall, never a
+			// second canned phrase.
+			a.emit("stall_clip_done", nil)
+			return
+		}
+		a.closePersonaTurn(ctx, false, 0)
 		a.transition(StateListening, "clip played out")
-	case timerSilence, timerSession:
+	case timerSilence:
+		a.endReason = endReasonAbandoned
+		a.windDown(ctx, f.Kind.String()+" cap")
+	case timerSession:
+		a.endReason = endReasonDurationCap
 		a.windDown(ctx, f.Kind.String()+" cap")
 	}
 }
@@ -642,6 +707,16 @@ func (a *actor) handleTimer(ctx context.Context, f timerFire) {
 // handlePartial feeds an in-progress interviewer utterance forward and closes
 // the turn on the first final.
 func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
+	// The actor increments turn when the human's final arrives. The harness
+	// receives partials before that increment, so all human revisions belong to
+	// the next turn even when the persona is being interrupted.
+	accepted := a.harness.recordHuman(p.Text, p.Final, p.ItemID, a.clock.Now(), a.turn+1)
+	if !accepted && (!p.Final || strings.TrimSpace(p.Text) != "") {
+		a.emit("transcript_revision_discarded", map[string]any{
+			"source": "human", "item_id": p.ItemID, "turn": a.turn + 1,
+		})
+		return
+	}
 	if !p.Final {
 		// The interviewer is still speaking. Open their turn on the first
 		// partial so start_ms reflects when they began, not when they
@@ -672,6 +747,7 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 		}
 		return
 	}
+	a.asrOwnsTurn = false
 	//exhaustive:ignore -- the default below *emits*, so a state added later
 	// cannot fall through unobserved; see .golangci.yml for when this
 	// suppression is allowed.
@@ -687,14 +763,17 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 		}
 		a.turns.appendText(p.Text)
 		a.turns.close(a.clock.Now())
+		a.utterance = ""
 		if !a.transition(StateSpeaking, "greeting") {
 			return
 		}
 		a.sentences.reset()
 		a.turns.begin(a.turn, speakerPersona, a.clock.Now())
 		a.turns.appendText(a.contract.OpeningLine)
+		a.harness.recordPersonaFinal(a.contract.OpeningLine, "", a.clock.Now(), a.turn)
 		a.emit("opening_line", nil)
-		a.armClipPlayout(ctx, a.contract.OpeningLine)
+		clip, ok := a.openingClip()
+		a.armClipPlayout(ctx, clip, ok, a.contract.OpeningLine, "clip")
 	case StateListening:
 		a.turn++
 		if a.turns.open == nil {
@@ -702,6 +781,11 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 		}
 		a.turns.appendText(p.Text)
 		a.turns.close(a.clock.Now())
+		// Consumed. On the degraded path nothing else ever clears this —
+		// the reset on the first partial above needs a partial, which the
+		// Speaker's transcript never sends — so without this line every
+		// later turn's text carried every earlier question too.
+		a.utterance = ""
 		a.emit("utterance_end", map[string]any{"text": p.Text})
 		// A verdict filed while the interviewer was still speaking belongs
 		// to the utterance that just ended. Comparing turn numbers here is
@@ -729,8 +813,8 @@ func (a *actor) handlePartial(ctx context.Context, p ports.Partial) {
 // and ResponseDone is SPEAKING's only legal exit. The alarm is turn-scoped,
 // so a barge-in cancels it through the existing cancelTurnScoped and the
 // clip does not "finish" after the persona was already interrupted.
-func (a *actor) armClipPlayout(ctx context.Context, text string) {
-	a.timers.arm(timerPlayout, a.playClip(ctx, text))
+func (a *actor) armClipPlayout(ctx context.Context, clip ports.PCM16Audio, ok bool, text, itemPrefix string) {
+	a.timers.arm(timerPlayout, a.playClip(ctx, clip, ok, text, itemPrefix))
 }
 
 // playClip sends a pre-synthesized clip to the browser and reports how long it
@@ -742,8 +826,7 @@ func (a *actor) armClipPlayout(ctx context.Context, text string) {
 // the persona would open with the last half-second of its own greeting. The
 // clip is already rendered and the browser buffers it, so there is nothing to
 // pace.
-func (a *actor) playClip(ctx context.Context, text string) time.Duration {
-	clip, ok := a.openingClip()
+func (a *actor) playClip(ctx context.Context, clip ports.PCM16Audio, ok bool, text, itemPrefix string) time.Duration {
 	if !ok {
 		// No clip to play. The turn is still timed so the session moves on:
 		// a persona that opens silently is a blemish, one that hangs in
@@ -757,7 +840,7 @@ func (a *actor) playClip(ctx context.Context, text string) time.Duration {
 		return estimateSpeechDuration(text)
 	}
 
-	itemID := fmt.Sprintf("clip-%d", a.turn)
+	itemID := fmt.Sprintf("%s-%d", itemPrefix, a.turn)
 	a.playout.begin(itemID, a.clock.Now())
 	a.playout.sent(len(clip.Samples), clip.SampleRateHz)
 	if a.mediaConn != nil {
@@ -767,7 +850,7 @@ func (a *actor) playClip(ctx context.Context, text string) time.Duration {
 			Timestamp:    a.clock.Now(),
 		}
 		if err := a.mediaConn.SendAudio(ctx, frame); err != nil {
-			a.logger.Warn("send opening clip failed", "err", err)
+			a.logger.Warn("send clip failed", "item_id", itemID, "err", err)
 		}
 	}
 	a.emit("clip_played", map[string]any{"ms": d.Milliseconds(), "item_id": itemID})
@@ -871,16 +954,81 @@ func (a *actor) beginDefer(ctx context.Context) {
 		a.useFallback(ctx, "no thinker")
 		return
 	}
+	if !a.requestNote(ctx, thinkerDeadline) {
+		a.useFallback(ctx, "harness context unavailable")
+		return
+	}
 	a.timers.arm(timerThinker, thinkerDeadline)
+	// The latency rule: the stall phrase covers a miss, it is not the
+	// path. A note that is already there lands inside the persona's own
+	// pause and no clip plays; only when the pause runs out does the
+	// persona buy time with words.
+	a.timers.arm(timerPause, a.stallGrace())
+}
+
+// requestNote is Window A of the harness design: the interviewer has
+// stopped, so the Thinker gets the history it needs and is asked for its
+// direction before the Speaker answers. The history was published when the
+// previous persona turn closed (refreshThinker), so the snapshot here is
+// normally a same-version no-op that leaves the mid-question speculation
+// intact; it is repeated so a Thinker that missed Window B still reasons from
+// the right history. Reports false when the Thinker could not take context.
+func (a *actor) requestNote(ctx context.Context, deadline time.Duration) bool {
+	snapshot := a.harness.snapshot(a.turn)
+	if err := a.thinker.SetHarnessSnapshot(ctx, snapshot); err != nil {
+		a.emit("thinker_context_failed", map[string]any{"err": err.Error()})
+		return false
+	}
 	a.openTurnGate()
-	go a.awaitNote(ctx, a.thinker.RequestNote(ctx, a.clock.Now().Add(thinkerDeadline)),
-		a.turn, a.turnGate)
+	go a.awaitNote(ctx, a.thinker.RequestNote(ctx, a.clock.Now().Add(deadline)),
+		a.turn, snapshot.Version, a.turnGate)
+	return true
+}
+
+// stallGrace is how long a deferred turn waits for the note before the stall
+// clip starts: the persona's own pause-before-answer, bounded so a note that
+// is already there always lands and a slow persona never sits silent for
+// most of the Thinker deadline.
+func (a *actor) stallGrace() time.Duration {
+	grace := time.Duration(a.contract.VoiceDirectives.TargetPauseBeforeAnswerMs) * time.Millisecond
+	if grace < stallGraceFloor {
+		grace = stallGraceFloor
+	}
+	if grace > stallGraceCeiling {
+		grace = stallGraceCeiling
+	}
+	return grace
+}
+
+// beginStall enters STALLING: the persona says one of its own stall phrases,
+// pre-synthesized in its own voice, so the Thinker's late direction lands
+// under words rather than under a gap. The phrase is part of the persona's
+// turn — it was said — so it opens the turn record and lands in the harness
+// as spoken text; the answer that follows joins the same record.
+func (a *actor) beginStall(ctx context.Context) {
+	if !a.transition(StateStalling, "thinker not ready") {
+		return
+	}
+	if a.stall == nil {
+		a.emit("stall_unavailable", map[string]any{"reason": "no stall bank"})
+		return
+	}
+	clip, phrase, ok := a.stall.PickStall()
+	if !ok {
+		a.emit("stall_unavailable", map[string]any{"reason": "bank empty"})
+		return
+	}
+	a.turns.begin(a.turn, speakerPersona, a.clock.Now())
+	a.turns.appendText(phrase + " ")
+	a.harness.recordPersonaFinal(phrase, fmt.Sprintf("stall-%d", a.turn), a.clock.Now(), a.turn)
+	a.emit("stall_started", map[string]any{"phrase": phrase})
+	a.armClipPlayout(ctx, clip, true, phrase, "stall")
 }
 
 // awaitNote pumps one Thinker note into the actor. A pump, not logic: it
 // carries no decisions, which is what keeps every decision on one goroutine.
 func (a *actor) awaitNote(
-	ctx context.Context, ch <-chan ports.Note, turn int, gate <-chan struct{},
+	ctx context.Context, ch <-chan ports.Note, turn int, contextVersion uint64, gate <-chan struct{},
 ) {
 	select {
 	case note, ok := <-ch:
@@ -888,7 +1036,7 @@ func (a *actor) awaitNote(
 			return
 		}
 		select {
-		case a.notes <- thinkerNote{Note: note, Turn: turn}:
+		case a.notes <- thinkerNote{Note: note, Turn: turn, ContextVersion: contextVersion}:
 		case <-gate:
 		case <-ctx.Done():
 		}
@@ -920,11 +1068,19 @@ func (a *actor) closeTurnGate() {
 // and the answer. That is the whole reason the two models are one brain rather
 // than a relay.
 func (a *actor) handleNote(ctx context.Context, n thinkerNote) {
-	if n.Turn != a.turn || a.state != StateDeferred && a.state != StateStalling {
-		a.emit("note_discarded", map[string]any{"turn": n.Turn, "state": a.state.String()})
+	// The context guard is against the finalized history, never the interim
+	// revision counter: an interviewer adding "um, and also" while the note
+	// is in flight must not cost the persona its answer.
+	if current := a.harness.historyVersion(a.turn); n.Turn != a.turn || n.ContextVersion != current ||
+		a.state != StatePreAnswer && a.state != StateDeferred && a.state != StateStalling {
+		a.emit("note_discarded", map[string]any{
+			"turn": n.Turn, "context_version": n.ContextVersion,
+			"current_context_version": current, "state": a.state.String(),
+		})
 		return
 	}
 	a.timers.cancel(timerThinker)
+	a.timers.cancel(timerPause)
 	a.closeTurnGate()
 	a.assessUnlock(n.Note)
 	a.recordSpokenClaims(n.Note)
@@ -1000,6 +1156,8 @@ func (a *actor) assessUnlock(n ports.Note) {
 	}
 	a.unlocked = true
 	a.unlockTurn = a.turn
+	a.unlockEvidence = n.Unlock.Evidence
+	a.unlockAt = a.clock.Now()
 	a.emit("unlock_flipped", map[string]any{
 		"turn": a.turn, "evidence": n.Unlock.Evidence,
 	})
@@ -1057,13 +1215,23 @@ func (a *actor) ceilingBlock() string {
 }
 
 // beginAnswer enters PRE_ANSWER and arms the human-pause delay.
-func (a *actor) beginAnswer(_ context.Context, reason string) {
+//
+// Window A applies here too. CONFIDENT means the Speaker may answer unaided,
+// not that the Thinker has nothing to say: it has been reasoning since the
+// question's first words, and that call is already paid for. If its direction
+// lands inside the persona's own pause it steers this answer — claims, unlock,
+// the ledger — and if it does not, the pause elapses and the Speaker answers
+// alone. No stall on this path: a confident persona does not buy time.
+func (a *actor) beginAnswer(ctx context.Context, reason string) {
 	if !a.transition(StatePreAnswer, reason) {
 		return
 	}
 	pause := time.Duration(a.contract.VoiceDirectives.TargetPauseBeforeAnswerMs) * time.Millisecond
 	if pause <= 0 {
 		pause = time.Millisecond
+	}
+	if a.thinker != nil {
+		a.requestNote(ctx, pause)
 	}
 	a.timers.arm(timerPause, pause)
 }
@@ -1073,11 +1241,16 @@ func (a *actor) createResponse(ctx context.Context, reason string) {
 	if !a.transition(StateSpeaking, reason) {
 		return
 	}
+	// Whatever direction has not arrived by now is for the log, not the
+	// Speaker: nothing is injected once the persona is talking.
+	a.closeTurnGate()
 	if a.speaking == nil {
 		return
 	}
 	a.sentences.reset()
-	a.turns.begin(a.turn, speakerPersona, a.clock.Now())
+	if open := a.turns.open; open == nil || open.Speaker != speakerPersona || open.Turn != a.turn {
+		a.turns.begin(a.turn, speakerPersona, a.clock.Now())
+	}
 	a.refreshContext(ctx)
 
 	tp := a.contract.TurnPolicy
@@ -1123,17 +1296,140 @@ func (a *actor) trimResponse(ctx context.Context) {
 	a.sentences.reset()
 }
 
-// closePersonaTurn finalizes the in-flight persona turn record.
-func (a *actor) closePersonaTurn(bargedIn bool, heardMs int) {
-	if a.turns.open == nil {
+// closePersonaTurn finalizes the in-flight persona turn record and then
+// refreshes the Thinker — the harness diagram's "Window B".
+func (a *actor) closePersonaTurn(ctx context.Context, bargedIn bool, heardMs int) {
+	a.harness.finalizePersona("", a.clock.Now(), a.turn)
+	if a.turns.open != nil {
+		a.turns.open.ProbedSkill = a.probedSkill
+		a.turns.open.Deferred = a.deferred
+		a.turns.open.FallbackUsed = a.fallbackUsed
+		a.turns.open.BargedIn = bargedIn
+		a.turns.open.HeardMs = heardMs
+		a.turns.close(a.clock.Now())
+	}
+	a.refreshThinker(ctx)
+}
+
+// refreshThinker is Window B of the harness design: once the persona stops
+// speaking, the reasoning model learns what was actually said (the finalized
+// harness history) and what the persona is now committed to (the ledger), so
+// that by the time the interviewer's next question streams in through
+// FeedPartial the Thinker is already reasoning from the right state. Doing
+// this here rather than at defer time is what keeps the defer path a no-op
+// for the Thinker's context: the snapshot it receives then is the one it
+// already holds, and the speculation it started mid-question survives.
+func (a *actor) refreshThinker(ctx context.Context) {
+	if a.thinker == nil {
 		return
 	}
-	a.turns.open.ProbedSkill = a.probedSkill
-	a.turns.open.Deferred = a.deferred
-	a.turns.open.FallbackUsed = a.fallbackUsed
-	a.turns.open.BargedIn = bargedIn
-	a.turns.open.HeardMs = heardMs
-	a.turns.close(a.clock.Now())
+	var summary string
+	if a.ledger != nil {
+		summary = a.ledger.ThinkerSummary()
+	}
+	if err := a.thinker.Reset(ctx, summary); err != nil {
+		a.logger.Warn("thinker reset failed", "err", err)
+	}
+	snapshot := a.harness.snapshot(a.turn + 1)
+	if err := a.thinker.SetHarnessSnapshot(ctx, snapshot); err != nil {
+		a.logger.Warn("thinker context refresh failed", "err", err)
+		return
+	}
+	a.emit("thinker_context_refreshed", map[string]any{
+		"turn": a.turn, "context_version": snapshot.Version, "turns": len(snapshot.Turns),
+	})
+}
+
+// End reasons, as the control plane's ingest model spells them.
+const (
+	endReasonInterviewerEnded = "interviewer_ended"
+	endReasonAbandoned        = "abandoned"
+	endReasonDurationCap      = "duration_cap"
+	endReasonError            = "error"
+)
+
+// markEnded stamps the end of the session's life. A session nobody's alarm
+// or failure ended was ended by the interviewer (StopSession cancels the
+// actor's context), which is the ordinary way an interview finishes.
+func (a *actor) markEnded() {
+	a.endedAt = a.clock.Now()
+	if a.endReason == "" {
+		a.endReason = endReasonInterviewerEnded
+	}
+}
+
+// ingest assembles the session's write-back for the control plane. Read
+// after run has returned: it walks the turn table and the actor's own
+// counters, which nothing else touches once the actor has stopped.
+func (a *actor) ingest(contractFingerprint string) ports.SessionIngest {
+	records := a.turns.Records()
+	out := ports.SessionIngest{
+		SessionID:           a.id,
+		CandidateID:         a.contract.CandidateID,
+		InterviewID:         a.contract.InterviewID,
+		ContractFingerprint: contractFingerprint,
+		EngineVersion:       EngineVersion,
+		StartedAt:           a.startedAt,
+		EndedAt:             a.endedAt,
+		EndReason:           a.endReason,
+		Turns:               make([]ports.TurnIngest, 0, len(records)),
+		Degradations:        append([]string{}, a.degradations...),
+		Metrics:             map[string]float64{},
+	}
+	var human, persona, deferred, fallback, barged, trimmed float64
+	suppressed := map[string]bool{}
+	for _, r := range records {
+		out.Turns = append(out.Turns, ports.TurnIngest{
+			Turn: r.Turn, Speaker: r.Speaker, StartMs: r.StartMs, EndMs: r.EndMs, Text: r.Text,
+			ProbedSkill: r.ProbedSkill, Deferred: r.Deferred, FallbackUsed: r.FallbackUsed,
+			Trimmed: r.Trimmed, BargedIn: r.BargedIn, HeardMs: r.HeardMs,
+		})
+		switch r.Speaker {
+		case speakerHuman:
+			human++
+		case speakerPersona:
+			persona++
+			if r.Deferred {
+				deferred++
+				// Depth was held back and the interviewer had not (yet)
+				// earned the unlock: what they probed for, they did not get.
+				if r.ProbedSkill != "" && (!a.unlocked || r.Turn < a.unlockTurn) {
+					suppressed[r.ProbedSkill] = true
+				}
+			}
+			if r.FallbackUsed {
+				fallback++
+			}
+			if r.BargedIn {
+				barged++
+			}
+			if r.Trimmed {
+				trimmed++
+			}
+		}
+	}
+	for skill := range suppressed {
+		out.SuppressedAnswers = append(out.SuppressedAnswers, skill)
+	}
+	sort.Strings(out.SuppressedAnswers)
+	if a.unlocked {
+		out.UnlockFlip = &ports.UnlockFlip{Turn: a.unlockTurn, Evidence: a.unlockEvidence, At: a.unlockAt}
+	}
+	out.Metrics["turns"] = float64(len(records))
+	out.Metrics["human_turns"] = human
+	out.Metrics["persona_turns"] = persona
+	out.Metrics["deferred_turns"] = deferred
+	out.Metrics["fallback_turns"] = fallback
+	out.Metrics["barge_ins"] = barged
+	out.Metrics["trimmed_turns"] = trimmed
+	if persona > 0 {
+		out.Metrics["defer_rate"] = deferred / persona
+		out.Metrics["stall_rate"] = fallback / persona
+	}
+	out.Metrics["dropped_mic_frames"] = float64(a.drops.MicAudio.Load())
+	out.Metrics["dropped_asr_partials"] = float64(a.drops.ASRPartials.Load())
+	out.Metrics["dropped_speaker_frames"] = float64(a.drops.SpeakerAudio.Load())
+	return out
 }
 
 // release stops every alarm and voids any in-flight async work. The actor
@@ -1181,6 +1477,22 @@ func (a *actor) handleSpeechOnset(ctx context.Context, ev ports.VADEvent) {
 // Even when gated, the frame still reaches the recorder and transcriber
 // upstream of here: an ignored interruption attempt is itself feedback data.
 func (a *actor) handleMic(ctx context.Context, m micFrame) {
+	// Recording is deliberately before the speaker's barge-in gate. An
+	// interruption a persona declines is still part of the interview record,
+	// and Recorder's contract guarantees this write never blocks the media path.
+	if a.recorder != nil {
+		a.recorder.WriteHuman(m.Frame)
+	}
+
+	// The independent Transcriber receives every mic frame, including audio
+	// while the persona owns the floor. The Speaker gate below only controls
+	// whether the persona hears that audio; suppressing ASR here would lose
+	// interruption evidence and make the independent stream non-canonical.
+	if a.transcriber != nil {
+		if err := a.transcriber.SendAudio(ctx, m.Frame); err != nil {
+			a.logger.Warn("send audio to transcriber failed", "err", err)
+		}
+	}
 	if a.speaking == nil {
 		return
 	}
@@ -1213,16 +1525,50 @@ func (a *actor) handleSpeakerEvent(ctx context.Context, ev ports.SpeakerEvent) {
 			a.playout.begin(e.ItemID, a.clock.Now())
 		}
 		a.playout.sent(len(e.Frame.PCM), e.Frame.SampleRateHz)
+		if a.recorder != nil {
+			a.recorder.WritePersona(e.ItemID, e.Frame)
+		}
 		a.sendToBrowser(ctx, e)
 	case ports.InputTranscript:
 		// The Speaker's own transcription of the interviewer. Verified live:
 		// it still fires with the vendor's automatic voice detection off,
 		// which makes it the ASR fallback when the Transcriber is gone. It
 		// supplies the text; the energy detector supplies the boundary.
-		if e.Text != "" {
-			a.utterance += e.Text
+		//
+		// When the independent Transcriber is running, its Partial stream
+		// is the canonical human transcript and this event is ignored:
+		// recording it too would duplicate one utterance under a second
+		// item id and pollute the Thinker snapshot.
+		if a.transcriber != nil || a.asrOwnsTurn || e.Text == "" {
+			return
 		}
+		if a.state.speakingish() {
+			// The vendor's transcript trails the energy detector, so a
+			// fragment can land after the turn it belongs to has closed
+			// and the persona holds the floor. It goes on that turn's
+			// record, not the next question's. (A refused interruption
+			// lands here too; the event log says so either way.)
+			a.emit("late_transcript_fragment", map[string]any{"text": e.Text, "state": a.state.String()})
+			a.turns.amendLast(speakerHuman, e.Text)
+			return
+		}
+		a.utterance += e.Text
+		// This is the diagram's input transcription: the interviewer's
+		// live fragments, arriving from the Speaker. Routed through the
+		// same partial path an independent Transcriber uses, so the
+		// pre-gate classifies and the Thinker reads while the interviewer
+		// is still talking, and the harness holds the cumulative text
+		// under the turn's own key. Never final here: on this path the
+		// boundary belongs to the energy detector, whose final partial
+		// closes the same key.
+		a.handlePartial(ctx, ports.Partial{Text: a.utterance})
 	case ports.OutputTranscriptDelta:
+		if !a.harness.recordPersonaDelta(e.Text, e.ResponseID, a.clock.Now(), a.turn) {
+			a.emit("transcript_revision_discarded", map[string]any{
+				"source": "persona", "response_id": e.ResponseID, "turn": a.turn,
+			})
+			return
+		}
 		a.turns.appendText(e.Text)
 		if a.sentences.feed(e.Text, a.contract.TurnPolicy.MaxSentences) {
 			a.trimResponse(ctx)
@@ -1230,8 +1576,9 @@ func (a *actor) handleSpeakerEvent(ctx context.Context, ev ports.SpeakerEvent) {
 	case ports.SpeechStarted:
 		a.bargeIn(ctx)
 	case ports.ResponseDone:
+		a.harness.finalizePersona(e.ResponseID, a.clock.Now(), a.turn)
 		a.playout.close(a.clock.Now())
-		a.closePersonaTurn(false, 0)
+		a.closePersonaTurn(ctx, false, 0)
 		a.transition(StateListening, "response done")
 	default:
 		// An event kind this build does not handle. Emitted rather than
@@ -1305,7 +1652,10 @@ func (a *actor) bargeIn(ctx context.Context) {
 			}
 		}
 	}
-	a.closePersonaTurn(true, heardMs)
+	if a.recorder != nil && itemID != "" {
+		a.recorder.TruncatePersona(itemID, heardMs)
+	}
+	a.closePersonaTurn(ctx, true, heardMs)
 	a.emit("barge_in", map[string]any{
 		"item_id": itemID, "heard_ms": heardMs, "sent_ms": sentMs,
 	})

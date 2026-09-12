@@ -66,6 +66,14 @@ def duration_ms(path: Path) -> int:
     live stream, so the header carries no duration and `ffprobe` reports none.
     Decoding to null is slower than reading a header and is the only answer that
     works on the files this system actually stores.
+
+    The recording may now carry a **video track** — the manager's camera rides in
+    the same container as the stereo audio (`video/webm;codecs=vp8,opus`). The
+    fallback passes `-vn` so ffmpeg neither decodes those frames (free on a
+    solid-colour canvas, real CPU on 45 minutes of camera footage) nor lets them
+    decide the answer: the length reported is the *audio* length by
+    construction, and the windows this drives cannot run past the end of what
+    the model is given to listen to.
     """
     _require_ffmpeg()
     probe = subprocess.run(
@@ -82,7 +90,7 @@ def duration_ms(path: Path) -> int:
         pass
 
     decoded = subprocess.run(
-        ["ffmpeg", "-v", "info", "-nostdin", "-i", str(path), "-f", "null", "-"],
+        ["ffmpeg", "-v", "info", "-nostdin", "-i", str(path), "-vn", "-f", "null", "-"],
         capture_output=True,
         text=True,
         check=False,

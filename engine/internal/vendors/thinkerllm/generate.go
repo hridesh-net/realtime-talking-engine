@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"skillbrew/engine/internal/ports"
@@ -42,12 +43,14 @@ var noteSchema = map[string]any{
 			"description": "2-3 sentences of guidance for the candidate's next answer.",
 		},
 		"claims_to_make": map[string]any{
-			"type":  "array",
-			"items": map[string]any{"type": "string"},
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": "Factual claims the candidate should commit to in the coming answer, each one already established by the persona brief.",
 		},
 		"claims_made": map[string]any{
-			"type":  "array",
-			"items": map[string]any{"type": "string"},
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": "Factual claims the candidate actually made in its most recent answer in the live context, quoted from what was said. Empty when there is no previous answer.",
 		},
 		"unlock_met":      map[string]any{"type": "boolean"},
 		"unlock_evidence": map[string]any{"type": "string"},
@@ -68,12 +71,12 @@ type rawNote struct {
 
 // generate runs one reasoning call and normalizes the result.
 func (t *Thinker) generate(
-	ctx context.Context, persona ports.PersonaCtx, question string,
+	ctx context.Context, persona ports.PersonaCtx, harness ports.HarnessSnapshot, question string,
 ) (ports.Note, error) {
 	payload, err := t.client().Do(ctx, geminijson.Request{
 		ModelID: t.modelID,
 		System:  systemPreamble,
-		Prompt:  buildPrompt(persona, question),
+		Prompt:  buildPrompt(persona, harness, question),
 		Schema:  noteSchema,
 		// Low, deliberately. This layer retrieves committed material;
 		// creativity here is indistinguishable from invention, and an
@@ -137,7 +140,7 @@ func clamp01(f float64) float64 {
 }
 
 // buildPrompt assembles the turn's reasoning input.
-func buildPrompt(persona ports.PersonaCtx, question string) string {
+func buildPrompt(persona ports.PersonaCtx, harness ports.HarnessSnapshot, question string) string {
 	var b strings.Builder
 	b.WriteString("=== WHO YOU ARE (the persona brief) ===\n")
 	b.WriteString(persona.SystemPrompt)
@@ -146,6 +149,27 @@ func buildPrompt(persona ports.PersonaCtx, question string) string {
 		b.WriteString("(nothing yet — this is early in the interview)\n")
 	} else {
 		b.WriteString(persona.LedgerSummary)
+	}
+	b.WriteString("\n=== LIVE HARNESS CONTEXT (finalized turns; the candidate lines are what was actually spoken) ===\n")
+	b.WriteString("context_version: ")
+	b.WriteString(strconv.FormatUint(harness.Version, 10))
+	b.WriteString("\ncurrent_turn: ")
+	b.WriteString(strconv.Itoa(harness.CurrentTurn))
+	b.WriteString("\n")
+	if len(harness.Turns) == 0 {
+		b.WriteString("(no finalized turns yet)\n")
+	} else {
+		for _, turn := range harness.Turns {
+			b.WriteString("turn ")
+			b.WriteString(strconv.Itoa(turn.Turn))
+			b.WriteString(" interviewer: ")
+			b.WriteString(turn.Human)
+			b.WriteString("\nturn ")
+			b.WriteString(strconv.Itoa(turn.Turn))
+			b.WriteString(" candidate: ")
+			b.WriteString(turn.Persona)
+			b.WriteString("\n")
+		}
 	}
 	b.WriteString("\n=== WHAT THE INTERVIEWER IS ASKING (may be mid-sentence) ===\n")
 	b.WriteString(question)

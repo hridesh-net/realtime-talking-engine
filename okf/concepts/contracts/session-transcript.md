@@ -6,8 +6,10 @@ resource: /control_plane/schemas.py
 tags: [contract, session, transcript, turn, evaluation]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  at: "2026-09-12T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
@@ -33,7 +35,7 @@ class Turn(BaseModel):
 class SessionCreateRequest(BaseModel):     # POST /api/v1/sessions
     interview_id: str
     archetype: str
-    planned_minutes: int = 20              # ge=5, le=45
+    planned_minutes: int = 20              # ge=5, le=MAX_INTERVIEW_MINUTES (180)
     modality: str = "text"                 # ^(text|voice)$
 
 class TranscriptAppendRequest(BaseModel):  # POST /sessions/{id}/transcript
@@ -82,6 +84,24 @@ every stored transcript never need a rename.
 For the same reason `interview_id` is expected to become `role_id` when the job
 card replaces the job spec (pivot plan Phase 2). Everything else on this page —
 turns, timestamps, modality, status — is already the final shape.
+
+## `planned_minutes` shares its ceiling with `duration_minutes`
+
+Both bounds come from one constant, `schemas.MAX_INTERVIEW_MINUTES = 180`:
+`InterviewConfigInput.duration_minutes` is `gt=0, le=MAX_INTERVIEW_MINUTES` and
+`SessionCreateRequest.planned_minutes` is `ge=5, le=MAX_INTERVIEW_MINUTES`. They
+are tied together because the portal launcher opens a session with the
+interview's own `duration_minutes`, so the session clock matches the configured
+length — any bound below the interview's rejects a valid interview.
+
+**The trap this closed:** `planned_minutes` was capped at 45 (a leftover from
+pivot plan drafting, not an engine limit — the
+[engine](/concepts/subsystems/engine.md) runs a 45–60 minute interview and
+handles resumption). The default interview is 60 minutes, so every launcher
+start failed with `body.planned_minutes: Input should be less than or equal to
+45`. The old console hardcoded 20, which is why nothing saw it until the portal
+launcher shipped. Move the ceiling only by moving the constant; the regression
+is pinned in `tests/test_portal_compat.py`.
 
 ## Why the clock is server-side
 

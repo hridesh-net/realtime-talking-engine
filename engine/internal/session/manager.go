@@ -2,9 +2,12 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sync"
 	"time"
 
@@ -77,7 +80,13 @@ type Manager struct {
 
 	mu       sync.RWMutex
 	sessions map[string]*entry
+	// ingests counts in-flight ingest reports so Drain can wait for them.
+	ingests sync.WaitGroup
 }
+
+// EngineVersion rides in every ingest report so a graded session names the
+// engine build that produced it. cmd/engined sets it from the build.
+var EngineVersion = "dev"
 
 // NewManager constructs a Manager. clock is the actor's only source of time
 // (plan §4); contracts fetches and validates the engine contract a new
@@ -116,8 +125,18 @@ func NewManager(
 // bad persona is a client problem, not an engine failure, and the HTTP
 // layer maps it to 400 accordingly.
 func (m *Manager) CreateSession(ctx context.Context, candidateID string) (Session, error) {
+	return m.CreateSessionWithID(ctx, candidateID, "")
+}
+
+// CreateSessionWithID is CreateSession under a caller-chosen session id,
+// so the engine's ingest report lands on the control-plane session the
+// portal already opened. An empty id means the engine mints one.
+func (m *Manager) CreateSessionWithID(ctx context.Context, candidateID, sessionID string) (Session, error) {
 	if candidateID == "" {
 		return Session{}, ErrEmptyCandidateID
+	}
+	if sessionID != "" && !validSessionID(sessionID) {
+		return Session{}, ErrInvalidSessionID
 	}
 
 	raw, err := m.contracts.FetchContract(ctx, candidateID)
@@ -138,10 +157,14 @@ func (m *Manager) CreateSession(ctx context.Context, candidateID string) (Sessio
 		return Session{}, fmt.Errorf("session: parse contract for %q: %w: %w", candidateID, ErrContractRejected, err)
 	}
 
-	id, err := newSessionID()
-	if err != nil {
-		return Session{}, err
+	id := sessionID
+	if id == "" {
+		id, err = newSessionID()
+		if err != nil {
+			return Session{}, err
+		}
 	}
+	fingerprint := contractFingerprint(raw)
 
 	// The factory is cheap and non-network (see DepsFactory's doc
 	// comment), so bounding it by the caller's ctx here — rather than the
@@ -166,13 +189,64 @@ func (m *Manager) CreateSession(ctx context.Context, candidateID string) (Sessio
 	done := make(chan struct{})
 	go a.run(actorCtx, done)
 
+	e := &entry{info: info, actor: a, cancel: cancel, done: done}
 	m.mu.Lock()
-	m.sessions[id] = &entry{info: info, actor: a, cancel: cancel, done: done}
+	m.sessions[id] = e
 	m.mu.Unlock()
+	m.ingests.Add(1)
+	// The report outlives the request that created the session — it is
+	// sent when the session ends, minutes later — so it keeps the request's
+	// values but not its cancellation.
+	go m.reportIngest(context.WithoutCancel(ctx), e, fingerprint)
 
 	m.logger.Info("session created", "session_id", id, "candidate_id", candidateID)
 	return info, nil
 }
+
+// reportIngest is the engine's single write-back: once the actor has
+// stopped, for any reason, its outcome goes to the control plane. Off the
+// actor's goroutine — the actor is done — and off the caller's, because
+// StopSession must return when the session is down, not when the control
+// plane has answered. Delivery, retry and spooling are the client's job.
+func (m *Manager) reportIngest(ctx context.Context, e *entry, fingerprint string) {
+	defer m.ingests.Done()
+	<-e.done
+	ingest := e.actor.ingest(fingerprint)
+	if err := m.contracts.NotifyIngest(ctx, ingest); err != nil {
+		m.logger.Error("session: ingest report failed", "session_id", ingest.SessionID, "err", err)
+		return
+	}
+	m.logger.Info("session: ingest reported", "session_id", ingest.SessionID,
+		"turns", len(ingest.Turns), "end_reason", ingest.EndReason)
+}
+
+// Drain waits for every in-flight ingest report, or for ctx. Shutdown calls
+// it after stopping the sessions, so a report in progress is delivered
+// rather than killed with the process.
+func (m *Manager) Drain(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		m.ingests.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// contractFingerprint identifies the exact contract bytes a session ran on,
+// so a report can be matched to the persona compile that produced it.
+func contractFingerprint(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,120}$`)
+
+func validSessionID(id string) bool { return sessionIDPattern.MatchString(id) }
 
 // Lookup returns the live session for id, and whether it was found.
 func (m *Manager) Lookup(id string) (Session, bool) {

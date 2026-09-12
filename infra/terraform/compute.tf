@@ -36,25 +36,26 @@ locals {
     data_mount_path     = local.data_mount_path
     env_file            = "${local.env_dir}/engined.env"
     engine_port         = var.engine_port
-    dev_sample_contract = var.engine_dev_sample_contract
   })
 
   bootstrap_script = templatefile("${path.module}/templates/bootstrap.sh.tftpl", {
-    app_dir            = local.app_dir
-    data_mount_path    = local.data_mount_path
-    env_dir            = local.env_dir
-    service_user       = local.service_user
-    aws_region         = var.aws_region
-    s3_bucket          = aws_s3_bucket.main.bucket
-    artifact_key       = local.artifact_key
-    ssm_param_prefix   = local.ssm_param_prefix
-    control_plane_port = var.control_plane_port
-    speaker_model_id   = var.speaker_model_id
-    thinker_model_id   = var.thinker_model_id
-    judge_model_id     = var.judge_model_id
-    tts_model_id       = var.tts_model_id
-    asr_model_id       = var.asr_model_id
-    speaker_vendor     = var.speaker_vendor
+    app_dir                 = local.app_dir
+    data_mount_path         = local.data_mount_path
+    env_dir                 = local.env_dir
+    service_user            = local.service_user
+    aws_region              = var.aws_region
+    s3_bucket               = aws_s3_bucket.main.bucket
+    artifact_key            = local.artifact_key
+    ssm_param_prefix        = local.ssm_param_prefix
+    control_plane_port      = var.control_plane_port
+    speaker_model_id        = var.speaker_model_id
+    thinker_model_id        = var.thinker_model_id
+    judge_model_id          = var.judge_model_id
+    tts_model_id            = var.tts_model_id
+    asr_model_id            = var.asr_model_id
+    speaker_vendor          = var.speaker_vendor
+    control_plane_llm_model = var.control_plane_llm_model
+    portal_origin           = var.portal_origin
   })
 
   cloud_init = templatefile("${path.module}/templates/cloud-init.yaml.tftpl", {

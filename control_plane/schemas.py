@@ -9,11 +9,19 @@ from pydantic import BaseModel, Field, field_validator
 
 from evaluation_agent.schema import ROLE_FACT_KEYS, RoleFact
 
+#: Longest interview, and therefore longest session, this service will accept.
+#: `SessionCreateRequest.planned_minutes` shares it because the portal launcher
+#: opens a session with the interview's own `duration_minutes` so the session
+#: clock matches the configured length — a lower cap here rejects a valid
+#: interview. It is a sanity bound, not an engine limit: the engine runs a
+#: 45-60 minute interview and handles resumption (see okf engine.md).
+MAX_INTERVIEW_MINUTES = 180
+
 
 class InterviewConfigInput(BaseModel):
     """Runtime configuration overrides."""
 
-    duration_minutes: int = Field(60, gt=0, le=180)
+    duration_minutes: int = Field(60, gt=0, le=MAX_INTERVIEW_MINUTES)
     question_mode: str = Field("AI", pattern="^(AI|HYBRID|MANUAL)$")
     interview_mode: str = Field("STANDARD", pattern="^(STANDARD|DEEP)$")
 
@@ -284,7 +292,7 @@ class SessionCreateRequest(BaseModel):
 
     interview_id: str
     archetype: str = Field(..., description="Archetype key from GET /api/v1/candidate-archetypes.")
-    planned_minutes: int = Field(20, ge=5, le=45)
+    planned_minutes: int = Field(20, ge=5, le=MAX_INTERVIEW_MINUTES)
     modality: str = Field(
         "text",
         pattern="^(text|voice)$",
@@ -394,6 +402,93 @@ class SessionSummary(BaseModel):
     has_recording: bool = False
     has_report: bool = False
     analysis_status: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Engine ingest — the Go engine's single write-back at the end of a voice
+# session (docs/ENGINE_IMPLEMENTATION_PLAN.md §8.2). Idempotent on session_id.
+# ---------------------------------------------------------------------------
+
+
+class IngestTurn(BaseModel):
+    """One turn as the engine observed it. Speakers are the engine's own names."""
+
+    turn: int = Field(..., ge=0)
+    speaker: str = Field(..., pattern="^(human|persona)$")
+    start_ms: int = Field(..., ge=0)
+    end_ms: int = Field(..., ge=0)
+    text: str = ""
+    probed_skill: str = ""
+    deferred: bool = False
+    fallback_used: bool = Field(
+        False, description="The Thinker missed its deadline; depth on this turn is discounted."
+    )
+    trimmed: bool = False
+    barged_in: bool = False
+    heard_ms: int = Field(0, ge=0)
+
+
+class IngestCeilingFlag(BaseModel):
+    """A post-hoc Judge finding against a skill's knowledge ceiling."""
+
+    turn: int = Field(..., ge=0)
+    skill: str
+    severity: str
+    rationale: str = ""
+    walkback_hint: str = ""
+
+
+class IngestUnlockFlip(BaseModel):
+    """The single instant the persona's unlock_condition was judged met."""
+
+    turn: int = Field(..., ge=0)
+    evidence: str = ""
+    at: datetime
+
+
+class IngestObjectKeys(BaseModel):
+    """Where the rest of the bundle landed in object storage. Empty until the engine uploads."""
+
+    recording: str = ""
+    transcript: str = ""
+    event_log: str = ""
+
+
+class SessionIngest(BaseModel):
+    """POST /api/v1/sessions/{id}/ingest body — the engine's write-back for one session."""
+
+    session_id: str = Field(..., min_length=1, max_length=120, pattern="^[A-Za-z0-9_-]+$")
+    candidate_id: str = Field(..., min_length=1)
+    interview_id: str = Field(..., min_length=1)
+    contract_fingerprint: str = Field(
+        "", description="SHA-256 of the contract bytes the session ran on."
+    )
+    engine_version: str = ""
+    started_at: datetime
+    ended_at: datetime
+    end_reason: str = Field(
+        ..., pattern="^(interviewer_ended|abandoned|duration_cap|cost_cap|error)$"
+    )
+    s3: IngestObjectKeys = Field(default_factory=IngestObjectKeys)
+    turns: list[IngestTurn] = Field(default_factory=list)
+    ceiling_flags: list[IngestCeilingFlag] = Field(default_factory=list)
+    unlock_flip: IngestUnlockFlip | None = None
+    suppressed_answers: list[str] = Field(default_factory=list)
+    metrics: dict[str, float] = Field(default_factory=dict)
+    degradations: list[str] = Field(default_factory=list)
+
+
+class IngestReceipt(BaseModel):
+    """What the engine gets back: the session's final state on this side."""
+
+    session_id: str
+    status: str = Field(..., pattern="^(completed|abandoned)$")
+    turns_stored: int = Field(..., ge=0)
+    duplicate: bool = Field(
+        ...,
+        description="True when this session had already been ingested; the record was replaced.",
+    )
+    received_at: datetime
 
 
 class TranscriptAppendRequest(BaseModel):

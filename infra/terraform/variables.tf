@@ -51,22 +51,6 @@ variable "data_volume_gb" {
   default     = 20
 }
 
-variable "engine_dev_sample_contract" {
-  description = <<-EOT
-    Passes -dev-sample-contract to engined. The Go engine has no
-    control-plane ContractSource yet (implementation-plan task 46) and
-    refuses to boot without this flag; with it, every session is served the
-    one checked-in sample persona rather than a real one derived from the
-    job spec. This is a known, accepted interim state, not a bug — the flag
-    is surfaced here as an explicit, visible switch instead of a buried
-    hack. Flip to false only once the control-plane ContractSource ships,
-    at which point engined will refuse to start until this is false and a
-    real contract source is wired up.
-  EOT
-  type        = bool
-  default     = true
-}
-
 variable "control_plane_port" {
   description = "Port control_plane/main.py binds uvicorn to (CONTROL_PLANE_PORT)."
   type        = number
@@ -199,4 +183,28 @@ variable "speaker_vendor" {
   description = "Which vendor backs the Speaker adapter: gemini or openai."
   type        = string
   default     = "gemini"
+}
+
+variable "control_plane_llm_model" {
+  description = <<-EOT
+    LLM_MODEL for the control plane's own agents (expectation, candidate,
+    role-facts, report judge). The code default is gemini-3.7-flash, which
+    rate-limits under load and surfaces as a 502; pinning a steadier model
+    here is the config-only fix. Model IDs are config, never hardcoded
+    (CLAUDE.md) — change this without a redeploy. See okf/references/model-providers.md.
+  EOT
+  type        = string
+  default     = "gemini-3.5-flash"
+}
+
+variable "portal_origin" {
+  description = <<-EOT
+    Browser origin allowed to call the control plane cross-origin
+    (CORS_ALLOWED_ORIGINS). The SkillBrew Organization portal makes its JSON
+    calls direct from the browser, so its origin must be listed or every call
+    is blocked. Empty means no CORS middleware at all (the in-repo ui/ is
+    same-origin and needs none). Comma-separated for more than one.
+  EOT
+  type        = string
+  default     = ""
 }

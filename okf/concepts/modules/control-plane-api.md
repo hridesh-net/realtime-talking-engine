@@ -5,8 +5,8 @@ description: The /api/v1 router — routes, dependency injection, and the enroll
 resource: /control_plane/api.py
 tags: [api, fastapi, routes, di]
 generated:
-  by: claude-opus-5/okf-curator
-  at: "2026-09-10T12:00:00Z"
+  by: claude-opus-5
+  at: "2026-09-12T00:00:00Z"
 verified:
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
@@ -22,7 +22,7 @@ sources:
 ---
 # control_plane/api.py
 
-700 lines. Endpoint reference lives in [REST API](/concepts/contracts/rest-api.md);
+1012 lines. Endpoint reference lives in [REST API](/concepts/contracts/rest-api.md);
 this card is about the code.
 
 # Schema
@@ -201,10 +201,32 @@ rejects every part a hand-read form produces. (This is also why
 
 `finalize_recording` and `get_recording` take the narrower `RecordingStore` —
 neither needs the session, only the recording, which either exists or does
-not. `get_recording` returns a raw `Response` (not a Pydantic model) so it can
-set `media_type` from the stored `mime_type` rather than being forced to JSON.
+not. `get_recording` returns a **`FileResponse`** (not a Pydantic model) so it
+can set `media_type` from the stored `mime_type` rather than being forced to
+JSON, stream the file instead of loading it, and answer a `Range` request with a
+206. `content_disposition_type="inline"` is passed explicitly: Starlette's
+default is `attachment`, and this endpoint has always served inline.
+
+`start_analysis` hands the agent the recording's own path, from
+`repo.open_recording`. It used to copy the bytes to a scratch file under
+`tempfile.gettempdir()` that nothing deleted; that copy is gone (2026-09-12).
 See [Session recording](/concepts/contracts/session-recording.md) for the full
-chunk protocol.
+chunk protocol and the retention decision that makes handing out the live path
+safe.
+
+## `ingest_session` — the engine's write-back, and `require_engine_secret`
+
+`require_engine_secret` is a dependency on the two engine-facing routes. It
+reads `CONTROL_PLANE_SHARED_SECRET` at request time (so a test can set it per
+case), answers **503** when unset — refusing beats admitting on a deploy that
+forgot the secret — and compares the bearer token with `secrets.compare_digest`.
+
+`ingest_session` validates before it writes: path and body `session_id` must
+agree (422), the interview and persona must exist (404), and the persona must
+belong to that interview (409). Then one repository call does everything
+(see [storage ports](/concepts/contracts/storage-ports.md)); `IngestConflictError`
+from it is a 409. The status is chosen from the receipt: 201 first time, 200 on
+a repeat. Full contract: [Session ingest](/concepts/contracts/session-ingest.md).
 
 ## Gotchas
 

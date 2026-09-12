@@ -31,6 +31,21 @@ concept and append to [log.md](/log.md) — see
 * [Runbooks](/concepts/runbooks/index.md) - setup, checks, using the API, **running an interview**, maintaining this bundle.
 * [References](/references/index.md) - the BRD, providers, the sibling repo, the OKF spec.
 
+## Shared agent workspace
+
+* [Current State](/current-state.md) - concise handoff of active implementation and runtime state.
+* [Decisions](/decisions.md) - decisions that constrain current cross-agent work.
+* [Work Log](/work-log.md) - short append-only handoffs for work in progress.
+* [Backlog](/backlog.md) - verified follow-ups and open validation work.
+
+Before changing code, read Current State and the affected concept page. After a
+change, update the affected concept, append the detailed change to
+[log.md](/log.md), and leave a short handoff in Work Log. Record only facts
+verified from repository state or an explicitly identified runtime; label plans
+and external runtime observations as such. Never copy credentials, tokens,
+private prompts, recordings, transcripts, personal data, or raw `.env` values
+into this bundle.
+
 ## Freshness
 
 Curated 2026-08-21 against commit `802c8426` by reading every documented source

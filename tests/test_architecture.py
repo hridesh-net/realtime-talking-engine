@@ -226,6 +226,7 @@ NARROW_PORTS = [
     ports.RecordingStore,
     ports.AnalysisStore,
     ports.ReportStore,
+    ports.IngestStore,
 ]
 
 COMPOSITION_PORTS = [
@@ -236,6 +237,7 @@ COMPOSITION_PORTS = [
     ports.RecordingWorkflowStore,
     ports.AnalysisWorkflowStore,
     ports.ReportWorkflowStore,
+    ports.IngestWorkflowStore,
 ]
 
 

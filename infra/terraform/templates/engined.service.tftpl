@@ -13,11 +13,11 @@ User=${service_user}
 Group=${service_user}
 EnvironmentFile=${env_file}
 WorkingDirectory=${app_dir}
-# -dev-sample-contract is var.engine_dev_sample_contract (default true) —
-# see its description in variables.tf: the control-plane ContractSource
-# doesn't exist yet, engined refuses to boot without this flag, and every
-# session gets the one checked-in sample persona until that lands.
-ExecStart=${app_dir}/engined -addr=:${engine_port}%{ if dev_sample_contract } -dev-sample-contract%{ endif }
+# engined fetches every session's persona from the control plane over
+# CONTROL_PLANE_BASE_URL with CONTROL_PLANE_SHARED_SECRET (both in the env
+# file) and reports the finished session back the same way. Undeliverable
+# reports spool under SPOOL_DIR/ingest and drain on the next start.
+ExecStart=${app_dir}/engined -addr=:${engine_port}
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

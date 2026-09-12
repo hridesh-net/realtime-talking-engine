@@ -6,23 +6,26 @@ import builtins
 import json
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from candidate_agent.schema import VirtualCandidate
 from control_plane.database import recordings_dir_from_env
 from control_plane.persona import generate_persona
+from control_plane.ports import IngestConflictError
 from control_plane.schemas import (
     REPORT_SECTIONS,
     AnalysisMeta,
     CandidatePersona,
+    IngestReceipt,
     InterviewConfigInput,
     InterviewCreateRequest,
     InterviewResponse,
     RecordingMeta,
     ReportMeta,
     RoleFact,
+    SessionIngest,
     SessionResponse,
     SessionSummary,
     Turn,
@@ -490,6 +493,129 @@ class InterviewRepository:
         return self.get_session(session_id)
 
     # ------------------------------------------------------------------
+    # Engine ingest
+    # ------------------------------------------------------------------
+
+    def store_ingest(
+        self,
+        ingest: SessionIngest,
+        *,
+        archetype: str,
+        opening_line: str,
+        planned_minutes: int,
+    ) -> IngestReceipt:
+        """Create or close the session, replace its turns, keep the raw payload.
+
+        One transaction, so a retry that lands mid-way cannot leave a session
+        closed with half a transcript. The session row is created when the
+        engine minted its own id and reused when the portal opened it first
+        (the recording already lives there); either way the transcript is the
+        engine's turn table verbatim, mapped onto this side's speaker names,
+        and empty turns — a barge-in that produced no words — are skipped so
+        the report does not read blank lines as silence.
+        """
+        now = _utcnow()
+        status = (
+            "completed"
+            if ingest.end_reason in ("interviewer_ended", "duration_cap", "cost_cap")
+            else "abandoned"
+        )
+        started = ingest.started_at.astimezone(UTC).isoformat()
+        ended = ingest.ended_at.astimezone(UTC).isoformat()
+        with self.conn:
+            row = self.conn.execute(
+                "SELECT interview_id, candidate_id FROM sessions WHERE id = ?",
+                (ingest.session_id,),
+            ).fetchone()
+            if row is None:
+                self.conn.execute(
+                    """
+                    INSERT INTO sessions (
+                        id, interview_id, candidate_id, archetype, status, modality,
+                        planned_minutes, opening_line, started_at, ended_at, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 'voice', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        ingest.session_id,
+                        ingest.interview_id,
+                        ingest.candidate_id,
+                        archetype,
+                        status,
+                        planned_minutes,
+                        opening_line,
+                        started,
+                        ended,
+                        now,
+                    ),
+                )
+            elif (
+                row["interview_id"] != ingest.interview_id
+                or row["candidate_id"] != ingest.candidate_id
+            ):
+                raise IngestConflictError(
+                    f"session {ingest.session_id} belongs to interview {row['interview_id']} "
+                    f"and persona {row['candidate_id']}, not to the ingest's"
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE sessions SET status = ?, modality = 'voice', ended_at = ? WHERE id = ?",
+                    (status, ended, ingest.session_id),
+                )
+
+            existing = self.conn.execute(
+                "SELECT first_received_at FROM session_ingests WHERE session_id = ?",
+                (ingest.session_id,),
+            ).fetchone()
+            self.conn.execute(
+                "DELETE FROM session_turns WHERE session_id = ?", (ingest.session_id,)
+            )
+            idx = 0
+            for turn in ingest.turns:
+                text = turn.text.strip()
+                if not text:
+                    continue
+                speaker = "manager" if turn.speaker == "human" else "candidate"
+                at = (ingest.started_at + timedelta(milliseconds=turn.start_ms)).astimezone(UTC)
+                self.conn.execute(
+                    """
+                    INSERT INTO session_turns (session_id, idx, speaker, text, at, elapsed_ms)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (ingest.session_id, idx, speaker, text, at.isoformat(), turn.start_ms),
+                )
+                idx += 1
+            self.conn.execute(
+                """
+                INSERT INTO session_ingests (
+                    session_id, payload, engine_version, contract_fingerprint, end_reason,
+                    first_received_at, received_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    engine_version = excluded.engine_version,
+                    contract_fingerprint = excluded.contract_fingerprint,
+                    end_reason = excluded.end_reason,
+                    received_at = excluded.received_at
+                """,
+                (
+                    ingest.session_id,
+                    ingest.model_dump_json(),
+                    ingest.engine_version,
+                    ingest.contract_fingerprint,
+                    ingest.end_reason,
+                    existing["first_received_at"] if existing else now,
+                    now,
+                ),
+            )
+        return IngestReceipt(
+            session_id=ingest.session_id,
+            status=status,
+            turns_stored=idx,
+            duplicate=existing is not None,
+            received_at=_parse_ts(now),
+        )
+
+    # ------------------------------------------------------------------
     # Session recordings
     #
     # Session existence and modality ('voice' vs 'text') are the handler's
@@ -766,12 +892,18 @@ class InterviewRepository:
             updated_at=_parse_ts(row["updated_at"]),
         )
 
-    def read_recording(self, session_id: str) -> tuple[RecordingMeta, bytes] | None:
-        """Return the recording's metadata and its bytes, or None."""
+    def open_recording(self, session_id: str) -> tuple[RecordingMeta, Path] | None:
+        """Return the recording's metadata and the spool file holding it, or None.
+
+        One `SELECT` and a path join — the bytes are never read here. A session
+        recording now carries the manager's camera alongside the stereo audio,
+        about 190 MB an hour, and this process has no business holding that in
+        memory so that Starlette can write it out again or ffmpeg can read it
+        back off disk.
+        """
         row = self.conn.execute(
             "SELECT * FROM session_recordings WHERE session_id = ?", (session_id,)
         ).fetchone()
         if not row:
             return None
-        data = (self._recordings_dir / row["storage_key"]).read_bytes()
-        return self._row_to_recording_meta(row), data
+        return self._row_to_recording_meta(row), self._recordings_dir / row["storage_key"]

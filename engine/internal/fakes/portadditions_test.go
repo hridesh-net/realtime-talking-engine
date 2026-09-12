@@ -207,14 +207,14 @@ func TestFakeStallBank_CyclesAndWarms(t *testing.T) {
 		t.Fatalf("WarmCalls() = %d, want 1", got)
 	}
 
-	if clip, idx, ok := bank.PickStall(); !ok || idx != 0 || string(clip.Samples) != "a" {
-		t.Fatalf("first PickStall = %v, %d, %v, want a, 0, true", clip, idx, ok)
+	if clip, phrase, ok := bank.PickStall(); !ok || phrase != "stall clip 0" || string(clip.Samples) != "a" {
+		t.Fatalf("first PickStall = %v, %q, %v, want a, stall clip 0, true", clip, phrase, ok)
 	}
-	if clip, idx, ok := bank.PickStall(); !ok || idx != 1 || string(clip.Samples) != "b" {
-		t.Fatalf("second PickStall = %v, %d, %v, want b, 1, true", clip, idx, ok)
+	if clip, phrase, ok := bank.PickStall(); !ok || phrase != "stall clip 1" || string(clip.Samples) != "b" {
+		t.Fatalf("second PickStall = %v, %q, %v, want b, stall clip 1, true", clip, phrase, ok)
 	}
-	if clip, idx, ok := bank.PickStall(); !ok || idx != 0 || string(clip.Samples) != "a" {
-		t.Fatalf("third PickStall did not wrap around: %v, %d, %v", clip, idx, ok)
+	if clip, phrase, ok := bank.PickStall(); !ok || phrase != "stall clip 0" || string(clip.Samples) != "a" {
+		t.Fatalf("third PickStall did not wrap around: %v, %q, %v", clip, phrase, ok)
 	}
 	if got := bank.PickCalls(); got != 3 {
 		t.Fatalf("PickCalls() = %d, want 3", got)
