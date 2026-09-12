@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-21T19:17:54Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-21T19:17:54Z"
 status: stable
@@ -39,8 +41,8 @@ class InterviewCreateRequest(BaseModel):
     manager_level: str = ""             # e.g. "Frontline manager"
     language: str = "english_indian"    # english_indian | hinglish | hindi
     proctoring: str = "off"             # off | identity | full — recorded, never enforced
-    candidate_notes: str = ""           # max_length=2000, layered on the archetype
-    clarity_facts: list[ClarityFact] = []          # the role-fact checklist
+    persona_notes: str = ""             # max_length=2000, layered on the archetype
+    role_facts: list[RoleFact] = []     # the role-fact checklist
     report_sections: dict[str, bool] = REPORT_SECTIONS   # 12 keys, 10 on by default
     config: InterviewConfigInput = ...
     scheduled_at: datetime | None = None
@@ -54,7 +56,9 @@ class InterviewResponse(InterviewCreateRequest-ish):
     start_url: str                      # f"/api/v1/interviews/{id}/start"
 ```
 
-`ClarityFact` lives in [`evaluation_agent.schema`](/concepts/subsystems/evaluation-agent.md),
+`RoleFact` (renamed out of the `clarity` family on 2026-09-10 — see
+[log.md](/log.md)) lives in
+[`evaluation_agent.schema`](/concepts/subsystems/evaluation-agent.md),
 not here — the agent that produces it owns the model, and `control_plane` may
 import downward. `REPORT_SECTIONS` is in `control_plane.schemas` because it
 describes what the *console* shows, not what the evaluator computes.
@@ -67,9 +71,11 @@ and `sample_phrases` are written in it), the compiled `system_prompt`'s
 `hinglish` interview produces *"Main bahut excited hoon is opportunity ke liye."*
 See [engine contract](/concepts/contracts/engine-contract.md).
 
-**`candidate_notes`** is free text an operator types, which makes it the one
-place in casting where someone could try to talk a persona out of its own
-ceiling. The casting prompt subordinates it explicitly — *"It adds detail; it
+**`persona_notes`** — renamed on 2026-09-10, because the field is not notes
+*about* a job applicant: it is colour layered on the persona's archetype, and it
+feeds the persona's casting prompt — is free text an operator types, which makes
+it the one place in casting where someone could try to talk a persona out of its
+own ceiling. The casting prompt subordinates it explicitly — *"It adds detail; it
 does not replace anything"* — and the knowledge clamp in
 `VirtualCandidateAgent._build_knowledge_map` enforces the band regardless of
 what the note said. `test_operator_notes_cannot_override_the_archetype` covers

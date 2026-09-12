@@ -56,8 +56,8 @@ def persona_block(session: SessionResponse, candidate: VirtualCandidate | None) 
     When neither is available the block is empty rather than guessed, and the
     engine reports the persona-grounded signals as unmeasurable.
     """
-    if session.persona_key in archetypes.ARCHETYPES:
-        archetype = archetypes.get(session.persona_key)
+    if session.archetype in archetypes.ARCHETYPES:
+        archetype = archetypes.get(session.archetype)
         return {
             "archetype_key": archetype.key,
             "label": archetype.label,
@@ -77,8 +77,8 @@ def persona_block(session: SessionResponse, candidate: VirtualCandidate | None) 
     if candidate is not None:
         scorecard = candidate.interviewer_scorecard
         return {
-            "archetype_key": session.persona_key,
-            "label": candidate.archetype_label or session.persona_key,
+            "archetype_key": session.archetype,
+            "label": candidate.archetype_label or session.archetype,
             "must_discover": [
                 {
                     "id": s.id,
@@ -95,8 +95,8 @@ def persona_block(session: SessionResponse, candidate: VirtualCandidate | None) 
         }
 
     return {
-        "archetype_key": session.persona_key,
-        "label": session.persona_key,
+        "archetype_key": session.archetype,
+        "label": session.archetype,
         "must_discover": [],
         "session_beats": [],
         "stresses": {},
@@ -130,8 +130,8 @@ def build_bundle(
                 "job_title": interview.job_title,
                 "summary": interview.jd,
                 "role_family": role_family_for(interview.job_title),
-                "clarity_facts": [
-                    {"key": f.key, "statement": f.statement} for f in interview.clarity_facts
+                "role_facts": [
+                    {"key": f.key, "statement": f.statement} for f in interview.role_facts
                 ],
             },
             "persona": persona_block(session, candidate),
@@ -233,17 +233,15 @@ def build_analysis_context(
     """
     persona = persona_block(session, candidate)
     archetype = (
-        archetypes.get(session.persona_key)
-        if session.persona_key in archetypes.ARCHETYPES
-        else None
+        archetypes.get(session.archetype) if session.archetype in archetypes.ARCHETYPES else None
     )
     return AnalysisContext(
         job_title=interview.job_title,
         job_description=interview.jd,
         skills_required=list(interview.skills_required),
-        clarity_facts=[
+        role_facts=[
             {"key": f.key, "statement": f.statement}
-            for f in interview.clarity_facts
+            for f in interview.role_facts
             if f.statement.strip()
         ],
         language_setting=getattr(interview, "language", ""),

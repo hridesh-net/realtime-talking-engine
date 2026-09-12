@@ -5,9 +5,13 @@ description: One command for every standard — what each check enforces and whe
 resource: /scripts/check.sh
 tags: [runbook, ci, lint, tests]
 generated:
-  by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  by: claude-opus-5
+  at: "2026-09-10T18:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T18:00:00Z"
+  - by: claude-opus-5
+    at: "2026-09-10T12:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5
@@ -17,6 +21,8 @@ verified:
 status: stable
 sources:
   - resource: /scripts/check.sh
+  - resource: /tests/infra.py
+  - resource: /tests/test_object_store.py
   - resource: /pyproject.toml
 ---
 # Checks
@@ -40,11 +46,62 @@ non-zero if any failed, with a summary list.
 | `pytest tests/test_session.py` | The live text session — contract-verbatim prompt, transcript ordering, session SQL, and the session endpoints under `TestClient`. Offline: a fake `ChatModel`, an in-memory database |
 | `pytest tests/test_voice.py` | The voice session on **both** providers — deterministic voice/speed/eagerness/VAD, prompt and opening-line verbatimness, dispatch by provider, the never-leak-the-prompt guarantee (including `client_config`), and the voice endpoints. Offline: a fake `RealtimeBroker` per provider |
 | `pytest tests/test_recording.py` | [Session recording](/concepts/contracts/session-recording.md) — chunk ordering, finalize idempotency, the modality gate, and the recording endpoints. Offline: `recordings_dir=tmp_path`, no real audio |
+| `pytest tests/test_portal_compat.py` | The three additions the SkillBrew portal needs — the [error envelope](/concepts/contracts/rest-api.md) beside an unchanged `detail`, the [multipart chunk door](/concepts/contracts/session-recording.md) against the raw one, and that `CORS_ALLOWED_ORIGINS` decides whether any CORS header exists. Offline: `TestClient`, `:memory:`, no model |
+| `pytest tests/test_migrations.py` | The [Postgres schema and migration runner](/concepts/contracts/database-schema.md) — apply, `--check`'s three exit codes, drift, a failed migration recording nothing, the advisory lock, and the two foreign-key decisions. **Needs a database**; see the block below |
+| `pytest tests/test_object_store.py` | The [object store port](/concepts/contracts/storage-ports.md) — one behavioural set over **both** adapters: round trip, the five range cases, a missing key, the content-type round trip, the prefix in the real key, and a 9 MiB object whose ETag proves the multipart path. **Needs MinIO**; see the block below |
 | `pytest tests/test_key_failover.py` | The [second-key failover](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01) — which errors are key-shaped and which are not, that a rate-limited primary falls over and a malformed request does not, that stickiness survives a rebuild, and that a single key builds no wrapper. Offline: counting fakes, no key |
 | gofmt / go vet / go build / `go test -race` / go architecture / golangci-lint | The [live-session engine](/concepts/subsystems/engine.md) in `engine/`. Every gate runs **from inside the module** — a repo-root `go vet ./...` finds no packages. Race detector always on |
 | `pytest tests/test_report_judge.py` | The [judge veto](/concepts/determinism.md) — verbatim spans, who spoke, no numbers in prose, and that a rejected claim leaves the composed sentence standing. Offline: `judge.overlay` driven with hand-written model output |
 | `export_schemas.py --check` | `owner_handover/` matches the Pydantic models |
 | Live scenarios | Only with `--live` — Python model scenarios plus the engine's `//go:build live` vendor tests. The Go live tests read credentials through `internal/config`, not `os.Getenv`, because the layering gate allows only that package to read the environment — which also means they exercise the same configuration path production does |
+
+## The Postgres + MinIO block
+
+The database-backed suites need a real server, and the object-store suite needs
+a real S3-compatible one. `check.sh` brings both up **once** for the whole gate
+run, through `python -m tests.infra up all`, and tears them down with a `trap`
+on EXIT — provisioning costs seconds and this gate runs one pytest session per
+suite line, so a container per session would dominate the run. (It asked for
+`postgres` alone until 2026-09-10; `tests/test_object_store.py` is what widened
+it. Narrow it again only if every suite that needs one of them goes away.)
+
+`tests/infra.py` uses `TEST_DATABASE_URL` and `TEST_S3_*` if they are set and
+otherwise starts throwaway `postgres:16-alpine` and `minio` containers with
+**Apple `container`**. Docker is not installed in this project and is not used;
+`docker.io/...` in the image names is a registry hostname, not a runtime. The
+runtime is not started automatically — `container system start` has a one-time
+kernel download behind it.
+
+**Containers are reached on their own IP, not a published host port.** Apple
+`container` 1.2.0 accepts `-p 127.0.0.1:<host>:<guest>` and even binds a
+listener that completes a TCP handshake, but the forwarded connection is
+dropped the moment a real protocol exchange starts. Measured on 2026-09-10:
+`nc` reported the host port open while `psycopg` on that same port failed with
+"server closed the connection unexpectedly", and the container's own log said
+`database system is ready to accept connections` — the server was fine, the
+forwarder was not. `infra.py` therefore publishes no ports at all and reads
+`.status.networks[0].ipv4Address` from `container inspect`, which also removes
+the free-port race that publishing needed. A host-port binding that handshakes
+and then fails is worse than one that refuses outright: it makes a readiness
+probe that only opens a socket report success.
+
+**Unavailable infrastructure is `missing`, not `skip`**: the block prints
+**NOT RUN** and fails the gate unless `ALLOW_MISSING_TOOLS=1`. Both ways to make
+it run:
+
+```bash
+container system start                                   # once per machine
+container system kernel set --recommended                 # once; see the note below
+# or point the gate at servers you already run — the same override path, no
+# code difference. A Homebrew postgres and a Homebrew minio are enough:
+export TEST_DATABASE_URL='postgresql:///postgres?host=/tmp&user=<you>'
+export TEST_S3_ENDPOINT=http://127.0.0.1:9000 TEST_S3_ACCESS_KEY=... TEST_S3_SECRET_KEY=...
+scripts/check.sh
+```
+
+The object-store suite does **not** fall back to a stub when MinIO is missing:
+its fixture raises, every S3 case ERRORs, and the run is red. A storage adapter
+checked against a fake only proves the fake matches the fake.
 
 ### A gate that did not run must never read as one that did
 

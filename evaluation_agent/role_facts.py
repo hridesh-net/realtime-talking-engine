@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from evaluation_agent.prompts import ROLE_FACTS_PERSONA, build_role_facts_prompt
-from evaluation_agent.schema import CLARITY_FACT_KEYS, ClarityFact
+from evaluation_agent.schema import ROLE_FACT_KEYS, RoleFact
 from llm.base import StructuredModel
 from llm.factory import build_model
 
@@ -31,7 +31,7 @@ _SCHEMA: dict[str, Any] = {
 class RoleFactsAgent:
     """Turns a job description into statements for the fixed fact checklist.
 
-    The checklist itself is `CLARITY_FACT_KEYS`, defined in code. This agent
+    The checklist itself is `ROLE_FACT_KEYS`, defined in code. This agent
     only writes the wording, and anything it returns for a key that is not on
     the list is discarded — so a hallucinated seventh fact cannot reach the
     report and quietly change what managers are measured against.
@@ -49,19 +49,19 @@ class RoleFactsAgent:
         """Model id in use, for provenance."""
         return self._model.model_id
 
-    async def extract(self, *, job_title: str, jd: str, location: str = "") -> list[ClarityFact]:
+    async def extract(self, *, job_title: str, jd: str, location: str = "") -> list[RoleFact]:
         """Draft one statement per fact key. Always returns every key, in order."""
         draft = await self._model.generate_json(
             system=ROLE_FACTS_PERSONA,
             prompt=build_role_facts_prompt(
-                job_title=job_title, jd=jd, location=location, count=len(CLARITY_FACT_KEYS)
+                job_title=job_title, jd=jd, location=location, count=len(ROLE_FACT_KEYS)
             ),
             schema=_SCHEMA,
         )
         return self._build(draft)
 
     @staticmethod
-    def _build(draft: dict[str, Any]) -> list[ClarityFact]:
+    def _build(draft: dict[str, Any]) -> list[RoleFact]:
         """Clamp the model's answer onto the fixed checklist."""
         said = {
             str(f.get("key", "")).strip().lower(): str(f.get("statement", "") or "").strip()
@@ -71,4 +71,4 @@ class RoleFactsAgent:
         # Every key, always, in catalog order — a missing key becomes an empty
         # fact rather than vanishing, so the UI shows the operator what was not
         # answered instead of silently shortening the checklist.
-        return [ClarityFact(key=k, statement=said.get(k, "")[:300]) for k in CLARITY_FACT_KEYS]
+        return [RoleFact(key=k, statement=said.get(k, "")[:300]) for k in ROLE_FACT_KEYS]

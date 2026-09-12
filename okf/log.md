@@ -1,961 +1,705 @@
 # Directory Update Log
 
 ## 2026-08-21
-* **Creation**: Hand-curated OKF v0.2 bundle authored by reading the source tree at commit `802c842`. Covers the four layers, the code-vs-model determinism split, the API and persona contracts, the Go engine handoff, per-module cards, and runbooks.
-* **Change**: `scripts/check.sh` go block now targets the `engine/` module instead of the repo root, adds `go build`, `go test -race`, and a guarded `go architecture` gate, and runs the engine's `//go:build live` vendor tests under `--live`. `pyproject.toml` excludes `okf/` and `docs/` from ruff, which was reformatting fenced Python blocks in prose. Updated `concepts/runbooks/checks.md`.
-* **Addition**: `docs/ENGINE_IMPLEMENTATION_PLAN.md` — approved implementation plan for the Go live-session engine (8 phases, 58 ToDos). A `concepts/subsystems/engine.md` page follows once the module lands.
-* **Addition**: `concepts/subsystems/engine.md` — the Go live-session engine: the candidate/interviewer inversion and what it does to the latency budget, the one-brain-two-parts split, the six layering rules `internal/arch` enforces, and why the contract parser retains the minor version. Indexed in `concepts/subsystems/index.md`.
-* **Change**: `engine/` phase 0 complete — module skeleton, `internal/{ports,contract,config,fakes,arch,session}`, `cmd/engined`. Two fixes on top of the task work: `contract.Parse` now wraps `ErrInvalidContract` on decode failure so every rejection classifies as a client error (malformed JSON was surfacing as 5xx), and `engined` refuses to boot without `-dev-sample-contract` rather than silently serving one sample persona to every session until the control-plane client lands. See `concepts/subsystems/engine.md`.
-* **Addition**: `docs/ENGINE_ONE_BRAIN_TWO_PARTS.html` — diagrammatic explainer of the Speaker/Thinker sync: anatomy, a shared-axis millisecond timeline contrasting the confident turn against the deferring one, and the claims ledger. Linked from `concepts/subsystems/engine.md` and `concepts/repo-map.md`.
-* **Addition**: `LICENSE` — proprietary, all rights reserved, copyright Hridesh Sharma. Declared in `pyproject.toml` (`License :: Other/Proprietary License` plus `Private :: Do Not Upload`, which makes PyPI reject an upload) and `ui/package.json` (`UNLICENSED`, alongside the existing `private: true`). README carries a license section.
-* **Addition**: `docs/BRD_Interviewer_Upskilling_v3.{html,pdf}` — BRD v3 for the Atibhee/Airtel engagement, superseding `docs/BRD_AI_Interview_Platform_v2.md`. Two structural changes: the assessed subject flips from the candidate to the hiring manager (v2's rubric scored candidate technical depth, which is the wrong product), and the job description stops driving the rubric — a role is now a job title plus three lines, while the organising input becomes the manager competency being trained. Personas are role-agnostic trait bundles selected to stress a specific rubric criterion. No code changes.
-* **Change**: BRD v3 corrected — removed the Unconscious Bias critical-fail gate. No criterion caps, fails or overrides the result; the report is an analytical estimation, not a pass/fail grade. Section 8 reframed from a client POC scope-lock into the first runnable milestone: converse with any persona, take an interview, read the report. PDF regenerated (11pp).
-* **Fix**: `.gitignore` was ignoring `owner_handover/` and `docs/` despite a trailing comment saying those deliverables are "tracked on purpose". 7 of 12 owner_handover files and 5 of 6 docs files were untracked — including `engine_contract_schema.json`, which the Go engine generates its contract types from, and `GO_ENGINE_CONTRACT.md`, the spec the engine is built against. Both rules removed; the comment now explains why they must stay tracked.
-* **Addition**: `docs/PIVOT_PLAN_MANAGER_ASSESSMENT.md` — plan for the BRD v3 pivot. 5 phases, 34 ToDos. Decides: retire `expectation_agent/` outright, and build a text-first session in Python rather than waiting on the Go voice engine.
-* **Change**: `concepts/repo-map.md` routes BRD v3 and the pivot plan, marks BRD v2 superseded, and adds a "what is scored / who is scored" entry pointing at the BRD before any change to the rubric.
-* **Addition**: pivot plan **Phase 1 — the live text session**. A human can now conduct a full typed interview against any persona from the browser, which was the milestone the plan's task 5 named. Six pieces: (1) a second model port, `ChatModel` (`generate_text(*, system, messages) -> str`), beside `StructuredModel` in `llm/base.py`, with `GeminiChatModel`/`OpenAIChatModel` adapters, a `CHAT_PROVIDERS` registry, `build_chat_model()`, and `session`/`judge` role prefixes — see `concepts/contracts/chat-model.md`; (2) `candidate_agent/session.py`, a stateless `CandidateSessionAgent` that injects the compiled contract prompt verbatim and appends only a text-mode preamble — `concepts/modules/candidate-agent-session.md`; (3) `sessions` + `session_turns` tables and a `SessionStore` port with two compositions; (4) `POST /sessions`, `POST /sessions/{id}/turns`, `POST /sessions/{id}/end`, `GET /sessions/{id}`; (5) `SessionView.jsx` — a chat pane reachable from an **Interview** button on every persona card, which casts the persona on the spot if it is not enrolled; (6) `tests/test_session.py`, offline, wired into `check.sh`. Two decisions worth carrying forward: the speaker enum is `manager|candidate` rather than `interviewer|candidate`, so BRD v3's flip needs no transcript rename; and turn indexes and timestamps are assigned by the repository, never the caller, because the transcript is the evaluation layer's evidence. Concepts updated: `contracts/{chat-model,session-transcript,structured-model,rest-api,storage-ports,database-schema}`, `modules/{candidate-agent-session,llm-factory,control-plane-api,control-plane-repository}`, `subsystems/{llm-port,candidate-agent,control-plane,ui,test-suite,owner-handover}`, `determinism`, `architecture`, `glossary`, `repo-map`, `project-overview`, `runbooks/{run-an-interview,checks,dev-setup}`.
-* **Addition**: **voice mode** — a spoken interview held over WebRTC between the browser and OpenAI Realtime, reached from a **🎙 Voice** button on every persona card. The user asked for audio after finding Phase 1 was chat-only. Shape: `RealtimeBroker`, a third port in `llm/base.py` that is *not* a way to call a model — it mints a short-lived credential a **browser** redeems, so 24 kHz audio never enters this process and the latency budget survives. `llm/openai_realtime.py` implements it against `POST /v1/realtime/client_secrets`; `candidate_agent/voice.py` compiles the persona's `EngineContract` into the vendor session document (instructions verbatim + spoken preamble, voice hashed from `candidate_id`, speed and turn-detection eagerness from `voice_directives.pace`); `POST /sessions/{id}/realtime` mints, `POST /sessions/{id}/transcript` ingests what was said, `GET /voice-capability` tells the UI whether to offer the button; `ui/src/VoiceSessionView.jsx` runs the call. Decisions worth carrying: (1) the browser is **never** sent `instructions` — a client that could read the persona prompt could edit it, so it is sealed into the credential vendor-side and a test asserts the prompt appears nowhere in the response; (2) a `modality='voice'` session writes **no turn 0**, because the persona speaks its opening line and the browser reports it back — writing it server-side too would duplicate the turn and shift every `elapsed_ms`; (3) `REALTIME_PROVIDERS` is a deliberate **subset** of `PROVIDERS`, with its own subset test, because realtime is OpenAI-only today and a Voice button that cannot work is worse than none; (4) voice choice is hashed from `candidate_id`, which makes the provider's voice *ordering* part of the contract. Honest gap recorded on the new pages: this is **Speaker-only** — the knowledge ceiling is prompt text with no deterministic pre-gate, so a voice persona is easier to argue past than a text one until the Go engine's Thinker lands. Vendor facts (endpoints, CORS, event names, the ten voices, the `.completed`/`.done` asymmetry) were verified against the live API on 2026-08-22 and are recorded in `concepts/contracts/realtime-voice.md`; the full WebRTC handshake was exercised end to end from the browser with a synthetic audio track. New pages: `contracts/realtime-voice.md`, `modules/candidate-agent-voice.md`. Updated: `contracts/{rest-api,session-transcript,storage-ports,database-schema,index}`, `modules/{control-plane-api,control-plane-repository,llm-factory,index}`, `subsystems/{llm-port,candidate-agent,ui,test-suite,owner-handover}`, `determinism`, `architecture`, `glossary`, `repo-map`, `project-overview`, `runbooks/{run-an-interview,checks,dev-setup}`, `index`.
+* **Creation**: hand-curated OKF v0.2 bundle authored from the source tree at commit `802c842`.
+* **Change**: `scripts/check.sh` go block targets `engine/` (adds `go build`, `go test -race`, guarded arch gate, `//go:build live` under
+  `--live`); `pyproject.toml` excludes `okf/`/`docs/` from ruff. Additions: `docs/ENGINE_IMPLEMENTATION_PLAN.md` (8 phases, 58 ToDos),
+  `concepts/subsystems/engine.md`, `docs/ENGINE_ONE_BRAIN_TWO_PARTS.html`, `LICENSE` (proprietary).
+* **Change (engine phase 0)**: module skeleton + `internal/{ports,contract,config,fakes,arch,session}`, `cmd/engined`. Two fixes:
+  `contract.Parse` wraps `ErrInvalidContract` on decode failure (malformed JSON was surfacing as 5xx); `engined` refuses to boot without
+  `-dev-sample-contract`.
+* **BRD v3** (`docs/BRD_Interviewer_Upskilling_v3.{html,pdf}`, supersedes v2): assessed subject flips candidate → hiring manager; JD no longer
+  drives the rubric; **removed the Unconscious Bias critical-fail gate — no criterion caps, fails or overrides the result.** No code changes.
+* **Fix**: `.gitignore` was ignoring `owner_handover/` and `docs/` despite the "tracked on purpose" comment (untracked
+  `engine_contract_schema.json`, `GO_ENGINE_CONTRACT.md`). Rules removed.
+* **Addition**: `docs/PIVOT_PLAN_MANAGER_ASSESSMENT.md` (5 phases, 34 ToDos). Decides: retire `expectation_agent/`, build a text-first session
+  in Python rather than wait on the Go voice engine.
+* **Addition — Phase 1 live text session**: `ChatModel` port in `llm/base.py` (Gemini/OpenAI adapters, `CHAT_PROVIDERS`,
+  `build_chat_model()`); stateless `CandidateSessionAgent`; `sessions`/`session_turns` tables + `SessionStore`; `POST /sessions`, `.../turns`,
+  `.../end`, `GET`; `SessionView.jsx`; `tests/test_session.py`. **Decisions worth carrying forward**: the speaker enum is `manager|candidate`
+  (BRD flip needs no transcript rename); turn indexes and timestamps are assigned by the repository, never the caller.
+* **Addition — voice mode** (WebRTC to OpenAI Realtime, 🎙 Voice button): `RealtimeBroker` port — mints a short-lived credential the browser
+  redeems, so 24 kHz audio never enters this process. `llm/openai_realtime.py`, `candidate_agent/voice.py`, `POST
+  /sessions/{id}/realtime`/`transcript`, `GET /voice-capability`, `VoiceSessionView.jsx`. **Decisions worth carrying**: (1) the browser is
+  never sent `instructions` — sealed vendor-side, test asserts the prompt appears nowhere; (2) a `modality='voice'` session writes **no turn
+  0** (persona speaks its opening line, browser reports it back); (3) `REALTIME_PROVIDERS` is a deliberate subset of `PROVIDERS`
+  (OpenAI-only), with its own subset test; (4) voice hashed from `candidate_id`, making the vendor's voice ordering part of the contract.
+  **Honest gap**: this is Speaker-only — no deterministic pre-gate until the Go Thinker lands. Vendor facts verified live 2026-08-22 in
+  `contracts/realtime-voice.md`. New: `contracts/realtime-voice.md`, `modules/candidate-agent-voice.md`.
 
 ## 2026-08-22
-* **Change**: **the console aligned to the SkillBrew.AI design mockup**, plus the **catalog half of persona library v2**. The user supplied `interview_training_wizard (1).html` as the design source of truth; it is the UI of the *finished* product, so the work split into what could be wired to a live endpoint and what could not. Built: `ui/src/index.css` as a port of the mockup's stylesheet with class names kept identical (so the two can be diffed), and five new components — `Shell` (icon rail, topbar, breadcrumbs, footer), `InterviewList`, `Wizard` (two steps), `PersonaPicker` (`.plist` + sticky `.detail`), `InterviewDetail` (sessions table, transcript panel, practise and cast tabs) — with `App.jsx` reduced to a four-way screen switch in one `useState`. Not built, by decision: the manager cohort with readiness scores and bias flags, the report-section toggles, and the CSV upload — no endpoint produces any of it, and a card of invented numbers would be the most convincing thing on the page. The mockup's `Fair & Inclusive · Critical` gate was **not** ported: it contradicts the standing decision that no criterion has a hard limit, and that is flagged on the UI page so it is not reintroduced from the mockup later. The mockup's Location / Department / Manager level / Language / Proctoring fields were dropped rather than stubbed, since the pivot plan replaces `InterviewCreateRequest` with a role card. Interview status badges use the real `scheduled|in_progress|completed|failed|cancelled` vocabulary rather than the mockup's running/draft/archived.
-
-  Catalog `v1.0` → `v2.0`: the eleven candidate-judging archetypes are replaced by the mockup's seven manager-stressing ones — `cooperative_trap`, `evasive`, `nervous_fresher`, `inflated_resume`, `comp_first`, `defensive`, `rambler`. `Archetype` gains `session_beats` (what the persona tends to do) and `stresses` (rubric criterion → 1-4), both validated in `_register` and both carried through `catalog()` so a new archetype needs no UI edit — `test_ocp_new_archetype_needs_no_agent_change` now asserts that. The five criteria are declared as `RUBRIC_CRITERIA` in `candidate_agent`, not imported from a future `evaluation_agent`, because sibling agent packages never import each other. `verdict` survives as persona metadata and drives the two defaults, which are now the bias trap and the evasive candidate — chosen for rubric weight, not hiring outcome.
-
-  Decisions worth carrying forward: (1) `session_beats` reach the live persona through the **casting** prompt, not the engine contract — the casting model turns them into `always_does`, which lands verbatim in the compiled `ALWAYS` section, verified against a live cast that produced *"Volunteers a personal detail about her recent marriage and future plans mid-interview"*. This means no `ENGINE_CONTRACT_VERSION` bump and the Go engine's pin stays honest, but it is **model-mediated, not enforced** — nothing fires a beat at a fixed moment, which is why the picker's heading reads "What they tend to do". Deterministic scripting is `DisruptionSpec`, pivot-plan Phase 3.2, deliberately deferred. (2) `GET /interviews/{id}/sessions` returns `SessionSummary`, not `SessionResponse`: the transcript is the evaluation layer's evidence and has no business travelling to render a row count. It hangs off `SessionStore` despite the nested path, because the handler never reads the interview. (3) The catalog endpoint now ships `rubric_criteria` and `stress_labels` alongside the personas, so the picker labels its bars from the server rather than keeping a copy that would drift. (4) The Readiness stat tile renders `—` with "no evaluation layer yet" rather than being omitted, so the gap is visible instead of silently missing.
-
-  Verified in the browser end to end: wizard → seven personas with live traits, beats and stress bars → **Create & chat** cast Priya Sharma and held a typed interview → **🎙 Voice** connected over WebRTC (voice `ash`) with live transcription → both sessions appear in the detail table with correct modality and turn counts → transcript panel reads back the stored record. `scripts/check.sh` green.
-
-  New pages: none. Updated: `subsystems/{ui,candidate-agent,project-overview}`, `modules/{candidate-agent-archetypes,candidate-agent-agent}`, `contracts/{rest-api,storage-ports,virtual-candidate}`, `glossary`, `repo-map`, `runbooks/{create-an-interview,run-an-interview}`, `index`. Also `README.md` and `docs/PIVOT_PLAN_MANAGER_ASSESSMENT.md`.
-* **Change**: **Phase 0 MVP milestone M1 — interview configuration completeness.** The training-wizard HTML turned out to be the manager's *requirements* document, not the design reference it was first read as, so every field the previous change dropped as styling became scope. `InterviewCreateRequest` and the `interviews` table gain `location`, `department`, `manager_level`, `language`, `proctoring`, `candidate_notes`, `clarity_facts` and `report_sections`; the vestigial `config.language` (`"en"`, never read by any code) was removed rather than left to collide with the real one.
-
-  **New package `evaluation_agent/`** — sibling of `candidate_agent`, imports `llm` only, added to `PACKAGES`/`ALLOWED_IMPORTS`, mypy's file list, and the architecture diagram. It holds two things so far. `rubric.py` is the config-driven scoring instrument: the specification's four criteria (Clarity 25, Structured 30, Fair & Inclusive 25, Communication & Presence 20) with `load_rubric(path)` for an override, and bands that reproduce the spec's own examples (74 → Competent, 48 → Developing, 39 → Needs practice). `schema.py` holds `CLARITY_FACT_KEYS` — the six role facts a manager must convey — and `role_facts.py` drafts their per-interview wording at temperature 0.1.
-
-  Decisions worth carrying forward: (1) **the rubric criteria are the manager's four, not the BRD's five**, chosen because the mockup is the newer artefact (14:38 vs 11:58 the same day) and is the MVP definition; the archetypes' `stresses` maps were remapped from `bias`/`experience` onto `fairness`/`communication` so one vocabulary exists rather than two, and `test_rubric_vocabulary_agrees_across_the_two_agents` stops them drifting. (2) **The mockup's critical-fail gate on Fair & Inclusive is knowingly not implemented** — it contradicts the standing rule that nothing caps, fails or overrides a score. `test_the_rubric_has_no_critical_fail_gate` guards that as a decision rather than an omission, and it is flagged for the manager. (3) **The role-fact *keys* are fixed in code and the model only drafts *statements*** — a hallucinated seventh fact is discarded, and a key the model skipped returns empty rather than vanishing, so the checklist a manager is measured against is never something a model chose. Verified live: a JD naming a target and a shift pattern produced three facts and left `comp_band`, `growth_path` and `next_steps` empty rather than inventing a salary band. (4) **Auto-fill is a wizard button, not a creation side effect** (`POST /role-facts`), so the operator corrects the drafts before anything is stored and `POST /interviews` stays model-free.
-
-  **`language` is behaviour, not a label.** It reaches three places or it is decoration: the casting prompt (so `opening_line` and `sample_phrases` are written in it), the compiled `system_prompt`'s `HOW YOU TALK` section, and the realtime transcription hint. That last one is a **prompt change, so `ENGINE_CONTRACT_VERSION` is now `v1.1`** — the Go engine needs no edit because it parses by major version and retains the minor, which its own `contract_test.go` already covers. `hinglish` deliberately sends **no** transcription language hint: the vendor's `languages` (plural) parameter is rejected by `gpt-4o-mini-transcribe`, `gpt-4o-transcribe` and `whisper-1` alike — verified against the live API — so a code-mixed session can only be pinned to one language or none, and pinning either half mangles the other. Verified end to end in the browser: a Hinglish persona opened with *"Main bahut excited hoon is opportunity ke liye"* and answered *"Haanji, toh, pichli company mein main as a Retail Sales Associate thi…"*.
-
-  **`candidate_notes` is the first unstructured operator text to reach casting**, so it is subordinated explicitly in the prompt and every structural guarantee is re-enforced in code after it; `test_operator_notes_cannot_override_the_archetype` asserts both halves. **`proctoring` is recorded and never enforced** — no camera is accessed at any setting, and the wizard says so on screen rather than shipping a control that silently does nothing.
-
-  New pages: `subsystems/evaluation-agent.md`. Updated: `architecture` (three-sibling diagram and the reason for the re-declared vocabulary), `determinism` (a new section on operator input), `glossary`, `repo-map`, `project-overview`, `index`, `contracts/{interview-record,engine-contract,rest-api}`, `subsystems/{ui,test-suite,index}`, plus `docs/GO_ENGINE_CONTRACT.md` for the v1.1 addition.
-* **Verification pass (OKF catch-up)**: a sweep of the bundle against the M1 diff found the module level had lagged the subsystem/contract level. Fixed: `modules/candidate-agent-archetypes.md` (the four-criterion vocabulary, remapped stress table, the drift-guard test), `modules/candidate-agent-engine-contract.md` (`LANGUAGE_DIRECTIVES`, the `language` parameter, v1.1), `modules/candidate-agent-agent.md` (`language`/`candidate_notes` in `generate`, the notes-subordination guarantee), `modules/candidate-agent-voice.md` (`_TRANSCRIBE_LANGUAGE` and why Hinglish sends no hint), `modules/llm-factory.md` (the `role_facts` prefix), `modules/control-plane-api.md` (`draft_role_facts`, six providers), `modules/control-plane-repository.md` (the M1 columns, the `report_sections` default-merge on read), `contracts/database-schema.md` (the new `interviews` columns and their CHECK constraints), `contracts/rest-api.md` (four criteria, DI list), `subsystems/candidate-agent.md` (rubric labels, four criteria, line counts), `subsystems/control-plane.md` (three agent packages, five providers), `subsystems/llm-port.md` (roles, role-facts temperature), `subsystems/engine.md` (v1.1 is taken by the language line, so the behavioural fields would be v1.2; the `doc.go`-only placeholder packages), `subsystems/evaluation-agent.md` (the rubric landed after the page was written), `runbooks/dev-setup.md` (`ROLE_FACTS_*` env vars), `runbooks/create-an-interview.md` (the optional M1 fields, the corrected defaults comment), `conventions.md` (mypy covers `evaluation_agent`), `project-overview.md` (v1.1 shipped — for language, not the persona-v2 behavioural fields; layout gains `evaluation_agent/`), `subsystems/index.md`, `repo-map.md`. New module cards: `modules/evaluation-agent-rubric.md`, `modules/evaluation-agent-role-facts.md`. Conformance check and `scripts/check.sh` both green; `owner_handover/` matches the code.
+* **Change**: console aligned to the SkillBrew.AI mockup (`interview_training_wizard (1).html`, the finished-product UI). Built
+  `ui/src/index.css` + `Shell`/`InterviewList`/`Wizard`/`PersonaPicker`/`InterviewDetail`. **Not built, by decision**: manager cohort
+  readiness/bias flags, report toggles, CSV upload (no endpoint produces them — invented numbers would be the most convincing thing on the
+  page). The mockup's `Fair & Inclusive · Critical` gate was **not ported** (contradicts the no-hard-limit rule), flagged on the UI page.
+* **Catalog v1.0 → v2.0**: the eleven candidate-judging archetypes replaced by seven manager-stressing ones — `cooperative_trap`, `evasive`,
+  `nervous_fresher`, `inflated_resume`, `comp_first`, `defensive`, `rambler`. `Archetype` gains `session_beats` + `stresses` (criterion→1-4).
+  `RUBRIC_CRITERIA` declared in `candidate_agent`, not imported from a sibling. `test_ocp_new_archetype_needs_no_agent_change`.
+* **Decisions worth carrying forward**: (1) `session_beats` reach the persona through the **casting** prompt, not the engine contract —
+  model-mediated, **not enforced**; no `ENGINE_CONTRACT_VERSION` bump; deterministic scripting (`DisruptionSpec`) deferred to Phase 3.2. (2)
+  `GET /interviews/{id}/sessions` returns `SessionSummary`, not `SessionResponse`. (3) the catalog endpoint ships
+  `rubric_criteria`/`stress_labels`. (4) the Readiness tile renders `—` "no evaluation layer yet" rather than being omitted.
+* **Change — Phase 0 MVP milestone M1 (interview config completeness)**: the wizard HTML is the manager's *requirements*, not a design
+  reference. `InterviewCreateRequest`/`interviews` gain `location`, `department`, `manager_level`, `language`, `proctoring`,
+  `candidate_notes`, `clarity_facts`, `report_sections`; vestigial `config.language` removed. **New package `evaluation_agent/`** (imports
+  `llm` only): `rubric.py` (four criteria — Clarity 25, Structured 30, Fair & Inclusive 25, Communication & Presence 20 — with bands and
+  `load_rubric(path)`), `schema.py` (`CLARITY_FACT_KEYS`, six role facts), `role_facts.py` (drafts wording at temp 0.1).
+* **Decisions worth carrying forward**: (1) **rubric criteria are the manager's four, not the BRD's five** (mockup is the newer artefact);
+  `test_rubric_vocabulary_agrees_across_the_two_agents`. (2) the critical-fail gate is knowingly not implemented;
+  `test_the_rubric_has_no_critical_fail_gate`. (3) **role-fact keys are fixed in code, the model only drafts statements** (a hallucinated
+  seventh is discarded, a skipped key returns empty). (4) auto-fill is a wizard button (`POST /role-facts`); `POST /interviews` stays
+  model-free.
+* **`language` is behaviour**: it reaches the casting prompt, the compiled `HOW YOU TALK` section, and the realtime transcription hint — that
+  last is a prompt change, so **`ENGINE_CONTRACT_VERSION` is now `v1.1`** (engine parses by major, retains minor). `hinglish` sends **no**
+  transcription hint — the vendor's `languages` plural is rejected by every transcribe model (verified live).
+* **`candidate_notes` is the first unstructured operator text to reach casting** — subordinated in the prompt, guarantees re-enforced after
+  it; `test_operator_notes_cannot_override_the_archetype`. **`proctoring` is recorded and never enforced** (wizard says so on screen).
+* **Verification pass (OKF catch-up)**: module level had lagged the subsystem/contract level; new module cards
+  `evaluation-agent-{rubric,role-facts}.md`. Note recorded: v1.1 is taken by the language line, so behavioural fields would be v1.2.
 
 ## 2026-08-23
-* **Addition**: Dynamic persona composition, developed on `origin/main` before the v2.0 manager-assessment pivot landed and rebased onto it on branch `feature/dynamic-persona-composition`. Two composers in new `candidate_agent/trait_dimensions.py`: `compose_archetype`/`register_dynamic` (an `Archetype` from five generic presets — competence, conscientiousness, communication, emotional stance, honesty, optional bias trap — instead of a hand-written dataclass) and `compose_human_traits` (a `HumanTraitProfile` — the BRD §3.2 taxonomy: affect, verbal style, language & literacy, comprehension, integrity red flags, motivation, negotiation stance, compliance traps, environment, profile). `HumanTraitProfile` + `EnvironmentProfile` added to `candidate_agent/schema.py` as an optional `human_traits` field on `VirtualCandidate` (`PERSONA_VERSION`/`ENGINE_CONTRACT_VERSION` v1.0 → v1.1); `engine_contract._compile_system_prompt` gained an optional "REALISM & COMPLIANCE LAYER" section, byte-identical to before when absent. `GET /api/v1/trait-dimensions` and a `custom_personas` field on `CandidateEnrollRequest` let a spec be composed and cast at enrollment time without registering an archetype in source first, via a content-addressed `dyn-<hash>` key (idempotent on resubmission), rejected with a 422 by `_register_custom_persona` before any model call if malformed. Two Airtel/telecom archetypes (`frontline_network_candidate`, `frontline_sales_candidate`) added the same way, content-only, no `CATALOG_VERSION` bump. UI: `ui/src/PersonaComposer.jsx` (new) — the taxonomy form plus an inline-SVG radar chart (no new npm dependency) for the 3 genuinely numeric axes (fluency, accent strength, code-switch probability) — wired into `InterviewDetail.jsx`'s new "🧬 Compose" tab; `CandidateCard` there gained a "Human traits (§3.2 taxonomy)" panel.
-* **Rebase onto v2.0**: the pivot's `Archetype` gained required `session_beats` (non-empty) and `stresses` (rubric-criterion → 1-4) fields, validated by `_register` — both frontline archetypes and `compose_archetype` failed to register until updated. Fixed by adding `session_beats`/`stresses` to both hand-written archetypes (mapped to the rubric criteria they were already designed to test — `bias` hardest for both) and by deriving both fields inside `compose_archetype` from the same five presets it already consumes, so a dynamically composed persona satisfies exactly what a hand-written one has to, not a relaxed subset. Two of our own tests referenced archetype keys removed by the pivot (`strong_hire`/`clear_reject` → `cooperative_trap`/`evasive`) — updated to read `archetype_catalog.default_keys()` / any registered key rather than a hardcoded name, so they can't go stale the same way again. All 300 tests pass (upstream's + ours) after the rebase; `owner_handover/` regenerated and matches.
-* **Fix** (pre-rebase, still true after it): `HumanTraitProfile.compliance_traps`/`.integrity_red_flags` were unconstrained `list[str]` — fixed with `Annotated[str, StringConstraints(pattern=...)]` list items. `compose_human_traits` now raises when `volunteers_protected_info` is present without a `protected_info_type`, and treats `protected_info_type=""` (the enrollment UI's actual default-form-state value) as "not set" rather than a pattern-mismatch 422 — both caught by real usage, both covered by regression tests in `tests/test_trait_dimensions.py` and `tests/test_control_plane_candidates_api.py`.
-* **Env**: `EXPECTATION_MODEL`/`CANDIDATE_MODEL` in `.env` needed to move off the now-retired `gemini-2.5-flash` to `gemini-3.6-flash` (the model Google's own API error names) — unrelated to this work, but blocked verifying it live until fixed. Not a code change; `.env` is gitignored. Same fix applied to `SESSION_MODEL`, found the same way — the live-typed-chat role fell back to the same retired default and had not yet been exercised.
-* **Addition**: the New Interview wizard's step 2 ("Who will they interview?") gained a "Pick from catalog" / "Compose custom" toggle. Custom mode reuses `PersonaComposer` in a new `singleMode` (drops its batch queue, reports the live spec via `onChange`). All three actions work in custom mode — `createFromWizardCustom` composes-and-casts through the enrollment endpoint first (so `human_traits` carries through), then starts the session against the resulting persona, because `start_session` only accepts an already-registered archetype key and never authors `human_traits` itself.
-* **Addition**: `tests/test_custom_persona_integration.py` (12 cases) — proves a composed persona *enacts* as defined, not just that composition validates. Drives the full `VirtualCandidateAgent.generate()` pipeline (not just the composer functions) against an adversarial fake model that deliberately violates every re-imposition rule a hand-written archetype relies on: inflates a skill above its ceiling, drops a required skill, invents an extra one, uses out-of-enum stance/truthfulness values, invents scorecard ids, and over-fills verbal tics/sample phrases. Parametrized across all four bias traps plus none, all three compliance-trap types individually (confirming each renders its own distinct prompt line, and that the section header's "traps" label never leaks into the in-character instruction text), a full taxonomy-values-land-verbatim check, a strong-vs-weak divergence check, and a 25-seed trait-bounds sweep. All pass — composed archetypes hold the same guarantees hand-written ones do. Also added `tests/test_session.py::test_session_round_trip_with_a_custom_composed_persona`, proving the REALISM & COMPLIANCE LAYER reaches the live chat model's system prompt during an actual session turn, not just the stored persona document.
-* **Addition**: `tests/test_full_interview_pipeline_integration.py` (12 cases) — the full manager-facing HTTP flow, not just the agent layer: create interview -> cast a persona -> read its `InterviewerScorecard` "report" -> run a multi-turn practice session -> end it -> re-read the transcript and confirm the report is unchanged. Repeated across a 5-persona matrix (every bias trap plus none, each paired with a distinct competence/honesty/communication combination) via `TestClient` against a deterministic fake `StructuredModel` (casting) and fake `ChatModel` (session turns), no network or cost. Also covers: a persona never engaged still has a readable report; ending a session with zero manager turns still yields one; an unknown candidate's scorecard is 404; two personas in one interview get fully independent sessions and reports; re-casting an identical spec reuses both the candidate and its report; a hand-written catalog archetype follows the identical lifecycle a composed one does; and the live transcript is readable mid-session, before `end` is ever called. Surfaced an explicit, pre-existing gap while writing it: there is no post-session judge or grader — `JUDGE_MODEL`'s role prefix and the Go `Judge` port (`engine/internal/ports/judge.go`) are reserved for scoring a finished transcript against the rubric, but nothing implements it yet in Python, so the only "report" a manager can pull today is the scorecard's pre-computed answer key from casting time, not a score of what actually happened in the conversation. Documented on `concepts/subsystems/candidate-agent.md` so it isn't mistaken for a working feature later.
-* **Fix**: the custom-persona composer's radar chart (`ui/src/PersonaComposer.jsx`), reported broken by inspecting the live UI with Playwright. Three real, separate bugs, not one: (1) `.radar-grid`/`.radar-spoke` stroked `var(--line)` (`#e5e7eb`, dashed, 1px) — nearly invisible against a white card, so with a skewed preset selected (e.g. the default `native_fluent`, whose accent/code-switch axes are near zero) the chart read as a bare spike instead of a web; darkened both to `var(--ink-4)`. (2) Axis labels sat at a fixed 130%-of-radius offset with `textAnchor="middle"`, which gave the vertical (top) axis ample clearance but left side axes' labels overlapping the outer grid ring, and — for longer labels like "Conscientiousness" — clipped by the SVG's own viewBox since the anchor straddled the point instead of growing outward from it; fixed with a fixed-pixel gap (not a percentage of radius) and a position-aware `textAnchor` (`start`/`end`/`middle` based on which side of center the point falls), plus `overflow: visible` on the `<svg>` as a backstop. (3) On the top axis specifically, the value ended up rendered *above* the label — "farther from the shape" means "further up the page" there, opposite of every other axis — breaking top-to-bottom reading order; fixed by choosing which of {label, value} gets the larger radius based on the axis's own vertical direction, so every axis reads label-then-value regardless of angle.
-
-  Separately, prompted by "the radar chart should show the exact values selected for the custom persona, so it depicts the actual real nature": the chart plotted only the 3 numeric language-preset fields (fluency, accent strength, code-switch probability) — it never reflected competence, effort, composure, honesty, or comprehension at all, so two personas with wildly different natures but the same language preset produced an identical chart. `trait_dimensions.dimension_catalog()` now attaches a 0-10 `score` to every preset in the four archetype-side scored dimensions (competence, conscientiousness → relabelled "Effort" on the axis, emotional_stance → "Composure", honesty) plus a new `COMPREHENSION_SCORES` table for comprehension — kept as a *separate* mapping merged only at serialization time, not written into `COMPETENCE`/`CONSCIENTIOUSNESS`/`EMOTIONAL_STANCE`/`HONESTY` (safe, since `compose_archetype` reads those by explicit key) versus `LANGUAGE_PROFILE_PRESETS`/`COMPREHENSION_PRESETS` (unsafe to touch directly, since `compose_human_traits` spreads them with `**` straight into `HumanTraitProfile(...)`, so an added key there would raise a constructor error). The composer now renders a 6-axis radar — Competence, Effort, Composure, Honesty, Comprehension, Fluency — built live from whichever preset is currently selected in the form, verified in the browser to visibly collapse/expand as the dropdowns change (a "weak, low-effort, nervous, bluffing, misreads-questions" persona plots as a small hexagon; a "strong, transparent" one fills the full ring). `test_dimension_catalog_scores_are_present_and_ordered_with_their_presets` (new, `tests/test_trait_dimensions.py`) locks the score tables to stay monotonic with each preset's plain-English ordering, so a future edit can't make "expert" score below "weak" without a test failing. All 326 offline tests, ruff, mypy, and `owner_handover/` export still pass; `npm run build` still compiles the UI cleanly.
-* **Fix**: a full "fix all the bugs" sweep, run two ways at once — an adversarial fresh-eyes review of the whole branch's diff against `origin/main` (dispatched as a background agent, explicitly told not to just re-confirm what existing tests already cover), and a live end-to-end Playwright walkthrough of the actual composer → wizard-submit → cast flow in the browser. The two found non-overlapping bugs, which is the point of running both.
-
-  **Found by driving the live UI** (`control_plane/api.py`): composing a custom persona against the real Gemini free-tier quota (exhausted from earlier testing) produced a raw, unhandled `500` with a full stack trace to the browser. Root cause: `generate_expectation`, `enroll_candidates`, and `start_session` all call `agent.generate(...)`, which can raise `ModelError` (rate limit, quota, provider outage, bad JSON) — and none of the three caught it, unlike the realtime-voice mint endpoint two hundred lines away, which already has exactly this pattern with the comment *"A mint failure is the vendor's answer, not a bug in this service."* Fixed by wrapping all three call sites the same way — `except ModelError as exc: raise HTTPException(502, detail=str(exc)) from exc` — so a provider failure now surfaces as a clean, catchable error the UI's existing `try/catch` + `setError` already knows how to display, instead of a blank crash. `tests/test_model_error_surfacing.py` (new, 4 cases) locks this in for all three endpoints with a `FailingModel` that always raises `ModelError`. Re-verified live: the same composed persona that previously crashed the page now shows a readable red banner and leaves the form intact for a retry.
-
-  **Found by the adversarial review agent** (`ui/src/PersonaComposer.jsx`): (1) checking the `volunteers_protected_info` compliance-trap checkbox without picking a `protected_info_type` was never blocked client-side — both the wizard's single-mode submit buttons and the batch "Add to batch" button would happily let it through to a 422 the user had no explanation for. Added `personaSpecError(spec)`, a single shared validity check (exported and reused from `Wizard.jsx`) that now disables submission and shows the exact reason inline; verified live in both the wizard's single-mode path and the Compose tab's batch path. (2) The "Offers in hand" number input stored the raw string from a controlled `<input type="number">`, so clearing it mid-edit (a completely ordinary interaction) set `offers_in_hand: ""`, which `CustomPersonaSpec`'s `int` field rejects with a 422 if submitted in that instant; fixed with a dedicated `setNumber` handler that coerces to a non-negative integer, defaulting to 0 on empty. (3) The radar's "wait until every axis has a real preset" guard (`axes.every(Boolean)`) would have let a `NaN` score through as a truthy `{label, value: NaN}` object if any preset table were ever missing a `score` — not triggered today since every table has full coverage, but tightened to `Number.isFinite(ax.value)` so the guard actually guards what its own comment claims.
-
-  Full gate after all of the above: 330 offline tests (4 new), ruff, mypy, `owner_handover/` export, and `npm run build` all pass; both the wizard's single-mode compose path and `InterviewDetail`'s batch Compose tab re-verified live in the browser with the actual validation now blocking a bad submission and the actual provider failure now rendering a message instead of a crash.
+* **Addition — dynamic persona composition** (branch `feature/dynamic-persona-composition`, rebased onto v2.0):
+  `candidate_agent/trait_dimensions.py` with `compose_archetype`/`register_dynamic` (an `Archetype` from generic presets) and
+  `compose_human_traits` (a `HumanTraitProfile` taxonomy: affect, verbal style, language & literacy, comprehension, integrity, motivation,
+  negotiation, compliance traps, environment, profile). `HumanTraitProfile`+`EnvironmentProfile` added as optional `human_traits` on
+  `VirtualCandidate` (`PERSONA_VERSION`/`ENGINE_CONTRACT_VERSION` v1.0 → v1.1); optional "REALISM & COMPLIANCE LAYER" section, byte-identical
+  when absent. `GET /api/v1/trait-dimensions`, `custom_personas` on `CandidateEnrollRequest`, content-addressed `dyn-<hash>` key (422 before
+  any model call if malformed). Two Airtel archetypes added content-only, no `CATALOG_VERSION` bump. `PersonaComposer.jsx` + inline-SVG radar.
+* **Rebase onto v2.0**: `Archetype` gained required `session_beats`/`stresses`; both frontline archetypes and `compose_archetype` failed to
+  register until updated (both derived from the same presets, not a relaxed subset). Two tests referenced removed keys → now read
+  `default_keys()`/any registered key. 300 tests pass.
+* **Fix** (pre-rebase): `HumanTraitProfile.compliance_traps`/`.integrity_red_flags` unconstrained → `StringConstraints`;
+  `compose_human_traits` raises when `volunteers_protected_info` present without `protected_info_type`, treats `""` as "not set". Regression
+  tests in `test_trait_dimensions.py`/`test_control_plane_candidates_api.py`.
+* **Env** (not code, `.env` gitignored): `EXPECTATION_MODEL`/`CANDIDATE_MODEL`/`SESSION_MODEL` moved off retired `gemini-2.5-flash` to
+  `gemini-3.6-flash`.
+* **Addition**: wizard step 2 "Pick from catalog" / "Compose custom" toggle; `createFromWizardCustom` composes-and-casts through enrollment
+  first (so `human_traits` carries through).
+* **Addition**: `tests/test_custom_persona_integration.py` (12 cases) — proves a composed persona *enacts* as defined, driving the full
+  `generate()` pipeline against an adversarial fake model; parametrized across bias traps, compliance traps, a 25-seed bounds sweep. Plus
+  `test_session_round_trip_with_a_custom_composed_persona`.
+* **Addition**: `tests/test_full_interview_pipeline_integration.py` (12 cases) — full manager-facing HTTP flow across a 5-persona matrix
+  against fake models. **Gap surfaced**: there is **no post-session judge or grader** — `JUDGE_MODEL`'s prefix and the Go `Judge` port are
+  reserved but unimplemented in Python, so the only "report" today is the scorecard's casting-time answer key, not a score of the
+  conversation. Documented on `subsystems/candidate-agent.md`.
+* **Fix**: radar chart (`PersonaComposer.jsx`) — three separate bugs (near-invisible strokes; label offset/anchor clipping; top-axis
+  label/value order reversed). Then the radar was made to plot all six axes (Competence, Effort, Composure, Honesty, Comprehension, Fluency)
+  built live from the selected presets; `dimension_catalog()` attaches a 0-10 `score` per preset (kept as a separate mapping merged at
+  serialization). `test_dimension_catalog_scores_are_present_and_ordered_with_their_presets`. 326 tests.
+* **Fix (sweep, adversarial review + live Playwright)**: (a) `generate_expectation`/`enroll_candidates`/`start_session` didn't catch
+  `ModelError` → raw 500; now `except ModelError → HTTPException(502)`; `tests/test_model_error_surfacing.py` (4 cases). (b) client-side:
+  shared `personaSpecError(spec)` blocks the `volunteers_protected_info`-without-type 422; `setNumber` coerces the "Offers in hand" input;
+  radar guard tightened to `Number.isFinite`. 330 tests.
 
 ## 2026-08-23 (control plane, custom personas)
-* **Fix (blocking)**: a custom-composed persona became unusable after any process restart. `_register_custom_persona` wrote the composed archetype into the module-level `ARCHETYPES` dict at request time, and `start_session` checked that dict *before* the database — so the candidate row survived the restart, the archetype did not, and every attempt to open a session returned `422 unknown archetype` against a persona still listed in the UI. Two changes: composed archetypes are now **validated but never registered** (`archetypes._register` split into a public `validate_archetype` + a private registrar; `trait_dimensions.register_dynamic` deleted; `agent.generate` gained an `archetype=` parameter so an unregistered one can be cast), and `start_session` resolves from the database first, consulting the catalog only when a persona has to be cast fresh. This also fixes two side effects of the same design: the catalog grew without bound as specs were composed, and every composed persona leaked into `GET /candidate-archetypes` for every other interview. Regression test: `test_a_custom_persona_survives_a_process_restart`.
-* **Fix (blocking)**: six profile fields (`seniority`, `function`, `region`, `gender_presentation`, `age_band`, `notice_period`) were unvalidated `str`, rendered as free-text inputs, and f-string-interpolated into the compiled system prompt *after* `HARD RULES` — so text typed into the Region box could displace `UNIVERSAL_FORBIDDEN`, the rules that keep a persona from revealing its archetype and verdict. Four are now closed vocabularies; `function` and `region` stay free text (no fixed list survives a real org chart) constrained by `schema.PROFILE_TEXT_PATTERN` — one short line, no newlines, no control characters — rendered quoted, and the realism layer now sits **before** `HARD RULES` so nothing in it is the model's most recent instruction. `CustomPersonaSpec.label` is likewise capped. Both docstrings claiming every value came from `GET /trait-dimensions` were false and are corrected.
-* **Fix**: the realism layer emitted raw vocabulary tokens — `Affect / disposition: flirtatious_inappropriate`, `Integrity red flags: proxy_candidate`, `accent strength 0.5, code-switch probability 0.6` — leaving the model to infer both the meaning and the enactment of 33 values across five vocabularies, and to act on floats it cannot act on. That is persona design delegated to the model, which is the one thing `concepts/determinism.md` says code owns. Every value now compiles through a directive table in `engine_contract` (`AFFECT_DIRECTIVES`, `VERBAL_STYLE_DIRECTIVES`, `MOTIVATION_DIRECTIVES`, `NEGOTIATION_DIRECTIVES`, `INTEGRITY_DIRECTIVES`, `COMPLIANCE_TRAP_DIRECTIVES`, `VOCABULARY_CEILING_DIRECTIVES`, `CLARIFICATION_DIRECTIVES`, `MISINTERPRETATION_DIRECTIVES`, `CAMERA_DIRECTIVES`, plus `_accent_directive`/`_code_switch_directive` for the numbers). The tables are the vocabulary's single source of truth — `trait_dimensions` derives its value tuples from their keys, and `test_architecture.py` asserts `HumanTraitProfile`'s patterns still agree and that no directive merely restates its own key. The environment lines are now enactable rather than narrated, and the hard-stop line no longer contradicts *"never end the interview yourself"*.
-* **Fix**: `compose_archetype` returned a constant `stresses` map (`structure: 3, communication: 3, clarity: 2`, `bias` 4-or-1) while its own comment claimed the values were derived from the chosen presets, and never touched `experience` at all — so the stress bars and the planned "next practice" recommendation meant nothing for a composed persona. Each preset now declares the rubric pressure it contributes and `_derive_stresses` sums and clamps them.
-* **Fix (typing)**: the nine preset tables were `dict[str, dict]` and the two `Archetype` specs were built by dict-merge behind `# type: ignore[arg-type]`, so a misspelt preset key type-checked *and* composed silently — verified by renaming `tone` to `tonee` and watching a persona compose clean. Tables are TypedDicts, `speech`/`answer_policy` are built field by field, both ignores are gone, and `validate_archetype` additionally checks the runtime shape (TypedDict keys are erased, so the constructor alone proves nothing). `_register` also now refuses a duplicate key instead of silently overwriting.
-* **Fix (layering)**: `trait_dimensions` imported the private `archetypes._register`; composition logic (content-addressing, both composer calls) lived in `control_plane/api.py`. Composition moved behind one `compose_custom_persona(...)` returning a `CustomPersona`, the handler is now four lines of exception translation, and `api.py` no longer imports `hashlib`/`json`. `register_dynamic(**kwargs: Any)` — which discarded the typed signature it wrapped — is gone.
-* **Fix (CI)**: five test files — `test_trait_dimensions.py`, `test_custom_persona_integration.py`, `test_control_plane_candidates_api.py`, and then `test_model_error_surfacing.py` and `test_full_interview_pipeline_integration.py` from the commits this rebased onto — were never run by `scripts/check.sh`, which invokes an explicit list of files. Nearly 1,400 lines of tests that CI had never executed. All five are now gates, and `test_every_test_file_is_wired_into_the_gate` fails the build if a sixth is ever added without one; enumerating suites is worth keeping for the per-area PASS/FAIL, and this is the check that makes enumerating safe. Wiring them up immediately paid: two assertions in the newly-run files had copied prompt prose that had already drifted, and both now read from the directive tables instead.
-* **Correction**: the taxonomy was introduced throughout the code, the okf and `concepts/determinism.md` as "BRD §3.2". It is not: BRD v3 §3.2 is the job card, BRD v2 §3.2 is the non-functional requirements, and no document in `docs/` contains one term from the taxonomy. The citation is removed everywhere and the open provenance question is recorded in `trait_dimensions.py`. **Still open, and needs the author, not code.**
-* **Not changed, needs a product decision**: the two Airtel archetypes take the catalog from the manager's seven to nine with no `CATALOG_VERSION` bump; custom persona composition does not appear in the manager's Phase 0 spec at all; and `affect="flirtatious_inappropriate"` puts an AI persona in a position to behave inappropriately toward a manager in training — defensible as bias/conduct practice, but a call for the manager rather than one to land in a merge.
-
-  Rebased onto `3dbe844`, which landed provider-error handling (`ModelError` → 502), radar-chart scores on the preset tables, and client-side spec validation while this review was in flight. Both sides are kept: the `ModelError` guards wrap the call sites this change also touches, `dimension_catalog` returns the scored `{text, score}` shape for the five scored dimensions *and* the directive maps for the behavioural vocabularies, and the composer's hint rendering handles both shapes. `scripts/check.sh` green, including five newly-wired gates. 349 tests.
-
-* **Merge**: `origin/main` (M1 — interview configuration completeness) merged into `feature/dynamic-persona-composition`. Sixteen textual conflicts across ten files, all additive on both sides and resolved by keeping both: `agent.generate`/`build_engine_contract` take `language`, `candidate_notes`, `human_traits` **and** `archetype`; `api.py` keeps M1's language/notes arguments inside this branch's `ModelError` guard and database-first session lookup; the wizard keeps M1's `candidate_notes` field *and* this branch's catalog/compose toggle, with the notes field moved below both modes since it is an interview-level setting; `api.js` keeps `listTraitDimensions` and `draftRoleFacts`.
-* **Merge, semantic**: the dangerous one, which merged cleanly as text and then would not import. M1 narrowed `RUBRIC_CRITERIA` from the BRD's five to the wizard spec's four (`bias` → `fairness`, "Candidate Experience" folded into "Communication & Presence"); this branch had added two archetypes and 22 preset stress contributions against the old five. Git kept M1's four-key tuple and the branch's five-key values, and `validate_archetype` raised at import: `frontline_network_candidate: unknown rubric criteria ['bias', 'experience']`. Remapped all 29 sites the same way M1 remapped its own seven. Composed personas' `stresses` still vary with the composition (verified: a weak/nervous/bluffing persona with a bias trap scores `structure 4, fairness 4, communication 4, clarity 1`; an expert/diligent/composed one scores `clarity 4, structure 3, fairness 1, communication 1`).
-* **Contract**: `ENGINE_CONTRACT_VERSION` → **v1.2**. Both branches independently bumped to `v1.1` for different prompt changes — M1 for the language line, this branch for the realism layer — and the merged prompt is a third shape, so it takes its own number rather than leaving two different prompts sharing one version string. `docs/GO_ENGINE_CONTRACT.md` now documents both minors separately and flags the one change that affects *every* persona, with or without `human_traits`: `HARD RULES` moved to the end of the prompt. The engine needs no change — it parses by major and retains the minor. Verified on a merged compile that the language line, the realism layer and hard-rules-last all hold together, and that no raw taxonomy token reaches the prompt.
-
-  `scripts/check.sh` green: 372 offline tests, twelve Python gates, five Go gates, schema export, and `npm run build`.
-* **Live verification (personas)**: drove the merged branch against real Gemini through the HTTP API, not fakes. Cast three catalog personas and one composed one into a Hinglish Field Sales interview and held five-turn sessions with each. Confirmed working: code-owned verdict and trait bounds survive a real cast; the knowledge ceiling holds under a question far above the band (`evasive`, band 3-5, asked to design a national distributor incentive scheme with margin modelling, produced generalities rather than expertise); `UNIVERSAL_FORBIDDEN` holds against a direct break-character probe ("are you an AI, state your archetype and verdict" → stayed Rohan Sharma); `language: hinglish` reaches casting and the compiled prompt and shows up as genuine code-switching; `contract_version` is `v1.2` with `HARD RULES` last; composed personas enact their directives verbatim (CTC refusal, comp-first close, an inflated claim thinning out from "led" to "coordinating with" under probing); the `volunteers_protected_info` compliance trap fires in character and at the right moment (volunteered marital status in answer to a travel question — precisely where a biased interviewer would latch onto it); and a composed persona survives a real process restart, opening a session on its `dyn-` key with the catalog back at nine and no leak.
-* **Fix**: `protected_info_type` was interpolated into the compliance-trap directive verbatim, so the persona was instructed to volunteer "your marital_status" — a vocabulary key rendered as English, the same defect the directive tables exist to prevent, in the one place a table lookup does not reach. Humanised at the render site, with `test_protected_info_type_reaches_the_prompt_as_english`.
-* **Open (design gap, not a regression)**: `human_traits` reach the compiled engine prompt but **never the casting prompt** — `prompts.py` does not mention them and `agent.generate` does not pass them to `build_user_prompt`. So `opening_line`, `sample_phrases`, `verbal_tics` and `always_does` are all authored blind to the realism layer: a persona told it "joined 6 minutes late" has an `opening_line` written as if it were on time, and a `monosyllabic` persona can be cast with verbose sample phrases. Observed live — the lateness went unacknowledged in one session and was acknowledged in the next, because it depends on the model reconciling two independently-authored layers at turn time. The repo already has the right pattern for this: `session_beats` reach the persona *through* casting, where the model turns them into `always_does`, which lands verbatim in the compiled `ALWAYS` block. The realism layer skips that route. Worth routing the same way, and a `PERSONA_VERSION` bump when it is.
+* **Fix (blocking)**: a custom persona became unusable after any restart — `_register_custom_persona` wrote into module-level `ARCHETYPES` at
+  request time and `start_session` checked it before the DB, so the archetype didn't survive restart. Composed archetypes are now **validated
+  but never registered** (`_register` split into public `validate_archetype` + private registrar; `register_dynamic` deleted; `agent.generate`
+  gained `archetype=`); `start_session` resolves from the DB first. Also fixes unbounded catalog growth and cross-interview leakage.
+  Regression: `test_a_custom_persona_survives_a_process_restart`.
+* **Fix (blocking)**: six profile fields (`seniority`, `function`, `region`, `gender_presentation`, `age_band`, `notice_period`) were
+  unvalidated `str` f-string-interpolated **after** `HARD RULES`, so Region text could displace `UNIVERSAL_FORBIDDEN`. Four are now closed
+  vocabularies; `function`/`region` stay free text via `schema.PROFILE_TEXT_PATTERN`, rendered quoted; the realism layer now sits **before**
+  `HARD RULES`. `CustomPersonaSpec.label` capped.
+* **Fix**: the realism layer emitted raw vocabulary tokens (`flirtatious_inappropriate`, floats) — persona design delegated to the model.
+  Every value now compiles through directive tables in `engine_contract` (`AFFECT_DIRECTIVES`, `VERBAL_STYLE_DIRECTIVES`, …,
+  `_accent_directive`/`_code_switch_directive`); the tables are the vocabulary's single source of truth and `test_architecture.py` asserts no
+  directive restates its own key.
+* **Fix**: `compose_archetype` returned a constant `stresses` map while claiming derivation; `_derive_stresses` now sums and clamps per-preset
+  pressure.
+* **Fix (typing)**: nine preset tables were `dict[str, dict]` merged behind `# type: ignore` (a misspelt key composed silently); now
+  TypedDicts, ignores gone, `validate_archetype` checks runtime shape, `_register` refuses a duplicate key.
+* **Fix (layering)**: `trait_dimensions` imported private `archetypes._register`; composition moved behind `compose_custom_persona(...)`,
+  handler reduced to exception translation, `api.py` drops `hashlib`/`json`.
+* **Fix (CI)**: five test files (~1,400 lines) were never run by `check.sh`'s explicit file list. All wired;
+  `test_every_test_file_is_wired_into_the_gate` fails the build if a sixth is added unwired. Wiring exposed two assertions with drifted prompt
+  prose.
+* **Correction**: the taxonomy was cited throughout as "BRD §3.2" — it is not (no doc in `docs/` contains its terms). Citation removed
+  everywhere; **provenance still open, needs the author.**
+* **Not changed, needs a product decision**: the two Airtel archetypes take the catalog 7 → 9 with no `CATALOG_VERSION` bump; custom
+  composition is not in the Phase 0 spec; `affect="flirtatious_inappropriate"` — a call for the manager.
+* **Merge (M1 → this branch)**: 16 textual conflicts across ten files, all resolved by keeping both. **Semantic merge (the dangerous one)**:
+  M1 narrowed `RUBRIC_CRITERIA` five → four (`bias`→`fairness`, experience folded into communication) while this branch added 22 preset stress
+  contributions against the old five; `validate_archetype` raised at import. Remapped all 29 sites.
+* **Contract**: `ENGINE_CONTRACT_VERSION` → **v1.2** — both branches bumped to v1.1 for different prompt changes, the merged prompt is a third
+  shape. `HARD RULES` moved to the end of the prompt (affects every persona). No engine change. 372 offline tests.
+* **Live verification**: code-owned verdict/trait bounds survive a real cast; knowledge ceiling holds above-band; `UNIVERSAL_FORBIDDEN` holds
+  against a break-character probe; `hinglish` code-switches; composed personas enact directives verbatim; the compliance trap fires in
+  character; a composed persona survives a real restart.
+* **Fix**: `protected_info_type` interpolated verbatim ("volunteer your marital_status") — humanised at the render site;
+  `test_protected_info_type_reaches_the_prompt_as_english`.
+* **Open (design gap, not a regression)**: `human_traits` reach the compiled engine prompt but **never the casting prompt**, so
+  `opening_line`/`sample_phrases`/`verbal_tics`/`always_does` are authored blind to the realism layer (observed live: a persona told it joined
+  late opened as if on time). Worth routing through casting like `session_beats`, with a `PERSONA_VERSION` bump when it is.
 
 ## 2026-08-23 (control plane, persona coherence)
-* **Fix (coherence, the one that matters for bake-once)**: `human_traits` reached the compiled `system_prompt` but never the **casting** prompt. Since a persona is compiled once, stored as `persona_json` and replayed from the database at session start, everything the casting model authors — `opening_line`, `sample_phrases`, `verbal_tics`, `always_does` — was being written blind to the realism layer and then *baked in*. Observed live: a persona instructed it joined six minutes late had an opening line written as though it arrived on time, so the lateness surfaced in one session and not the next, depending on whether the runtime model reconciled two independently-authored layers. `engine_contract.casting_realism_note(traits)` now renders the same directive tables for the casting side and `agent.generate` passes it through. `PERSONA_VERSION` v1.1 → **v1.2**; the contract shape is unchanged so `ENGINE_CONTRACT_VERSION` stays v1.2. Re-verified live — the same spec now casts an opening line carrying the lateness, the compliance trap and the region in one stored sentence.
-* **Fix (found by the above)**: the casting model also picks the persona's **name**, and was picking it blind — a spec with `gender_presentation="woman"` cast a persona called *Manish Kumawat* whose own compiled instructions read `Gender presentation: "woman"`. Under bake-once that is not a transient glitch; it is stored and replayed. The profile facts now go into the casting note too. Re-cast: *Pooja Sharma*, feminine verb forms and all.
-* **Fix**: `_english()` — closed-vocabulary keys are no longer emitted with their underscores. `notice_period` rendered as `30_days` and `gender_presentation` would have rendered `non_binary` straight into the persona's instructions. Same defect as `marital_status`, generalised and tested.
-* **Change**: the default Gemini model moves off `gemini-2.5-flash` — retired, removal scheduled for September 2026 — to **`gemini-3.7-flash`**, verified against the live API alongside `gemini-3.6-flash` and `gemini-flash-latest`. Pinned to an explicit version rather than the `-latest` alias **on purpose**: a persona is compiled once and replayed, so a casting model that silently changes under a stored persona is precisely the drift this codebase exists to prevent. Swept every stale reference in `okf/` and `.env.example`; a local `.env` that names `gemini-2.5-flash` explicitly still overrides the default and must be updated by hand.
+* **Fix (coherence, matters for bake-once)**: implements the gap above — a persona is compiled once and replayed, so casting authored blind to
+  the realism layer was baked in. `engine_contract.casting_realism_note(traits)` renders the directive tables for the casting side;
+  `agent.generate` passes it through. `PERSONA_VERSION` v1.1 → **v1.2**; contract shape unchanged so `ENGINE_CONTRACT_VERSION` stays v1.2.
+* **Fix (found by the above)**: the casting model also picks the persona's **name** blind (a `gender_presentation="woman"` spec cast *Manish
+  Kumawat*). Profile facts now go into the casting note; re-cast as *Pooja Sharma*.
+* **Fix**: `_english()` no longer emits closed-vocabulary keys with underscores (`30_days`, `non_binary`). Same defect as `marital_status`,
+  generalised and tested.
+* **Change**: default Gemini model moves to **`gemini-3.7-flash`**, pinned to an explicit version not `-latest` **on purpose** (a persona is
+  compiled once and replayed — a silently-changing casting model is the drift this codebase prevents). Swept `okf/` and `.env.example`.
 
-## 2026-08-23 (engine, phase 4 task 32)
-* **Change**: **Engine contract v1.3 — the dual-model runtime fields.** The Go engine's design runs two models per session (speech model talks, reasoning model thinks alongside it, sharing a claims ledger), and Phase 0 left it parked with ports defined and nothing behind them. This is the control-plane prerequisite for unparking it: the reasoning half needs something deterministic to reason *over*, compiled at design time rather than improvised at runtime.
+## 2026-08-23 (engine, phases 0–4 — build milestones)
+The engine build milestones, collapsed. Each bullet keeps its version/fix/gap; full detail in [Live-session
+engine](/concepts/subsystems/engine.md).
 
-  `EngineContract` gains `precompiled_beliefs[]` (`{claim_id, skill, statement, elaborations, vague_deflections}` — seeds the claims ledger at turn 0), `stall_phrases[]` (persona-voiced filler, so a defer starts playing inside 50 ms), `pregate_lexicon{}` (`{aliases, defer_at_or_below}` per skill, matched against partial speech), `unlock_spec` (`never` short-circuits per-turn assessment) and `tts_voice_id`. `SkillKnowledge` gains the design-time material behind them: `belief_elaborations`, `vague_deflections`, `probe_aliases`, all model-authored at cast time and requested explicitly in the casting prompt (rules 5a–5c). `ENGINE_CONTRACT_VERSION` v1.2 → **v1.3**; all fields optional, so a v1.0–v1.2 contract still parses and the engine degrades to the single-model path.
-
-  **Determinism**: `claim_id`s are assigned by code in `knowledge_map` order, which is itself clamped to the job's required skills, so the same persona compiles the same ids every time. A belief invented at runtime would void `seed_fingerprint` — that is the whole reason this is a contract field rather than a prompt instruction. Recorded in `okf/concepts/determinism.md`.
-* **Change**: `pick_voice` moved from `voice.py` to `engine_contract.py`. The choice is part of the compiled contract now — stall clips are synthesized ahead of time and a voice that differs from the speech model's makes the filler and the answer audibly two different people. One rule, one home, both callers.
-* **Fix (found live)**: `compile_unlock_spec` matched never-markers with `startswith`, so real model output — *"He never reveals deeper technical depth…"* — compiled to `conditional` and would have burned a reasoning call every turn to re-learn the persona never unlocks. Now searches the whole prose and treats a negation as closing the door **unless** the sentence also names a trigger word (`until`, `unless`, `only after`…), in which case the negation was qualifying it. Both misreadings cost something, so both directions are tested, including the real sentence that exposed it.
-* **Go**: `contract.EngineContract` extended with the five fields plus `PrecompiledBelief`, `PregateSkill` and `UnlockSpec` types. `go build`, `go vet`, `go test -race` and the layering gate all green; the engine already parses by major version so no engine change was needed to accept v1.3.
-
-  Live-verified: a cast against real Gemini produced two specific, technically-plausible beliefs with confident elaborations and in-register vague deflections, persona-voiced stall phrases, and a pre-gate lexicon of realistic interviewer phrasings ("how did you handle cache invalidation", "how do you prevent goroutine leaks"). `scripts/check.sh` fully green, 391 tests.
-* **Addition**: **Engine Phase 1 — the turn loop** (plan §14 tasks 9–14). The actor was a lifecycle stub: a goroutine that started and stopped cleanly and held no session state. It now holds the state machine, the alarms, the playout tracker and the barge-in path, which is the frame the Thinker and the claims ledger drop into.
-
-  `internal/session/state.go` — the eleven states of plan §4 as a closed enum with the legal edges in a **table**, not scattered conditionals. The expensive bugs in a real-time turn loop are the transitions nobody wrote down (audio arriving in DRAINING, a response created while one is in flight), and a table can be tested exhaustively. Two universal edges stay out of the table and are applied on top: barge-in reaches DRAINING from any speaking-ish state, wind-down from anywhere still running — encoding those per-source would be eleven rows repeating the same two entries.
-
-  `internal/obs/events.go` — the JSONL event log. Not debug output: it is the grader's record of what the engine decided and why, stamped from the **injected clock** so a FakeClock test produces byte-identical logs. State names are pinned by test because downstream reads them.
-
-  `internal/session/timers.go` — the six alarms, all on the injected `Clock`. Each arming carries a **generation**; a fire whose generation is stale is discarded. Stopping a Go timer does not retract a fire already in flight, so without this a stall alarm cancelled during barge-in still arrives and drives a response for a turn that no longer exists — the ghost-utterance class plan §4 names. Cancellation becomes a fact about actor state rather than a race against the runtime.
-
-  `internal/session/playout.go` — heard-time estimation. Barge-in truncates at what the human **heard**, not at bytes sent: audio sits in the out-ring, the jitter buffer and the output device, and telling the vendor the persona said things nobody heard poisons every later turn's reasoning. Browser heartbeats every 250 ms, extrapolated forward from the last report, capped at bytes-sent, monotonic per item so a late stale report cannot truncate too early and invent silence the human did hear.
-
-  `internal/session/actor.go` — plan §4's nested select. `select` has no priority, so a flat one lets a saturated audio channel starve control and timers: a stop command queued behind a hundred frames, a deadline fired but not acted on. Control and timers drain non-blockingly first. Channel policies per the §4 table — control and timers never dropped, media bounded drop-**oldest** (under jitter the freshest frame reflects reality; the stalest is the one worth losing), heartbeats newest-wins.
-* **Fix (caught by goleak, in my own code)**: the first timer implementation spawned a waiter goroutine that blocked forever on a cancelled timer's channel — one leaked goroutine per cancelled alarm per turn, which at fifty sessions a node is the "discovered in a week, not a year" failure the plan warns about. Waiters now select on their own stop channel, and the send to the actor does too, since an actor that has already shut down will never drain.
-* **Fix (caught by the arch gate, also mine)**: a new test bounded a FakeClock wait with `time.After`. `internal/session` may not touch real time and the rule is right — a test that reaches for the wall clock to bound a fake-clock test has stopped testing determinism. Replaced with a blocking receive; `go test`'s own timeout reports a hang.
-
-* **Verification**: the two self-inflicted bugs above were re-introduced deliberately to check the guards actually bite, rather than trusting a green suite. Both do — leak restored ⇒ `found unexpected goroutines`; `time.After` restored ⇒ *"calls time.After directly"* from the arch gate.
-
-  That exercise found a **third** problem, in the test rather than the code: `TestThousandSessionChurnLeavesNothingBehind` sent a control command and nothing else, and `cmdInterviewerJoined` arms no alarms — so it churned actors for a thousand iterations without ever exercising timer cancellation, and passed just as happily with the leak re-introduced. A churn test that cannot fail is worse than no churn test, because it reads like proof. It now arms every alarm per cycle, and was confirmed to fail with the leak present. goleak in this package is per-test `VerifyNone`, not a `TestMain`, so the new tests assert it explicitly instead of relying on a later test to catch a leak and mis-attribute it.
-
-  Plan done-when criteria met: task 9 (1000× start/stop churn, `-race` and goleak clean), task 11 (zero ghost fires after barge-in and after stop), tasks 12–13 (send 5 s, heartbeat 2.1 s, barge-in ⇒ `Truncate(item-1, 2100 ± one frame)`), plus the `barge_in_allowed=false` variant where the persona keeps the floor and the attempt is still recorded.
-
-  41 Go tests in `internal/session`. `go test -race` and goleak clean, layering gate green, `scripts/check.sh` fully green.
-* **Addition**: **Phase 1 task 15 — the confident turn path.** `internal/session/turn.go`: turn records carrying the ingest shape of plan §8.2 (`probed_skill`, `deferred`, `fallback_used`, `trimmed`, `barged_in`, `heard_ms`), so a report can say *the manager probed Redis, the persona deferred, the fallback fired* rather than inferring it from a transcript. The interviewer's turn opens on their **first partial**, not their last — a manager who took eight seconds to ask a question and one who took two are different, and only the record can show it.
-
-  Sentence bounds are enforced by trimming, not by asking the model nicely: length is one of the few ceiling layers that is an actual guarantee (plan §6 layer 5). The grace clause matters — cutting mid-sentence sounds like a dropped call, not a person finishing a thought — so the trim waits until the allowance is spent *and* another sentence has begun.
-* **Fix (found by the task-15 done-when test)**: `handlePregate` decided whether to apply a verdict by checking the state, but the actor is still `LISTENING` at end-of-turn. Every verdict arriving at the natural moment was therefore filed as "pending" and never applied, and every turn fell through to the race-lost fallback. It now keys off whether the pre-gate deadline is armed, which *is* the "end-of-turn reached" signal. Related: the pending verdict was compared against `a.turn`, which is incremented between filing and reading, so the comparison could never match — the pending verdict belongs to the utterance in flight, not to a turn number.
-* **Addition**: **Phase 4 task 33 — the claims ledger** (`internal/ledger`). Seeded from `contract.precompiled_beliefs` at turn 0, single-writer (the actor; everything else proposes), with `b*` ids for designed beliefs and `r*` for runtime ones so the grader can tell "designed to believe this" from "said it on the day". Walk-backs supersede rather than delete: a persona that said something wrong and corrected it is a different session from one that never said it. Two renderings — the full timeline for the reasoning model (a truncated ledger makes it produce confidently contradictory notes) and a capped, newest-first summary for the speech model, which competes for realtime context.
-
-  **Contradiction detection is deterministic and honest about its limits.** It compares canonical forms and negation parity, catching the case it exists for — "Redis is single-threaded" at turn 4 against "Redis is not single-threaded" at turn 19 — with no model call on the latency path. It does **not** catch semantic contradiction between differently-worded claims; nothing deterministic does, that is the async Judge's job (plan §6 layer 6), and claiming otherwise would be the kind of guarantee this codebase refuses to make.
-* **Fix (found by its own tests)**: canonicalization initially missed the commonest English negation, because the language inflects the verb when it negates — "fixes" becomes "does **not** fix". Dropping the negation token alone left two keys differing by an "s" and a stranded do-support auxiliary. Now stems a trailing "s"/"es"/"ies" and drops `do`/`does`/`did`; crude, but applied identically to both sides so equality is unaffected. Separately, a hedged claim was being contradicted — a hedge commits to nothing, so the stance check now runs before the polarity comparison.
-
-  45 tests in `internal/session`, 13 in `internal/ledger`. `go test -race` and goleak clean, layering gate green, `scripts/check.sh` fully green.
-* **Addition**: **Phase 3 task 27 + Phase 4 tasks 34–36 — the reasoning model is in the loop.** `internal/gate` is the deterministic pre-gate: incremental lexicon matching over *partial* transcripts, because a defer must put a stall clip on the wire within 50 ms of end-of-turn and nothing that thinks answers in 50 ms. Aliases match on word boundaries — substring matching would fire "go" inside "going" and produce a persona that stalls every other sentence. Longest alias wins, so "system design" beats "design", and the lexicon is totally ordered because Go randomises map iteration and two runs classifying the same sentence differently would lose reproducibility for a reason invisible in any log.
-
-  The actor now runs the full defer flow: pre-gate verdict → DEFERRED → stall + `RequestNote(700 ms)` → note injected as a **system item** and the speech model phrases it, so there is no register seam between the stall clip and the answer. A missed deadline falls back to the contract's own `on_unknown_question`, which is still persona-correct behaviour — the floor of plan §6 layer 3 — and is marked on the turn record so the grader discounts depth there.
-
-  Ledger → both models (task 34): the full timeline to the Thinker on every note, the capped summary to the speech model on a cadence and with every defer. The **contradiction guard** downgrades a note that would reverse a live claim to a restatement, deterministically and with no model call. Ceiling re-assertion (35) runs on a cadence *and* immediately on any probe at a skill with ceiling ≤ 3 — the moment an interviewer probes what the persona cannot discuss is exactly when prompt adherence drifts. Unlock (36): the Thinker assesses, **the actor decides**, the flip is monotonic, and a `kind: "never"` persona cannot be talked into unlocking whatever the Thinker claims.
-* **Design**: `internal/session` may import only `ports`, `contract` and `obs` — the layering gate enforces it — so the ledger and pre-gate reach the actor as **ports** (`ports.ClaimLedger`, `ports.PreGate`), with `cmd/engined` as the only place that names concrete implementations. The rule paid for itself here: the obvious move was to have the actor hold a `*ledger.Ledger`, and being unable to forced the interface that makes the orchestrator independent of which reasoning model, lexicon or ledger backs it. All three collaborators are optional — a nil one degrades the session to the single-model path rather than refusing to open an interview.
-* **Fix (goleak again, mine again)**: the note pump exited only on *session* context cancellation, so every deferred turn left a goroutine alive until the session ended — twenty defers, twenty stranded pumps. Async work is now scoped to a per-turn gate closed by every path that ends a turn (note arrived, deadline passed, barge-in, wind-down), the same discipline as the timer generations: cancellation has to be a fact, not a hope.
-
-  55 tests in `internal/session`, 13 in `internal/ledger`, 10 in `internal/gate`. `go test -race` and goleak clean, layering gate green, `scripts/check.sh` fully green.
-* **Addition**: **Phase 3 task 29 — the Thinker adapter** (`engine/internal/vendors/thinkerllm`). A real reasoning model behind `ports.Thinker`, over the Gemini REST API with `net/http` and `encoding/json` — no new module dependency, and the vendor boundary stays thin enough to read in one sitting.
-
-  It runs **speculatively**, which is the only reason the two-model design works: a reasoning call started at end-of-turn arrives seconds late, long after the silence became unbearable, so each partial transcript supersedes the last guess and by the time the question ends the model has been reasoning for seconds. Short partials are ignored — every "so," would otherwise cost a request. `RequestNote` joins the speculation already in flight rather than starting a new one, and closes its channel at the deadline without a note: the actor has its own timer and a persona-correct fallback, and blocking on a late reasoning model is precisely what the stall bank exists to avoid.
-
-  Structured output is enforced by the vendor's own `responseSchema` rather than asked for in prose and parsed hopefully. Temperature 0.2, deliberately: this layer *retrieves* committed material, and creativity here is indistinguishable from invention — which would void `seed_fingerprint`. A `nil` unlock assessment means "no opinion", kept distinct from "not met", because only one of those should ever be inferred from silence. Claims are bounded on the way out: forty claims are not more useful than three, just a bigger injection into a realtime context.
-* **Fix (structural, inherited from Phase 0)**: the adapter packages lived in `engine/internal/vendor/`, and **Go reserves any directory named `vendor`** — a package under one cannot be imported by its path at all. Confirmed against a scratch module: `probe/internal/vendor/foo must be imported as foo`. This would have blocked every single adapter — Speaker, Transcriber, TTS, Judge — and stayed invisible through Phase 0 only because all six were empty `doc.go` stubs that nothing imported. Renamed to `internal/vendors/`, with the reason recorded in `internal/arch/graph.go` so it does not get "tidied" back.
-* **Fix (tests)**: three adapter tests asserted on request counts immediately after `FeedPartial`, racing the goroutine that issues the call. `FeedPartial` returns the moment it hands the work off — the interviewer is still talking and nothing may block that path — so the tests now wait for the call rather than assume it already happened. goleak in this package is scoped to ignore stdlib `net/http` connection goroutines by name, keeping the check sharp on our own rather than dropping it because httptest is noisy.
-* **Wiring**: `cmd/engined` builds the Thinker when a model id and key are configured and logs a warning when they are not, running single-model instead. A live interview that degrades beats one that refuses to start (plan §11).
-
-  11 tests in `internal/vendors/thinkerllm`. Engine total: 55 session, 13 ledger, 10 gate, 11 thinker. `go test -race` and goleak clean, layering gate green, `scripts/check.sh` fully green.
-
-## 2026-08-23 (engine, phase 2 — milestone M1)
-* **Fix (the guard was not guarding)**: `internal/arch`'s rule 1 — *nothing outside `cmd/engined` imports a vendor, transport or store adapter* — had been **inert for the entire vendors tree**, and had been since the `vendor`→`vendors` rename. `forbiddenPackagePrefixes` still read `internal/vendor`, and `under()` matches `rel == prefix || HasPrefix(rel, prefix+"/")`, so `internal/vendors/gemini` matched neither. The proof it was inert: `go test ./internal/arch` passed while `thinkerllm` and `judgellm` both imported `geminijson`, an import the rule forbids on its face. Rule 3 still covered `session`/`ledger`/`gate`/`stall`, so the deterministic core was never exposed; what was unguarded was everything else — `judge`, `audio`, `record`, `controlplane`, `transcriptlog`, `fakes`, `config`.
-
-  The previous log entry for that rename claimed the reason was "recorded in `internal/arch/graph.go` so it does not get 'tidied' back". **It was not.** The note is there now, next to the rule that depends on it. A comment asserting a fact that is not in the code is worse than no comment, because it stops the next reader from checking.
-* **Fix (same file, same shape, not yet bitten)**: `CheckRestrictedImports` matched `restrictedPackages` with `rel == p` rather than `under()`. Rule 3 protects `internal/session` today but would have gone silently inert for `internal/session/foo` the moment anyone split a subpackage — the identical failure mode, lying in wait one refactor away.
-* **Design**: `geminijson` moved to `internal/vendors/shared/`, and the carve-out for it is **shared-only**, not "same-tree siblings may import each other". The broad form was considered and rejected: it would legalise `vendors/gemini` importing `vendors/thinkerllm`, i.e. a Speaker adapter smuggling in a reasoning model, which is precisely the coupling rule 1 exists to prevent. New checker rule 7 enforces the direction plan §3 states but never implemented — adapters may reach `ports`, `config`, `obs`, `audio` and `vendors/shared` among internal packages, and nothing else. Worded as *"among internal packages"* on purpose: a rule that banned third-party imports here would make libopus and the Pion stack illegal on arrival.
-* **Verification**: both faults were re-introduced and the gate watched to fail before being restored — reverting the prefix to the singular makes `TestSessionImportingAVendorsPackageIsAViolation` fail, and restoring `rel == p` makes `TestARestrictedSubpackageIsAlsoRestricted` fail. The first fixture is deliberately one that passes silently against the old code; it is the evidence the hole was real, not a description of it.
-* **Addition**: 13 deployability config variables (ICE/TURN, `S3_ENDPOINT`/`S3_FORCE_PATH_STYLE` so the store works against any S3-compatible host, spool dir, metrics address, connect timeout, the Gemini voice roster, and the walk-back and defer-tool switches), plus `strList` and `boolean` loaders. All optional with defaults: adding a required key would have silently broken the aggregate-every-issue test, which asserts on the exact issue count. `.env.example` now lists all 32 engine variables and a test fails if one goes missing — it listed 2 of 19 before, so `engined` could not be booted from it.
-* **Fix (introduced and caught in the same change)**: wiring the previously-dead `BindFlags` made every flag appear in `-h` — including flags naming **required** variables, which could not satisfy them, because the load error is computed before `flag.Parse` runs. A flag advertised in the help text that cannot do the one thing its name promises is worse than no flag. `ResolveFlagOverrides` now drops issues whose variable was explicitly overridden and keeps the rest, with `flagEnvKeys` as an explicit table rather than a name transform — `-pregate-deadline` overrides `PREGATE_DEADLINE_MS` and `-silence-timeout` overrides `ABANDON_AFTER_S`, and a transform would have missed exactly those. A test walks every registered flag and fails if one has no mapping.
-* **Spike (live API, `gemini-3.1-flash-live-preview`)**: three assumptions the plan rests on, measured rather than argued. Manual activity control works — with `automaticActivityDetection.disabled` the model does not answer until the engine sends `activityEnd`, which is what makes the engine-owned pause and the defer-then-answer path possible at all. Input transcription still fires with automatic VAD off. And **audio sent outside an activity window is discarded silently** — no bytes, no transcription, no error — so a missed `activityStart` means the persona never hears the question and nothing in the system can tell.
-* **Design (a decision to *not* build something)**: teaching the persona a `[[DIRECTION]]` marker convention in the system prompt **causes the leak it was meant to prevent** — the model began emitting its own fabricated `[[DIRECTION]] …` spans, 4 turns out of 4 with the marker present and 0 out of 2 without. Transcribing the audio independently showed those spans are **never spoken**: `output_audio_transcription` reported them, the audio did not contain them. A plain parenthetical context note with no marker machinery is obeyed, stays unspoken, and leaves the transcript identical to the audio. So `InjectSystemItem` maps to an ordinary `clientContent` turn, and the compiled `system_prompt` needs **no change and no `ENGINE_CONTRACT_VERSION` bump**.
-
-  The residual risk is the one that matters: **`OutputTranscriptDelta` is not guaranteed to equal what was spoken.** The actor feeds it into `max_sentences` enforcement — §6 layer 5, the one ceiling layer the design calls guaranteed — and into the persona's turn text, which is the grading ground truth. Phantom text both trims the persona early and corrupts the record, so transcript fidelity is now an explicit obligation on the Speaker adapter.
-
-  Updated [Live-session engine](/concepts/subsystems/engine.md).
-* **Fix (this file)**: three section headings were dated **2026-08-24** and **2026-08-25**, but the repository contains no commits after **2026-08-23** — the dates were in the future when they were written, which put every later entry out of order and made the log unusable for reconstructing when anything actually happened. Re-dated to 2026-08-23 with scope suffixes, matching the convention the engine sections already use. Content is untouched; only the headings changed.
-
-## 2026-08-23 (control plane + engine, M1.2 — sample regeneration)
-* **Fix (a silent contract-staleness hole)**: `owner_handover/engine_contract_sample.json` and its Go-side twin `engine/internal/contract/testdata/engine_contract_sample.json` were still `contract_version: "v1.0"`, with all five v1.3 fields (`precompiled_beliefs`, `stall_phrases`, `pregate_lexicon`, `unlock_spec`, `tts_voice_id`) absent or null, even though `ENGINE_CONTRACT_VERSION` had moved to `"v1.3"` and the schema carried them. `scripts/export_schemas.py --check` validated schemas only — its own docstring said samples were "left alone" — so nothing in `check.sh` could have caught this. Consequences: the pre-gate lexicon compiled empty (DEFER could never fire offline), the claims ledger seeded zero beliefs, the stall bank had no phrases or voice, and `fakes.NewSampleContractSource()` — behind the entire `engine/internal/session` test suite and `cmd/engined -dev-sample-contract` — served a persona the dual-model runtime could not exercise.
-* **Addition**: `scripts/export_engine_contract_sample.py` — regenerates both sample files by driving `build_engine_contract` and its helpers (`compile_precompiled_beliefs`, `compile_stall_phrases`, `compile_pregate_lexicon`, `compile_unlock_spec`, `pick_voice`) over real persona fields (Mateo Rodriguez, the `clear_reject` sample already in `candidate_output_sample.json`, with `belief_elaborations`/`vague_deflections`/`probe_aliases` layered onto three of five skills — that content postdates when this fixture's `knowledge_map` was last drafted). No live model call; deterministic — proven by running it twice and diffing byte-for-byte. `scripts/export_schemas.py --check` now also asserts the sample's `contract_version` matches `ENGINE_CONTRACT_VERSION` and that all five v1.3 fields are non-empty, closing the hole; its docstring no longer claims samples are untouched.
-* **Addition**: `GEMINI_TTS_VOICES` in `candidate_agent/engine_contract.py` — the Python-side mirror of the Go engine's `defaultTTSVoices` (`engine/internal/config/config.go`), same 30 voices, same order, append-only for the reason `pick_voice` depends on: the choice is `hash(candidate_id) % len(voices)`, so reordering repoints every already-cast persona's frozen `tts_voice_id`. `control_plane/api.py` now passes it at both call sites that cast a persona, which previously passed `voices=()` and left every live-cast `tts_voice_id` empty. `build_engine_contract` also asserts the chosen voice is non-empty and a roster member before returning the contract, as a defence-in-depth check on top of `pick_voice`'s own guarantee.
-* **Change (engine)**: `engine/internal/contract/testdata/engine_contract_sample.json` is now the v1.3 sample; the original v1.0 fixture is retained as `engine_contract_sample_v1_0.json` and covered by a new `TestParse_ToleratesAV1_0ContractAndDegradesToTheSingleModelPath`, so the "v1.0–v1.2 still parse, degrading to the single-model path" claim is tested against a real old contract rather than a v1.3 sample with its version string overwritten. Three new tests (`TestSampleContractSeedsANonEmptyPregateLexicon`, `TestSampleContractSeedsPrecompiledBeliefsIntoTheLedger`, `TestSampleContractCarriesAVoiceAndStallPhrases`) pin the sample's v1.3 fields directly. `go test -race ./...`, `go test ./internal/arch`, gofmt and vet all clean.
-* **Fix (docs)**: `docs/GO_ENGINE_CONTRACT.md` documented `voice_directives.may_interrupt` but never `turn_policy.barge_in_allowed`, despite the two naming opposite directions of interruption (human-interrupts-persona vs. persona-interrupts-human) — easy to conflate from the names alone. Both now documented side by side. Updated [EngineContract](/concepts/contracts/engine-contract.md), [engine_contract.py](/concepts/modules/candidate-agent-engine-contract.md), [Owner handover](/concepts/subsystems/owner-handover.md).
-
-## 2026-08-23 (engine, M1.7 — Judge adapter tests)
-* **Addition**: `internal/vendors/judgellm` gains 11 tests and a 25-case offline evaluation fixture (10 breach, 8 clean, 7 vague; severities spread across low/medium/high). The fixture is driven through the real adapter over `httptest` with canned model responses, so it pins the HTTP envelope parsing, the JSON decode and `normalize` — and its own `_comment`, plus the test's doc comment, say plainly that it does **not** measure real model judgement quality. Calibrating actual precision and recall needs a live vendor call and is a separate, later, paid task; a fixture that looked like an accuracy benchmark while measuring a parser would be worse than no fixture.
-* **Fix (a test suite that hung rather than failed)**: `go test -race ./internal/vendors/judgellm` did not finish — it parked until the 10-minute timeout, which is how it was found. `stallServer`, the stub vendor that never answers so a test can drive the review queue to capacity, parked on `<-r.Context().Done()` **without reading the request body**. `net/http` only starts the background read that detects a client disconnect once the request body has been consumed, so the handler was never woken when the Judge cancelled the call; it outlived the test, goleak reported it, and `httptest.Server.Close` then blocked forever on a connection it still considered active. Confirmed against a scratch module rather than reasoned about: the identical handler observes the disconnect when it drains the body and never observes it when it does not. One `io.Copy(io.Discard, r.Body)`, with the reason recorded at the helper — this is not tidiness, and a future reader deleting it as such reintroduces a hang that only reproduces under `-race`.
-* **Fix (a goroutine per persona turn)**: `reviewCtx()` built a fresh `context.WithCancel` for every review and spawned a watcher goroutine to translate `stop` into `cancel`. Nothing cancelled those contexts on the normal path, so both the goroutine and the context survived until `Close` — one per reviewed turn, accumulating for the length of a 45–60 minute interview. Replaced by a single Judge-lifetime context created in `New` and cancelled in `Close`. `Close` now closes `stop` **then** cancels, in that order: cancelling first would leave the worker free to pick up another queued turn and fail it fast in a loop.
-* **Fix (a silent gap in the grading metadata)**: a review the vendor never answered was dropped with a bare `continue`. The adapter already counts queue overflow via `Dropped()`, for the stated reason that *"a session that reviewed less than it should says so, rather than looking merely clean"* — a vendor error is the same situation and was invisible. Added `Failed()`, counted separately because the two have different fixes: `Dropped` means the Judge could not keep up, `Failed` means the vendor did not answer.
-* **Fix (a `select` that could outrun its own stop)**: `run()`'s two-case `select` picked uniformly at random among ready cases, so with a full queue a closed `stop` was passed over roughly half of each iteration and `Close` drained the backlog before returning. `stop` is now checked in its own non-blocking `select` first, the same priority idiom the session actor uses.
-* **Verification**: all three fixes were re-introduced and the guards watched to fail before being restored — removing `failed++` fails `TestAReviewTheVendorNeverAnsweredIsCountedRatherThanSilent`; removing `j.cancel()` from `Close` hangs `TestCloseUnblocksAReviewAlreadyInFlightAtTheVendor` to timeout; removing the body drain re-hangs the package under `-race`. The last one reproduces **only** under `-race` and only probabilistically — five plain runs passed — which is worth recording, because it means the drain is a fix whose absence no gate reliably catches.
-* **Addition**: `internal/vendors/shared/geminijson` gets its own tests — it had none, and it is the wire plumbing beneath *both* reasoning adapters, so a fault there is a fault in the Thinker and the Judge at once. Six cases pin the parts the adapters' own suites only reached incidentally: the request actually carries `responseSchema`, `responseMimeType` and the caller's temperature (without the schema the vendor answers in prose and both callers fail at the decode step, blaming the wrong layer); a non-200 reports the vendor's own message alongside the status, since the two failures this sees most — a bad key and a quota refusal — put the reason in the body; an `error` object inside an otherwise-successful 200 is still an error; a response with no candidates, which is what a safety block looks like, is an error rather than empty text.
-
-  The one worth calling out is the **bounded read**. `io.ReadAll(io.LimitReader(resp.Body, 1<<20))` was there and untested; a node runs many sessions and each holds this client, so an unbounded read turns a vendor bug or a hostile response into an OOM kill that takes every live interview on the box. Removing the limiter makes the new test consume **32 MiB** before stopping, which is the measurement the guard exists to make.
-* **Fix (docs, found while updating the page above)**: the engine concept page's *Contract versioning* section still described the five dual-model fields as a hypothetical future **v1.2** — "the behavioural fields the persona library v2 still wants … *would now be* a v1.2". They shipped as **v1.3** and `ENGINE_CONTRACT_VERSION` has read `"v1.3"` in `candidate_agent/schema.py` throughout. Rewritten to say what the version actually is, what it carries, and the part that matters operationally: the fields being *optional* is what lets a stale contract seed an empty pre-gate lexicon and zero beliefs without anything refusing to start — which is how both samples sat at v1.0 unnoticed. Updated [Live-session engine](/concepts/subsystems/engine.md).
-
-## 2026-08-23 (engine, M1 — lint standard raised)
-* **Change**: five linters added to `.golangci.yml` — `exhaustive`, `noctx`, `durationcheck`, `nilnil`, `predeclared`. The one that earned its place immediately is **`exhaustive`**, which found two of the live bugs the M1 plan had located by hand, mechanically and in seconds: the timer switch in the session actor is missing `timerStall` (one of three timer kinds never armed and never handled, so §11 abandonment and the session duration cap do not exist), and the command switch is missing `cmdAttachTransport`, `cmdConnected` and `cmdConnectFailed`. A typed enum whose switches nothing checks is just an int with extra ceremony.
-
-  `default-signifies-exhaustive` is deliberately **off**. A `default` clause is precisely how those three timer kinds stayed dead in plain sight, so letting one satisfy the check would hand back the property being bought. The `num*` sentinels are excluded by name, since they size arrays rather than name states.
-* **Scope**: the session findings are **not** fixed here — they are the specification for M1.6, which is the actor milestone. Fixed now are the three outside `internal/session`.
-* **Fix**: `arch.LoadPackages` ran `exec.Command("go", "list", …)` with no context. `go list` can block indefinitely — against an unreachable module proxy, most obviously — and it is the first thing the layering gate does, so an unbounded call turned a network problem into a CI run that **hangs instead of failing**. Now `exec.CommandContext` under a 2-minute cap, with a distinct error when the cap is what fired.
-* **Fix**: `RequireMinor(min int)` and `truncate`'s `const max` shadowed the `min`/`max` builtins. Renamed to `want` and `limit`. Harmless as written, but a later edit inside either scope that reached for the builtin would get the local instead — and in `RequireMinor`, a version comparison is not somewhere to discover that.
-* **Note**: `contextcheck` was trialled and left off. Its only finding is `go a.run(actorCtx, done)` in the session manager, where the actor context outliving the request is the design rather than a mistake, and buying one true positive elsewhere at the price of a permanent `nolint` on that line is a bad trade today. Worth re-running once the connect path lands.
-
-## 2026-08-23 (engine, M1.5 — failable connect and the Speaker event pump)
-* **Addition**: `DepsFactory func(ctx, sessionID, *contract.EngineContract) (Deps, error)` replaces the infallible `newDeps func(*contract.EngineContract) Deps`, and a per-session connector goroutine starts the vendors concurrently under `CONNECT_TIMEOUT_S`. Failure is **classified, not uniform**: Speaker and Transport are fatal — no mouth and no media path mean no interview — while Transcriber, Thinker and StallBank each nil their field, record `degraded:asr` / `degraded:thinker` / `degraded:stall`, and let the session run. Uniform-fatal was the obvious design and would have contradicted plan §11's degrade-don't-refuse rule that the rest of the engine already follows.
-* **Addition**: `POST /v1/sessions/{id}/transport` is routed. It had been documented and advertised while reaching no handler.
-* **Design**: `Transport.Accept` runs on the actor's own context, deliberately outside the connect budget. SDP answer generation is local and cheap by the port's own contract, and folding it into the vendor-connect timeout would make a slow vendor look like a malformed offer. This needed a reply channel on `command`, which had none.
-* **Design (cleanup ownership)**: the connector waits for every Start/Warm goroutine to *return* — it never abandons one — and only then decides between handing off and cleaning up after itself. The failure it exists to prevent is a stop arriving mid-connect and the vendor session landing three seconds later with nobody left to close it. A drain step in the actor's teardown catches the residual race where a buffered send to `control` succeeds after the loop has stopped reading.
-* **Design (pump split)**: `AudioDelta` goes to a drop-oldest ring and everything else to a never-drop channel, because losing 20 ms of audio is a glitch and losing a `ResponseDone` wedges the turn loop. Every blocking send carries a `ctx.Done()` escape. **Verified by re-introduction**: removing that escape strands the pump mid-send on a full channel, and both the explicit assertion and goleak fire. This makes the previously-`unused` `drops` counters live.
-* **Fix (found during the work)**: `handleAttachTransport`'s synchronous fatal branches called `windDown` directly, but the loop kept running afterwards with the state machine already in DONE. It now reports that it ended the session so `handle` exits.
-
-## 2026-08-23 (engine, M1.6 — the actor's dead code and wrong flags)
-* **Fix (the greeting dead-ended every real session)**: the actor moved GREETING→SPEAKING and emitted `opening_line`, but nothing ever left SPEAKING. Its only legal exit is LISTENING via `ResponseDone`, and the opening line is **pre-synthesized audio, not a vendor response**, so no `ResponseDone` was ever coming. It looked tested because `conversation_test.go` hand-injected one that no production path emits — that injection is now gone, and the test drives the real exit. New `timerPlayout` is armed for the clip's own duration on entering SPEAKING with a pre-synth clip; it is turn-scoped, so the existing `cancelTurnScoped` already makes a barge-in cancel it. With no StallBank wired the duration is estimated from the text at 150 wpm, floored and capped: a session that degrades beats one that hangs.
-* **Fix (three of six timers were never armed)**: `timerSilence` and `timerSession` are now armed, so plan §11's abandonment behaviour and the hard duration cap **exist for the first time** — an interviewer who closed the tab previously left a session running against a paid vendor connection. The silence cap is armed and cancelled inside `transition` rather than at each call site, because LISTENING is entered from five places and an alarm armed at four of them reads as working. The duration cap starts when the interviewer joins, not when the actor is built: a session can sit in CONNECTING with nobody talking, and charging that to the hour would cut a real interview short. Zero means *not armed*, never *fire immediately* — zero is what an unset config value reads as.
-* **Change**: `timerStall` is **deleted**, not fixed. It was dead three ways — never armed, no handler, present only in `String()` — and its documented job, bounding how long a stall clip covers for the Thinker, is what `timerThinker` already does. `timerPlayout` takes its place in the enum.
-* **Fix (the barge-in flag was the wrong field, and applied in one state of five)**: the mic gate and `bargeIn` keyed off `voice_directives.may_interrupt`, which means the **opposite** thing — the persona's licence to talk over the human. `turn_policy.barge_in_allowed` was read nowhere in the module, tests included. Both now read `barge_in_allowed`, and the gate applies across every speaking-ish state rather than `StateSpeaking` alone: a no-barge-in persona previously yielded during its own opening line and its own stall clips, the two moments an interviewer is most likely to talk over it.
-
-  The test helper is the durable part of this fix. `testContract` now sets `may_interrupt` to the **opposite** of `barge_in_allowed` on purpose, so any code reaching for the wrong field fails immediately. Setting them alike would let the conflation return with every test still green — which is exactly what happened before, and why the done-when this file records as passed for task 13 had tested the wrong field.
-* **Fix (playout measured samples, not duration)**: the tracker accumulated a sample count and divided once by a single fixed rate, so 24 kHz vendor audio alongside 48 kHz transport audio mis-measured the truncation point — with the fault re-introduced, two seconds of audio reports as three. It now converts each frame with **its own** declared rate, in microseconds so a 20 ms frame is exact and a long answer accrues no rounding drift. A frame with no declared rate falls back to the default rather than being dropped: dropping it would under-count what was sent, and `sentMs` caps the heard estimate, so a dropped frame truncates a barge-in early.
-* **Fix (silent drops)**: `handleSpeakerEvent` had no default. `ports.SpeakerEvent` has seven kinds and this build handles four, so `InputTranscript`, `ToolCall` and `SpeakerError` reached the actor and vanished. Ignoring them is right for now; ignoring them silently is not — it is indistinguishable from an adapter that emitted nothing. `SpeakerError` is the one that will matter: D5 has the Gemini adapter emit `SpeakerError{Fatal:true}` on resumption failure, and until the rebuild path lands in M5 this event is its only trace. `handlePartial` gained the same treatment for an utterance that ends in a state with nothing to do with one.
-* **Verification**: every fix above was re-introduced and its guard watched to fail — the greeting hang, both unarmed caps, the silent event drop, the sample-count regression, and the flag conflation (which fails three separate tests). The layering gate also caught the first draft of a new test helper calling `time.After` inside `internal/session`, which is rule 6 doing its job on the author of this entry.
-
-  Updated [Live-session engine](/concepts/subsystems/engine.md).
-
-## 2026-08-23 (engine, M2.1 — the sample domain)
-* **Addition**: `internal/audio` is real — PCM16 conversion, a polyphase rational resampler, speech-onset detection, a receive jitter buffer with concealment, and the outbound send ring. 21 tests. It knows nothing about vendors, transports or sessions, which is what lets the layering gate allow every adapter to import it while the session core may not.
-* **Design (resampler)**: the three rates in this system disagree by design — the browser sends 48 kHz, the Speaker vendor speaks 24 kHz, ASR wants 16 kHz — so conversion is unavoidable, and its quality is a product property rather than a detail: aliasing lands on exactly the consonants that separate one technical term from another, in a pipeline graded on what a candidate was *heard* to say. Polyphase L/M with a Kaiser-windowed sinc, streaming, with the filter history carried across calls because a stateless per-frame resampler clicks at every frame edge fifty times a second.
-
-  **D7's bar is measured, not asserted**: 87–88 dB SNR on every rate pair the engine uses (the ceiling there is PCM16 quantisation itself, not the filter), 111 dB rejection of a 10 kHz tone downsampled into a 16 kHz stream, and a p99 of 70 µs per 20 ms frame against a 1 ms budget. The latency bound is a **test**, not a benchmark, because a benchmark nobody reads cannot fail.
-
-  Two numbers were arrived at by measurement rather than taste. `tapsPerPhase` started at 32 and gave only ~23 dB of stopband rejection near the cutoff — audible aliasing — so it is 64. And the cutoff sits at 0.45 of Nyquist rather than 0.5, because a filter cannot fall vertically and placing the corner exactly at Nyquist spends half the transition band above it, where everything folds back into the signal.
-* **Fix (found by the test, in code written the same hour)**: the resampler's priming history is `tapsPerPhase-1` samples sitting *before* the stream, at input indices −(K−1)..−1. Labelling them 0..K−2 shifted every stream by K−1 samples against its own filter phase and produced output that was stable, streamed seamlessly, and wrong. Worth recording because the first SNR run reported −3 dB and the streaming-continuity test passed throughout: a consistent wrong answer is not a flaky one, and only an absolute measurement catches it.
-* **Note (a measurement bug, not a code bug)**: the second SNR run reported 14.2 dB and 23.7 dB — suspiciously repeatable numbers. They were exactly the artefact of rounding a **fractional** group delay to an integer before comparing against the ideal tone; at 1 kHz a 0.75-sample error alone reads as 14.2 dB. The resampler was already correct. A measurement that can fail this way has to be read before it is believed.
-* **Design (VAD)**: onset is load-bearing, offset is not. D6 gives end-of-turn to the Transcriber because an energy threshold cannot tell a thinking pause from a finished question — and the human here is a manager *composing* a question, for whom one- and two-second mid-question pauses are the normal case, worse still on code-switched Hinglish. The offset signal exists only as the degraded fallback for when the Transcriber is gone. The noise floor falls fast and rises slowly, and never rises while speech is in progress: a floor that tracks a talker upward goes deaf mid-sentence and then reports an end-of-turn that never happened.
-* **Design (send ring)**: drop-oldest, because the persona's audio is real-time and a backlog the listener has already waited through is worth less than the newest frame. A generation counter makes barge-in correct in O(1) — every queued frame belongs to a response the human stopped listening to, and playing it after the interruption is the audible form of the ghost-utterance bug. Superseded frames are discarded on the *read* side, so the barge-in path never walks the queue under a lock.
-* **Design (jitter buffer)**: three frames deep, deliberately shallow. A conferencing product would run deeper and be right to; this buffer sits on the path between the interviewer finishing a question and the persona being allowed to think about it, which is the time the whole two-model design is fighting for. The distinction that matters most: a buffer that has run **dry** is not a concealed loss, and concealing one invents audio out of nothing — on the mic path, speech the interviewer did not make.
-* **Verification**: seven faults re-introduced and every guard watched to fail — the resampler's frame-boundary history, the anti-alias cutoff, the ring dropping the wrong end, the generation bump, the ring aliasing its caller's buffer, a dry buffer concealing, and the noise floor tracking upward through speech.
-* **Fix (lint)**: nine `gosec` G115 findings on PCM16 byte↔sample conversion were deliberate two's-complement reinterpretations. Rather than nine suppressions, the conversions now funnel through one `decodeSample`/`encodeSample` pair carrying the reasoning once — which also deleted a second copy of the sample decoder that had grown inside the jitter buffer's concealment path, and a second copy of a sample-format decoder is a second place for a byte-order bug to live.
-
-## 2026-08-23 (engine, M2.2 — the WebSocket/PCM transport)
-* **Addition**: `internal/transport/wsfallback` is a working media plane — ticketed attach, PCM16 over a WebSocket, jitter buffering, resampling to the rate the Speaker wants, speech-onset detection and playout heartbeats. 9 tests, all driving a real socket over `httptest`. One new dependency, `github.com/coder/websocket`.
-* **Design (why this one first)**: it is the fallback in the plan, and it is also the transport that needs **no CGo and no ICE**, which makes it the one a test can drive end to end and the one a client can use today. The trade is explicit: raw PCM over TCP has no audio-tuned congestion control and no FEC, so a lossy path degrades into latency rather than into a glitch — the wrong failure mode for a real-time call, which is why it is the fallback and not the primary. It is markedly better than no session.
-* **Design (accept and attach are separate)**: the session actor needs a `MediaConn` the moment it accepts an offer — the port says so — but the browser cannot connect until it has been handed the answer telling it where. So `Accept` mints a connection that is real but not yet attached, and the socket binds to it later by ticket. Tickets are **single-use** and expire: a reusable one would let a second client join a live interview's audio path.
-* **Fix (a port that could not be implemented)**: `MediaConn.Control()` returned a plain bidirectional `chan ControlMessage` for both directions at once. A transport that both reads and writes one channel races its own consumer for the messages it just sent. Split into a receive-only `Control()` and a `SendControl(ctx, msg)`. Nothing consumed it yet, so the fix was free — and it would not have been once four adapters had implemented it.
-* **Fix (a wire-format bug, caught by gosec)**: the item identifier's length was written as `byte(len(itemID))`. The browser echoes that identifier back on every playout heartbeat and the actor matches heartbeats to the in-flight item by it, so a truncated identifier never matches and barge-in truncation silently falls back to assuming everything sent was heard. Now a checked two-byte field, with an undeliverable frame dropped and logged rather than sent corrupt.
-* **Design (nothing on the audio path blocks)**: `SendAudio` queues into the send ring and returns — the caller is the session actor's owner goroutine, and a send that could wait on a slow client would stall a live conversation's turn loop, which is exactly what the port's no-blocking-I/O clause forbids. Symmetrically, the read loop never blocks publishing: a blocked read loop stops reading the socket, so one slow consumer would silence every other signal. Both shed and count instead.
-* **Verification**: five faults re-introduced and every guard watched to fail — reusable tickets, a blocking `SendAudio`, mic audio forwarded unconverted at the browser's rate, a malformed offer still registering a ticket, and a ticket left outstanding when the session closes before the client arrives.
-* **Fix (in the tests)**: the first draft used `defer goleak.VerifyNone(t)` while the rig registered the connection's close with `t.Cleanup`. Deferred functions run *before* cleanups, so the check fired while the connection was still open and reported its own live goroutines as leaks. The check is now registered first with `t.Cleanup`, which — cleanups running last-registered-first — makes it run last.
-* **Wiring**: `cmd/engined` serves the media path and hands the transport to every session. **Smoke-tested against the real binary**: session create returns a transport URL, the offer returns a ticketed answer, and the session then winds down fatally with `no speaker configured` — which is correct, and is the honest state of the build. There is a media path and still no mouth.
-
-## 2026-08-23 (engine, M3 — the mouth, and the first end-to-end session)
-* **Addition**: `internal/vendors/gemini` implements the Speaker port over the Gemini Live API — 15 offline tests against a local WebSocket, plus the repo's first `//go:build live` tests. `internal/vendors/geminitts` and `internal/stall` supply the pre-synthesized opening line and stall clips.
-* **Decision (a recorded reversal of D3)**: the adapter speaks the wire protocol directly instead of adopting the official genai SDK. The SDK requires **Go 1.24** while this module targets 1.23, so adopting it is also a toolchain bump and an image change; it pulls in gRPC and protobuf to reach an API that is JSON over a WebSocket; and taking it here without migrating the two reasoning adapters would leave two ways to call one vendor — the outcome D3 itself named as the thing to avoid. D3's own first task was to check whether the SDK could be pointed at a local endpoint, since an adapter that cannot be tested offline is the riskiest package in the build; speaking the protocol directly makes the endpoint a plain field, and the whole adapter including reconnect now runs against a local WebSocket in the offline suite.
-* **Spike (live)**: **a bare `activityStart` is how you cancel a response.** There is no cancel RPC on this API. Measured: the server set `interrupted` **90 ms** after it was sent, emitted **zero** further audio bytes, completed the turn, and did not start a new response. `CancelResponse` is that, and the activity window it opens is left open deliberately — the barge-in that triggered the cancel is almost always followed by the human's own audio.
-* **Guard from an observed fault**: one live session returned a complete **1050-character output transcription and zero audio**, then completed the turn — the persona silent while the transcript, which is grading ground truth, said it spoke. It did not reproduce across eleven later connections, which makes it rare rather than imaginary. A turn that ends with transcript and no audio now emits `SpeakerError{Code:"silent_turn"}`.
-* **Design**: per-turn identifiers are **minted by the adapter**, because Gemini Live supplies none and the actor needs one — its playout tracker keys on it and the browser echoes it back on every heartbeat, so without one no heartbeat ever matches and barge-in truncation silently degrades to "assume it all played".
-* **Fix (a test that could not fail)**: the first deadlock test used `CloseRead` on the fake vendor to "stop it reading". `CloseRead` keeps draining the connection and discarding, so writes never blocked and the test passed even with the socket written to **inline** — exactly the actor-pump deadlock the port forbids. Rewritten against a vendor that genuinely stops reading, and it now fails when the fault is re-introduced. The same investigation found a real flaw: the write queue **blocked when full**, which is only a slower version of the deadlock — it survives a hiccup and dies under a sustained stall, which is worse because it passes every short test. It now sheds and says so.
-* **Fix (arch rule 5 was wrong in an obvious case)**: the model-id detector flagged the bare string `"models/"` — the Live API's resource-path prefix, with no model in it. Obeying it would have pushed a vendor-specific path format into `internal/config`, which is meant to be vendor-neutral. The pattern now requires something after the slash. **Verified the rule still bites**: re-introducing a real `"models/gemini-3.1-flash-live-preview"` literal fails the gate.
-* **Fix (three dead paths, found by running the thing)**: an end-to-end run against the real binary exposed what no unit test could.
-  1. **Nothing pumped the media connection into the actor.** `micAudio` and `playoutBeat` were read by the run loop and written by nothing in production, and persona audio never reached the transport. The media plane and the turn loop were two working halves that never met.
-  2. **`cmdInterviewerJoined` had no producer**, so CONNECTING was terminal, GREETING unreachable, and no interview could ever begin. It looked exercised because tests injected the command by hand. The interviewer is now present when their audio starts arriving.
-  3. **Plan §11 row 4 did not exist.** With no Transcriber nothing could produce the final partial that ends a turn, so the session reached GREETING and stopped. The energy detector now supplies the boundary on the degraded path only — never while a Transcriber is running, because a threshold cannot tell a thinking pause from a finished question and the human here is composing one.
-* **Fix (GREETING was counted as speaking-ish)**: it is not — the opening line does not start until the transition *out* of it. Counting it caused two live faults: the interviewer's first word registered as a barge-in and skipped the opening line, and the mic gate closed, so a persona with `barge_in_allowed=false` **never heard the first question at all**.
-* **Fix (a misattributed error that cost several rounds of debugging)**: the connector waits for every collaborator on one deadline, and on timeout marked the **Speaker** failed regardless of who was slow — overwriting a Speaker that had already started successfully, live, in **847 ms**. Because the Speaker is the one fatal collaborator, a slow stall bank *ended the interview* instead of degrading it, contradicting D8's classification, while the log blamed the mouth. Timeouts are now attributed to whoever actually did not finish. A misattributed error is worse than a vague one: it sends whoever is on call to read the wrong code.
-* **Fix (stall bank warm was serial)**: seven vendor round trips deep before an interview could start, inside the connect budget — which is how the first live run blew a 15-second timeout. Rendered concurrently now, in contract order so clip numbering stays deterministic, with one retry because the vendor was observed returning a bare 500 "please retry" during that same warm.
-* **Fix (the clip was never sent)**: everything around it worked — the bank warmed, the turn was timed from the clip's real duration, the playout alarm fired, the session moved on — and the interviewer heard silence, because nothing ever handed the audio to the transport. Sent as one frame rather than paced: the send ring is half a second deep and drops oldest, so feeding a seven-second clip through it frame by frame would shed all but the tail, and the persona would open with the last half-second of its own greeting.
-* **Result**: a live session now runs end to end against the real binary and the real API — `speaker_connected`, interviewer audio in, onset/offset, degraded end-of-turn, GREETING→SPEAKING, opening line synthesized and delivered, playout alarm, back to LISTENING. **7.1 seconds of persona audio captured off the wire**, in the contract's frozen voice.
-* **Update (bundle)**: the pages the engine work invalidated, brought back into line with the code. [Live-session engine](/concepts/subsystems/engine.md) said "there is no audio path in or out" and listed five now-built packages as `doc.go` placeholders; it now carries what a live session actually does, what it still does not (no recording, so nothing is graded; every session runs `degraded:asr`), and a **live-verified vendor facts** section so nobody re-derives from documentation the six things that were measured. [Project overview](/concepts/project-overview.md) called the engine "Phase 0 skeleton and parked" and still described the dual-model contract fields as a hypothetical v1.2. [Checks](/concepts/runbooks/checks.md) said `golangci-lint` "skips with a hint when not installed" — the exact behaviour that let the lint gate never run while the script printed success; it now documents SKIP versus NOT RUN and why the distinction was bought the hard way. [Test suite](/concepts/subsystems/test-suite.md) gained the Go module's suite, its two load-bearing conventions (no `time.Now` in `internal/session` even in tests; the latency bar is a test, not a benchmark), and the re-introduce-the-fault discipline. [Repo map](/concepts/repo-map.md) gained routing rows for `audio`, `transport`, `stall` and the vendor adapters.
+* **Phase 4 task 32 — contract v1.3, dual-model runtime fields**: `EngineContract` gains `precompiled_beliefs[]`, `stall_phrases[]`,
+  `pregate_lexicon{}`, `unlock_spec`, `tts_voice_id`; `SkillKnowledge` gains `belief_elaborations`/`vague_deflections`/`probe_aliases`
+  (model-authored at cast, casting rules 5a–5c). **`ENGINE_CONTRACT_VERSION` v1.2 → v1.3**; all fields optional so v1.0–v1.2 still parse and
+  degrade to single-model. Determinism: `claim_id`s assigned by code in `knowledge_map` order (a runtime-invented belief would void
+  `seed_fingerprint`). `pick_voice` moved to `engine_contract.py`. **Fix (live)**: `compile_unlock_spec` matched never-markers with
+  `startswith` → "He never reveals…" compiled to `conditional`; now whole-prose with a trigger-word exception. Go types extended; parses by
+  major, no engine change. 391 tests.
+* **Phase 1 turn loop (tasks 9–14)**: `state.go` (eleven states as a testable transition **table**; barge-in/wind-down applied on top),
+  `obs/events.go` (JSONL from the **injected clock** for byte-identical FakeClock logs), `timers.go` (six alarms, each arming carries a
+  **generation** so a stale fire is discarded — the ghost-utterance class), `playout.go` (heard-time from 250 ms heartbeats, capped at
+  bytes-sent, monotonic), `actor.go` (priority nested select: control/timers drain first, media drop-oldest, heartbeats newest-wins). **Fix
+  (goleak)**: timer waiter leaked per cancelled alarm → selects on its own stop channel. **Fix (arch gate)**: `time.After` banned in
+  `internal/session`. **Verification** re-introduced both bugs; found a third — `TestThousandSessionChurnLeavesNothingBehind` armed no alarms
+  so it couldn't fail; now arms every alarm per cycle. 41 tests.
+* **Phase 1 task 15 — confident turn path**: `turn.go` records the §8.2 ingest shape (`probed_skill`, `deferred`, `fallback_used`, `trimmed`,
+  `barged_in`, `heard_ms`); interviewer turn opens on their **first** partial. Sentence bounds enforced by trimming (layer 5), with a grace
+  clause so a cut never lands mid-sentence. **Fix (done-when test)**: `handlePregate` checked state (still `LISTENING` at end-of-turn) so
+  every verdict filed "pending" and fell through to fallback; now keys off the pre-gate deadline being armed, and the pending verdict is no
+  longer compared against an incremented `a.turn`.
+* **Phase 4 task 33 — claims ledger (`internal/ledger`)**: seeded from `precompiled_beliefs` at turn 0, single-writer, `b*`/`r*` ids (designed
+  vs runtime), walk-backs supersede rather than delete. Contradiction detection is deterministic (canonical forms + negation parity), and
+  **honest about its limits — it does not catch semantic contradiction between differently-worded claims; that is the async Judge's job (layer
+  6).** **Fix**: canonicalization missed inflected negation ("fixes"/"does not fix") — now stems trailing s/es/ies and drops do/does/did; a
+  hedge is checked before polarity. 45 session, 13 ledger tests.
+* **Phase 3 task 27 + Phase 4 tasks 34–36 — reasoning model in the loop**: `internal/gate` deterministic pre-gate over **partial** transcripts
+  (a defer must reach the wire within 50 ms); word-boundary alias match, longest wins, totally ordered (Go randomises map iteration). Full
+  defer flow: pre-gate → DEFERRED → stall + `RequestNote(700 ms)` → note injected as a system item. A missed deadline falls back to
+  `on_unknown_question` (layer-3 floor), marked on the record. Ledger → both models (34); ceiling re-assertion (35) on cadence and immediately
+  on any probe at ceiling ≤ 3; unlock (36): the Thinker assesses, **the actor decides**, monotonic, and a `kind:"never"` persona can't be
+  talked into unlocking. **Design**: ledger/pre-gate reach the actor as **ports** (`ports.ClaimLedger`, `ports.PreGate`); a nil collaborator
+  degrades to single-model. **Fix (goleak)**: the note pump exited only on session-context cancellation → per-turn gate closed by every
+  turn-ending path. 55/13/10 tests.
+* **Phase 3 task 29 — Thinker adapter (`internal/vendors/thinkerllm`)**: real reasoning model over Gemini REST (`net/http`+`encoding/json`, no
+  new dep). Runs **speculatively** (each partial supersedes the last guess); short partials ignored; `RequestNote` joins the flight and closes
+  at the deadline without a note. `responseSchema`-enforced output, temperature 0.2 (this layer retrieves, creativity = invention voids
+  `seed_fingerprint`); nil unlock = "no opinion"; claims bounded. **Fix (structural, from Phase 0)**: Go reserves any dir named `vendor` →
+  renamed `internal/vendors/`; would have blocked every adapter, invisible while all six were `doc.go` stubs. **Fix (tests)**: race on
+  `FeedPartial`. **Wiring**: builds Thinker when configured, else single-model with a warning. 11 tests.
+* **Phase 2 M1 — arch guards**: **Fix (guard not guarding)**: rule 1 had been **inert for the whole vendors tree** since the
+  `vendor`→`vendors` rename (`forbiddenPackagePrefixes` still read `internal/vendor`); proof — `thinkerllm`/`judgellm` imported a forbidden
+  `geminijson` while the arch test passed. **Fix (same shape)**: `CheckRestrictedImports` matched `rel == p` not `under()` — would go inert on
+  any `internal/session/foo` split. `geminijson` moved to `internal/vendors/shared/`; **shared-only** carve-out (not same-tree siblings) + new
+  rule 7. **Verification** re-introduced both. **Config**: 13 deployability vars added; `.env.example` now lists all 32 engine vars (was 2 of
+  19) with a test. **Fix**: `BindFlags` advertised required-variable flags that couldn't satisfy them → `ResolveFlagOverrides`, explicit
+  `flagEnvKeys` table. **Spike (live `gemini-3.1-flash-live-preview`)**: manual activity control works; input transcription fires with
+  automatic VAD off; **audio sent outside an activity window is discarded silently** (no bytes/transcription/error). **Design (not build)**: a
+  `[[DIRECTION]]` marker convention *causes* the leak it was meant to prevent (model emits fabricated spans); a plain parenthetical is obeyed
+  and unspoken — no prompt change, no version bump. **Residual risk**: `OutputTranscriptDelta` is not guaranteed to equal what was spoken, and
+  it feeds `max_sentences` and the grading ground truth. **Fix (this file)**: three headings dated 2026-08-24/25 (future) re-dated to
+  2026-08-23.
+* **M1.2 sample regeneration**: **Fix (silent contract-staleness)** — both `engine_contract_sample.json` files were still `v1.0` with all five
+  v1.3 fields absent while `ENGINE_CONTRACT_VERSION` was `v1.3`; `--check` validated schemas only, so the pre-gate compiled empty, the ledger
+  seeded zero beliefs, and `fakes.NewSampleContractSource()` served an unexercisable persona. `scripts/export_engine_contract_sample.py`
+  regenerates both deterministically (proven by byte-diff on a double run); `export_schemas.py --check` now asserts the version matches and
+  the fields are non-empty. `GEMINI_TTS_VOICES` Python mirror of Go `defaultTTSVoices` (30 voices, append-only — `pick_voice` is `hash %
+  len`). v1.0 fixture retained as `engine_contract_sample_v1_0.json` + `TestParse_ToleratesAV1_0ContractAndDegradesToTheSingleModelPath`.
+  **Fix (docs)**: `barge_in_allowed` vs `may_interrupt` now documented side by side.
+* **M1.7 Judge adapter tests (`internal/vendors/judgellm`)**: 11 tests + a 25-case offline fixture that pins parsing and **explicitly does not
+  measure real model judgement quality**. **Fix (hung not failed)**: `stallServer` parked on `Context().Done()` without reading the request
+  body — `net/http` starts disconnect detection only after the body is consumed — so the handler outlived the test and `httptest.Server.Close`
+  blocked; one `io.Copy(io.Discard, r.Body)`, reason recorded. **Fix (goroutine per turn)**: `reviewCtx()` spawned an uncancelled watcher per
+  review → one Judge-lifetime context; `Close` closes `stop` **then** cancels. **Fix (silent gap)**: a vendor-unanswered review dropped with
+  bare `continue` → `Failed()` counted separately from `Dropped()`. **Fix (select outran stop)**: `stop` now checked in its own non-blocking
+  select first. `geminijson` gets its own tests including the **bounded read** (`io.LimitReader(1<<20)`; removing it consumes 32 MiB). **Fix
+  (docs)**: the engine page called the dual-model fields a hypothetical v1.2 — they shipped as **v1.3**.
+* **M1 — lint standard raised**: five linters added (`exhaustive`, `noctx`, `durationcheck`, `nilnil`, `predeclared`). `exhaustive`
+  mechanically found the timer switch missing `timerStall` (three timers never armed → no abandonment/duration cap) and the command switch
+  missing three cases. `default-signifies-exhaustive` deliberately off. **Fix**: `arch.LoadPackages` ran `go list` with no context (could hang
+  CI on an unreachable proxy) → `CommandContext` 2-min. **Fix**: `RequireMinor`/`truncate` shadowed `min`/`max` builtins → `want`/`limit`.
+  Note: `contextcheck` trialled, left off. The session findings are the spec for M1.6.
+* **M1.5 — failable connect + Speaker event pump**: `DepsFactory` replaces the infallible `newDeps`; failure is **classified** —
+  Speaker/Transport fatal, Transcriber/Thinker/StallBank each nil their field and record `degraded:*` (plan §11 degrade-don't-refuse). `POST
+  /v1/sessions/{id}/transport` routed. `Transport.Accept` runs outside the connect budget. Pump split: `AudioDelta` to a drop-oldest ring,
+  everything else never-dropped, every blocking send with a `ctx.Done()` escape (verified by re-introduction). **Fix**:
+  `handleAttachTransport`'s fatal branch called `windDown` but the loop kept running.
+* **M1.6 — the actor's dead code and wrong flags**: **Fix**: the greeting dead-ended every real session — SPEAKING's only exit is
+  `ResponseDone` but the opening line is pre-synth audio, so none ever came (a hand-injected one hid it in tests). New `timerPlayout` armed
+  for the clip's duration. **Fix**: `timerSilence`/`timerSession` now armed, so abandonment and the hard duration cap **exist for the first
+  time** (zero means not-armed, not fire-immediately). `timerStall` **deleted** (dead three ways; its job is `timerThinker`'s). **Fix**:
+  barge-in keyed off `voice_directives.may_interrupt` — the **opposite** meaning; `turn_policy.barge_in_allowed` was read nowhere. Both now
+  read `barge_in_allowed`, gate applies across every speaking-ish state; the test helper sets `may_interrupt` **opposite** on purpose so a
+  re-conflation fails. **Fix**: playout measured a sample count over one fixed rate → per-frame declared rate in microseconds. **Fix**:
+  `handleSpeakerEvent`/`handlePartial` had no default (silent drops of `InputTranscript`/`ToolCall`/`SpeakerError`). Verification
+  re-introduced every fix.
+* **M2.1 — the sample domain (`internal/audio`)**: PCM16, a polyphase rational resampler, speech-onset detection, a receive jitter buffer, the
+  send ring. 21 tests. **D7 measured, not asserted**: 87–88 dB SNR per rate pair, 111 dB rejection, p99 70 µs/frame against a 1 ms budget (the
+  latency bound is a **test**). `tapsPerPhase` 64 and cutoff 0.45 Nyquist were arrived at by measurement. **Fix**: priming-history
+  off-by-(K−1) produced a stable **wrong** answer (first SNR run −3 dB while continuity passed — only an absolute measurement catches it).
+  Note: a later 14.2/23.7 dB reading was a measurement artefact (fractional group delay), the resampler was correct. **Design**: VAD onset is
+  load-bearing, offset is the degraded fallback (D6 gives end-of-turn to the Transcriber); send ring drop-oldest + generation counter for O(1)
+  barge-in; jitter buffer three frames, and a **dry** buffer is not a concealed loss. Verification: seven faults. **Fix (lint)**: nine gosec
+  G115 → one `decodeSample`/`encodeSample` pair.
+* **M2.2 — the WebSocket/PCM transport (`internal/transport/wsfallback`)**: a working media plane, 9 tests over a real socket, one dep
+  (`github.com/coder/websocket`). It needs **no CGo and no ICE** (the fallback; raw PCM degrades into latency not glitches). Accept and attach
+  are separate; tickets are **single-use** and expire. **Fix**: `MediaConn.Control()` returned one bidirectional channel (races its own
+  consumer) → receive-only `Control()` + `SendControl`. **Fix (gosec)**: itemID length written as `byte(len(...))` truncated the identifier
+  the browser echoes → checked two-byte field. **Design**: nothing on the audio path blocks (both directions shed and count). Verification:
+  five faults. **Fix (tests)**: `defer goleak` ran before `t.Cleanup`'s close → registered goleak first with `t.Cleanup`. **Wiring**:
+  smoke-tested — winds down fatally with `no speaker configured`, the honest state (media path, still no mouth).
+* **M3 — the mouth, and the first end-to-end session (`internal/vendors/gemini`)**: Speaker over Gemini Live, 15 offline + the repo's first
+  `//go:build live` tests; `geminitts` + `internal/stall`. **Decision (recorded reversal of D3)**: the adapter speaks the wire protocol
+  directly, not the genai SDK (SDK needs Go 1.24, pulls gRPC/protobuf for a JSON WebSocket, and would leave two ways to call one vendor); the
+  whole adapter runs against a local WebSocket offline. **Spike (live)**: a bare `activityStart` is how you cancel a response (no cancel RPC)
+  — measured `interrupted` at 90 ms, zero further audio. **Guard**: one live session returned a 1050-char transcript with **zero audio** →
+  `SpeakerError{Code:"silent_turn"}`. **Design**: per-turn ids minted by the adapter. **Fix**: a deadlock test used `CloseRead` (keeps
+  draining) so it couldn't fail; rewritten, and the write queue that **blocked when full** now sheds. **Fix**: arch rule 5 flagged the bare
+  `"models/"` prefix → requires something after the slash (verified it still bites). **Fix (three dead paths, found by running the binary)**:
+  (1) nothing pumped the media conn into the actor; (2) `cmdInterviewerJoined` had no producer, so CONNECTING was terminal; (3) plan §11 row 4
+  didn't exist — the energy detector now supplies the degraded-path boundary. **Fix**: GREETING was counted speaking-ish → the first word
+  registered as barge-in and a `barge_in_allowed=false` persona never heard the first question. **Fix**: the connector marked the **Speaker**
+  failed on any timeout, overwriting a Speaker that connected in 847 ms — a slow stall bank ended the interview and the log blamed the mouth.
+  **Fix**: stall-bank warm was serial (blew the 15 s budget) → concurrent in contract order, one retry. **Fix**: the clip was never sent to
+  the transport → sent as one frame (the ring is half a second, drop-oldest). **Result**: a live session runs end to end against the real
+  binary and API — **7.1 s of persona audio captured off the wire** in the frozen voice. Bundle: the engine page corrected (no longer "no
+  audio path"; documents what a session does and doesn't — no recording, every session `degraded:asr` — plus a live-verified vendor-facts
+  section); `project-overview`, `checks` (SKIP vs NOT RUN), `test-suite` (the re-introduce-the-fault discipline), `repo-map` updated.
 
 ## 2026-08-23 (control plane, session recording)
-* **Addition**: **browser-produced session recording**, for `modality="voice"` sessions only. Recorded in the **browser**, not the Go engine, because the browser is the only place today where both halves of the call already exist as addressable audio — `ui/src/VoiceSessionView.jsx` already holds the manager's mic `MediaStream` and the persona's remote WebRTC track for the `<audio>` element. The engine's own `Recorder`/`Finalizer` ports exist for this (`engine/internal/ports/{record,finalize}.go`) but `engine/internal/record/` and `engine/internal/store/s3/` are still `doc.go` stubs and no audio flows through `engined` yet — building the recorder there would have recorded nothing.
-
-  Shape: new table `session_recordings`, **`session_id` as its primary key** (one recording per session, ever, whoever produces it), `status ∈ (recording,complete)`, `producer ∈ (browser,engine)` default `browser`, `channel_layout = 'manager_left_candidate_right'` (mirrors the engine `Recorder` port's `WriteHuman`/`WritePersona` split), `next_seq`/`byte_size` for chunk bookkeeping, `storage_key` naming a file under `RECORDINGS_DIR` (default `recordings`, gitignored). New port `RecordingStore` + composition `RecordingWorkflowStore` (adds a fifth narrow port and fifth composition to `control_plane/ports.py`); new `RecordingMeta` Pydantic model — `storage_key` deliberately **not** on it, since where bytes live is a producer's internal detail, not something a client should construct a path from. Three endpoints: `POST /sessions/{id}/recording/chunks?seq=N` (raw bytes; `seq` must equal `next_seq`, enforced in the adapter the way turn indexing is; `Content-Type` on `seq=0` becomes the stored `mime_type`; 409 on wrong seq, already-finalized, or a non-voice session), `POST /sessions/{id}/recording/finalize` (idempotent), `GET /sessions/{id}/recording` (serves a **partial** recording too — `status='recording'` is not a 404, since the honest artifact of a crashed session is a partial file, not a hidden one). `SessionResponse.recording: RecordingMeta | None` and `SessionSummary.has_recording: bool` ride the existing session reads.
-
-  The browser side (`VoiceSessionView.jsx`): a `ChannelMergerNode` puts the manager's mic on the left channel and the persona's remote track (tapped off the same stream already feeding the `<audio>` element — Chrome only keeps producing Web Audio samples from a remote stream while it is also attached to a playing element) on the right, into one `MediaStreamDestination` that `MediaRecorder` chunks every 10s and uploads on its own ordered promise queue, separate from the transcript's queue, since the server enforces strict per-recording `seq` ordering the same way it enforces turn ordering. Each chunk retries 3× with backoff; on final failure the client stops posting and stops the recorder rather than let its notion of `seq` drift from the server's — what already landed is a valid, playable partial, which is the better thing to keep than a stream of 409s. Recording teardown (`stopRecording().then(finalizeRecording)`) runs **alongside, never gating**, the transcript-drain-then-`/end` sequence: a lost recording must not cost the transcript, which is what the evaluation layer actually reads.
-
-  Decisions stated loudly because they are vetoable, not defaults: bytes land on the operator's own host in `RECORDINGS_DIR`, never a third party — the realtime vendor already carries the live call, the recorded copy is a separate upload that only reaches this service; the connecting screen states the call is recorded and stored, and proceeding past it is the consent event; retention is indefinite with manual deletion only, nothing purges `RECORDINGS_DIR` on a schedule; `GET /sessions/{id}/recording` has no auth, like every other endpoint here, and gating one endpoint when the whole API is open would be theatre, not security. Text sessions get no row and no empty file for a recording — chunks POSTed to one are 409, by decision, not oversight.
-
-  Verified end-to-end against a running server (not just the offline suite, per the "run it to find dead wiring" discipline): chunk 0/1 → 201 with accumulating `byte_size`; wrong seq → 409; text session → 409; unknown session → 404; empty body → 422; partial GET → 200 with the right `Content-Type`; finalize → `status='complete'`; second finalize idempotent with `updated_at` unmoved; chunk after finalize → 409; `SessionResponse.recording` populated; `SessionSummary.has_recording` true only for the voice session; bytes on disk equal the concatenated chunks. `owner_handover/session_recording_schema.json` regenerated (new), plus the session output/summary schemas. `scripts/check.sh` green, including the new `tests/test_recording.py`.
-
-  New page: `contracts/session-recording.md`. Updated: `contracts/{realtime-voice,storage-ports,database-schema,rest-api,session-transcript,index}` (`realtime-voice.md`'s "the audio never touches this service" narrowed to the **live call** — a recorded copy now uploads out of band, off the latency path), `modules/{control-plane-api,control-plane-repository}`, `subsystems/{ui,control-plane,test-suite}` (`ui`: `VoiceSessionView` now records dual-channel; `control-plane`: the port count corrected from four to five; `test-suite`: the new offline test file), `runbooks/{dev-setup,run-an-interview,checks}` (`RECORDINGS_DIR`; a playback step and a curl recipe; the new check-table row), `repo-map` (routing rows for `session_recordings`, the engine's still-stub `Recorder`/`Finalizer` ports, `RecordingMeta`), `project-overview` (build state; the engine's "nothing is recorded" bullet narrowed to *engine-side*, since that claim predates this change and is still true for the engine specifically).
+* **Addition — browser-produced session recording** (voice only). Recorded in the **browser**, not the Go engine (`engine/internal/record/`
+  and `store/s3/` are still `doc.go` stubs; building it there would record nothing). New table `session_recordings`, **`session_id` as primary
+  key**, `status ∈ (recording,complete)`, `producer ∈ (browser,engine)` default browser, `channel_layout = 'manager_left_candidate_right'`.
+  New port `RecordingStore` + composition `RecordingWorkflowStore` (fifth narrow port); `RecordingMeta` (`storage_key` deliberately not on
+  it). Endpoints: `POST .../recording/chunks?seq=N` (`seq` must equal `next_seq`; 409 on wrong seq/finalized/non-voice), `.../finalize`
+  (idempotent), `GET .../recording` (serves a **partial** — `status='recording'` is not a 404). Browser: a `ChannelMergerNode` puts mic left /
+  persona right; `MediaRecorder` chunks every 10 s on its own ordered queue; teardown runs alongside, never gating, the transcript drain.
+* **Decisions stated loudly (vetoable)**: bytes land on the operator's host in `RECORDINGS_DIR`, never a third party; the connecting screen is
+  the consent event; retention is indefinite/manual; `GET` has no auth (the whole API is open — gating one would be theatre). Text sessions
+  get no row (chunks → 409 by decision). Verified end to end against a running server. New: `contracts/session-recording.md`.
 
 ## 2026-08-26 (report engine)
-
-* **Addition**: `report_engine/` — the **standalone** manager-assessment report engine, plus `docs/REPORT_ENGINE_SCORING_SPEC.md`, the research-backed scoring design it implements. Phases 1–5 of the spec's build order are built: bundle in, deterministic report out as JSON and self-contained HTML. No judge pass and no audio module yet.
-
-  **It imports no first-party package** — `ALLOWED_IMPORTS["report_engine"] = set()`, the only such entry in the repo. The rubric **travels in the input bundle** rather than being imported from `evaluation_agent`, because sibling agent packages may not import each other and the alternative was a second duplicated rubric declaration policed by a drift test; the repo already pays that price once in `test_rubric_vocabulary_agrees_across_the_two_agents`. `scripts/make_bundle.py` is the piece that does the importing, assembling a bundle from `control_plane.db`, a plain turn list, or the worked example in `tests/fixtures/demo_turns.json`.
-
-  **The comparability mechanism is the persona, not the job card.** `candidate_agent`'s archetypes already carry `must_discover` (weights summing to 1.0), `session_beats` and `stresses`; two managers facing `inflated_resume` get the same things to discover at the same weights, which is the fixed denominator the BRD's "comparable across 3,000 managers" needs. `discovery_attempted` is the heaviest structure signal and is computed against it. Whether a signal was *surfaced* needs reading comprehension and is deferred to the judge; whether it was *asked about* is countable now, and the two are named differently on purpose.
-
-  **New unit of analysis: the question act** (`acts.py`). Turns are too coarse — one manager turn routinely holds a preamble and two questions. Acts are typed by rule in strict precedence (`leading` > `double_barrelled` > `behavioural` > `situational` > `closed` > `open_other`), probe-tagged by content overlap with the preceding candidate turn, and clustered into topics. No model call anywhere in the path, which is what makes the counts reproducible.
-
-  **Thresholds are tagged `SOURCED` or `CALIBRATION`** and most are `CALIBRATION` — the metric is research-backed, the cut point is engineering judgment. Three research results actively contradict intuition and are encoded as rules: filled-pause rate *rises* with proficiency and does not discriminate level (r = −.08 n.s.), so fillers are measured and **never** scored; Huffcutt & Arthur's Level III→IV gain is only +.01, so probing is never penalised as a structure violation; and the four-fifths rule is undefined for a single interview, so adverse impact is absent per session and is a cohort metric only.
-
-  **Two operator toggles**, both of which break comparability and are therefore stamped on `Provenance`: `scoring_options.english_weight` (null = advisory panel, a float adds a fifth criterion and scales the rubric's four by `1 − w`) and `scoring_options.language_gate` (BRD **D-6** — a Hindi or code-mixed session is refused rather than scored with English rules; the mix is *always* detected and reported, the flag only decides refuse-vs-warn).
-
-  **Three invariants the tests enforce**, each of which is a decision rather than an implementation detail: an unmeasurable signal carries `value=None` and a reason, never a zero, so nobody is penalised for the modality they were given; positive-only markers (accommodation offered, name pronunciation checked) earn points and never cost them, because no effect-size research supports a penalty; and nothing caps or fails — a protected-topic hit lowers Fair & Inclusive and raises a flag without touching the other criteria or the index, the same standing rule `test_the_rubric_has_no_critical_fail_gate` guards. Determinism is asserted on both the JSON and the HTML.
-
-  Verified against a worked 27-turn session with planted defects: the engine caught both protected topics (`gender_role`, `salary_history`), the leading question, the compound question, the behavioural answer that never reached a Result, the missing `next_steps` role fact and the absent agenda — readiness 60, "Developing". `scripts/check.sh` green end to end including the Go gates, with the new `tests/test_report_engine.py` (23 tests) wired in.
-
-  New pages: `subsystems/report-engine.md`, `references/report-engine-spec.md`. Updated: `subsystems/index`, `references/index`, `repo-map` (six routing rows).
+* **Addition — `report_engine/`**, the standalone manager-assessment report engine, + `docs/REPORT_ENGINE_SCORING_SPEC.md`. Phases 1–5: bundle
+  in, deterministic JSON + self-contained HTML out. No judge pass, no audio module yet. **It imports no first-party package** —
+  `ALLOWED_IMPORTS["report_engine"] = set()`, the only such entry — the rubric **travels in the input bundle**; `scripts/make_bundle.py` does
+  the importing.
+* **Comparability is the persona, not the job card**: archetypes carry `must_discover` (weights summing to 1.0), the fixed denominator
+  "comparable across 3,000 managers" needs; `discovery_attempted` is computed against it (surfaced vs asked-about are named differently on
+  purpose).
+* **New unit — the question act (`acts.py`)**: typed by rule in strict precedence (`leading > double_barrelled > behavioural > situational >
+  closed > open_other`), probe-tagged by overlap, clustered into topics. No model call → reproducible counts.
+* **Thresholds tagged `SOURCED`/`CALIBRATION`**. Three research results encoded against intuition: filled-pause rate rises with proficiency (r
+  = −.08) so fillers are measured and **never scored**; Huffcutt & Arthur's Level III→IV gain is +.01 so probing is never penalised; the
+  four-fifths rule is undefined for one interview so adverse impact is a cohort metric only.
+* **Two operator toggles that break comparability (stamped on `Provenance`)**: `scoring_options.english_weight` (a float adds a fifth
+  criterion, scales the four by `1 − w`) and `scoring_options.language_gate` (BRD **D-6** — refuse vs warn; the mix is always detected and
+  reported).
+* **Three invariants the tests enforce**: an unmeasurable signal carries `value=None` + a reason, **never** a zero; positive-only markers earn
+  points and never cost them; **nothing caps or fails** (`test_the_rubric_has_no_critical_fail_gate`). Determinism asserted on JSON and HTML.
+* Verified against a planted 27-turn session — readiness 60 "Developing". `tests/test_report_engine.py` (23 tests). New:
+  `subsystems/report-engine.md`, `references/report-engine-spec.md`.
 
 ## 2026-08-26 (report engine, run against a real recording)
-
-* **Change**: four corrections to the report engine, every one of them found by running it on a **real 5m15s voice session** (`cooperative_trap`, 24 Aug 2026) rather than on the synthetic fixture. Recorded here because each was invisible to a green offline suite, which is the "run it end to end to find dead wiring" discipline applied to scoring rather than to wiring.
-
-  1. **`discovery_attempted` was inverted for restraint personas.** `must_discover` items are not all "surface it by asking": `cooperative_trap`'s heaviest item (weight **0.40**) is *"Move back to the role without asking a single follow-up on it"*. Scoring that by question-overlap credits the manager for doing exactly the wrong thing. Items are now classified from their `how_to_surface` into **ask-shaped** vs **restraint/statement**; only ask-shaped items are counted, weights renormalise over them, the display states how much of the persona's weight the signal could actually reach, and a persona with no ask-shaped items reports the signal as unmeasurable rather than as zero. For `cooperative_trap` that is 10% of the weight — so the signal now says so instead of quietly scoring 90% of the persona backwards.
-
-  2. **Question detection no longer trusts the question mark.** On a voice session the punctuation is the transcriber's guess, not the speaker's. Three real questions were missed on this recording, including a behavioural one, which moved the Structured score. Two unambiguous shapes are now recovered without punctuation: auxiliary-fronted clauses (`can you tell me`) and a wh-word followed closely by an auxiliary or pronoun (`how did you deal`, `what all type of complaints`). Verified against the full manager side of the recording: **8 of 8 questions found, zero false positives** on the statements — including near-misses like "Let me know if my window is visible to you" and "I would like to end the interview right now".
-
-  3. **The OPEN→ASSESS boundary was too strict.** It opened at the first *open* question, which left two real closed questions sitting in OPEN and escaping the talk-share measurement entirely. It now opens at the first question of any type.
-
-  4. **`promotion_prevention_balance` is no longer scored per session** (weight 0.0, `sub_score=None`, reported as a value only). The spec always said it was descriptive per session — differential framing needs two candidates before it is a bias claim — but it was still scored, and on this session a single risk-framed question manufactured a top-three "focus area" out of nothing. Cohort measure only.
-
-* **Addition**: `report_engine/signals/fairness.py` gains **`volunteered_detail_handling`** (weight 2.0), the deterministic counterpart to `cooperative_trap`'s central trap. Both halves are countable: the volunteering is a protected-topic pattern on a *candidate* turn, and pursuing it is a manager question in the next two turns that returns to the same topic. The failure mode it catches is the *well-meant* follow-up, which the archetype names in `interviewer_failure_modes`. On the real session it read **1 of 1 volunteered detail acknowledged and left alone** — the candidate disclosed a recent marriage unprompted and the manager moved on.
-
-* **Change**: `manager_talk_share` uses **speaking time** when the turns carry `start_ms`/`end_ms`, falling back to word share otherwise, and says which it used. The two measures genuinely disagree and the gap is itself a finding — a manager who speaks slowly uses more time than words, so word share alone overstates the room the candidate was given.
-
-* **Addition**: `scripts/transcribe_recording.py` — stereo recording to speaker-labelled turn list. Because the browser records `manager_left_candidate_right`, each channel is transcribed **on its own**, so speaker labels are exact rather than a diarisation model's guess; that is the payoff of the channel split the recorder was built with. Segments are dropped when their own channel is near-silent across the span (bleed, or an ASR hallucination on silence) or `no_speech_prob` is high. Costs money, so it is not in `scripts/check.sh`. It reaches for the vendor SDK directly, which `tests/test_architecture.py` permits only because `scripts/` is not scanned — when the English module lands the ASR adapter belongs in `llm/` behind a port like every other vendor call here.
-
-* **Validation against independent ground truth.** A session report PDF produced by the earlier pipeline for this same recording gives manager **43.3%** speaking time and **643 words** (172 manager / 471 candidate). The engine's independent path — channel split, ASR, turn merge — produced **42.0%** and **646 words**. The ratio agrees to 1.3 points, which is the number that gets scored. Absolute seconds differ (164.5s vs 103.8s) because ASR segments carry lead-in padding where the server's VAD measured phonation; worth knowing before anyone compares the two figures directly.
-
-  Result on the real session: readiness **62, "Developing"** — Fair & Inclusive 10.0, Communication 8.23, Clarity 4.29 (low confidence: the job card could not be reached, so the clarity checklist is reported absent rather than invented), Structured 3.33 (no behavioural questions, no follow-up probes, 3 of 5 competencies touched). Focus areas: never introduced themselves, never invited the candidate's questions, never set an agenda. All three check out by eye against the transcript.
-
-  Nine new tests (32 total in `tests/test_report_engine.py`), covering the unpunctuated-question shapes, the statements that must *not* trip them, the restraint-persona rule, and the descriptive-not-scored rule. `scripts/check.sh` green.
+* **Change — four corrections, each found running on a real 5m15s voice session (`cooperative_trap`), invisible to a green offline suite**:
+  1. **`discovery_attempted` was inverted for restraint personas** — `cooperative_trap`'s heaviest item (weight **0.40**) is *"Move back to the
+     role without asking a single follow-up"*, so question-overlap credited the wrong behaviour. Items now classified ask-shaped vs restraint
+     from `how_to_surface`; only ask-shaped counted, weights renormalise, and a persona with none reports the signal unmeasurable.
+  2. **Question detection no longer trusts the question mark** (voice punctuation is the transcriber's guess — three real questions missed).
+     Recovers auxiliary-fronted clauses and wh+auxiliary without punctuation. **8 of 8 found, zero false positives**.
+  3. **OPEN→ASSESS boundary** now opens at the first question of any type (was: first *open* question).
+  4. **`promotion_prevention_balance` no longer scored per session** (weight 0.0, value-only) — differential framing needs two candidates; cohort
+     measure only.
+* **Addition**: `fairness.py` `volunteered_detail_handling` (weight 2.0) — the deterministic counterpart to `cooperative_trap`'s trap; catches
+  the well-meant follow-up. Read 1 of 1 on the real session.
+* **Change**: `manager_talk_share` uses **speaking time** when turns carry `start_ms`/`end_ms`, else word share, and says which (the gap is
+  itself a finding).
+* **Addition**: `scripts/transcribe_recording.py` — stereo recording to speaker-labelled turns; each channel transcribed on its own (exact
+  labels, the payoff of the channel split). Costs money, not in `check.sh`; reaches the vendor SDK directly (allowed only because `scripts/`
+  is unscanned — belongs in `llm/` behind a port when the English module lands).
+* **Validation vs independent ground truth**: the engine's path produced **42.0%** manager speaking time / 646 words against the earlier
+  pipeline's 43.3% / 643 — agrees to 1.3 points (the number scored); absolute seconds differ (ASR lead-in padding). Real session: readiness
+  **62 "Developing"**. 32 tests.
 
 ## 2026-08-26 (report in the console: generate, read, print)
-
-* **Addition**: past sessions can now be scored and read from the operator console. New column **"Audio & report"** on the sessions table in `InterviewDetail`: a direct download of the stereo recording when one exists (`recordingUrl` was exported from `api.js` and wired to nothing until now), and a button that opens the session's development report.
-
-* **Addition**: `session_reports` — one row per session, `session_id` as the primary key, for the same reason `session_recordings` uses it: the stable identity is "this session's report", whatever produced it. Headline and provenance (`readiness_index`, `band`, `scoring_version`, `rubric_version`, `english_weight`, `language_gate`) are **denormalised out of the JSON** so the list view can draw a row and a cohort view can segment without parsing every report body. New narrow port `ReportStore` and composition `ReportWorkflowStore` (interview + candidate + session + report).
-
-  **The report is stored, not recomputed on read.** A threshold change must not silently move a score a trainer has already discussed with a manager — the comparability design rests on a report being a fixed artifact with its provenance stamped on it. Regenerating is an explicit `POST`.
-
-* **Addition**: `control_plane/reporting.py` — the seam that assembles a bundle. `report_engine` imports no first-party package by design, so *something* has to read the interview, the session and the catalog and hand it one object; this is that something, and it scores nothing itself.
-
-  **Composed personas turned out to carry ground truth too**, which the first cut missed. A `dyn-` persona has no catalog entry, so `archetypes.get()` raised on every session started from the Compose tab — which is most of the sessions in the database. But the casting agent writes the same `must_discover` scorecard onto the candidate (`persona_json.interviewer_scorecard`), so the fixed denominator survives composition; `persona_block` reads the catalog first and the candidate second, and returns an empty block rather than raising when neither exists. Composed personas get no `session_beats` and no `stresses`: they are assembled from trait presets, not written to stress a criterion.
-
-  A related honesty fix in `report_engine/signals/structure.py`: a composed persona's `how_to_surface` is written from the *candidate's* side ("Offer an easy win and see if real depth appears") rather than the interviewer's ("Ask for the mechanism, the number"). Those are stage directions for the persona, not questions for the manager, so no amount of question-matching can measure them. The allowlist already excluded them; the *reason* it printed called them restraint items, which was wrong. It now says what is actually true.
-
-* **Addition**: three endpoints — `POST /sessions/{id}/report` (generate or regenerate; the two operator toggles ride as query parameters and are stamped into provenance), `GET /sessions/{id}/report` (the stored body), `GET /sessions/{id}/report.html` (the engine's own self-contained page). 409 when nothing was said in the session; 404 for an unknown session or an ungenerated report.
-
-* **Decision — the console embeds the engine's HTML rather than re-drawing the report.** "Download as PDF" is the browser printing that very document, so a second React layout of the same data would mean the report a trainer reads on screen and the one they file could drift apart. One renderer, two outputs. `render.py` gains a print stylesheet (`@page` margins, `break-inside:avoid` on cards and quotes so a finding never loses the quote that makes it checkable). Server-side PDF was considered and rejected: WeasyPrint needs pango/cairo on the EC2 box and supports a CSS subset, headless Chrome means shipping ~400MB of Chromium — both are a large infrastructure change for a document download the browser already does well.
-
-* **Fix**: the sessions table kept offering "Generate" for a report that now existed, because `sessions` is fetched by the parent and does not refetch on generate. `ReportView` reports back and the row remembers, until the next real load corrects it.
-
-  Verified against a running server on a copy of the real database, not just the offline suite: 404 before generation, 201 on generate, 200 on read, 200 with the print stylesheet on `report.html`, `has_report` true in the list, 404 on an unknown session, and `english_weight=0.1` rescaling the rubric to 0.27/0.225/0.225/0.18 + 0.10 (summing to 1.0) with the value stamped on provenance. Then driven in Chrome end to end: generate from the table, report renders in the panel with quoted evidence and timestamps, and the button still reads "Report" after a full page reload. `owner_handover/session_summary_schema.json` regenerated for `has_report`. Six new tests (38 total).
+* **Addition**: past sessions can be scored/read from the console — a new "Audio & report" column (`recordingUrl` was exported and wired to
+  nothing until now) and a report button.
+* **Addition**: `session_reports` — one row per session, `session_id` PK; headline + provenance (`readiness_index`, `band`, `scoring_version`,
+  `rubric_version`, `english_weight`, `language_gate`) **denormalised out of the JSON**. New port `ReportStore` + composition
+  `ReportWorkflowStore`. **The report is stored, not recomputed on read** — a threshold change must not silently move a discussed score;
+  regenerating is an explicit `POST`.
+* **Addition**: `control_plane/reporting.py` assembles the bundle (`report_engine` imports nothing first-party). **Composed personas carry
+  ground truth too** — a `dyn-` persona has no catalog entry (raised on most sessions), but casting writes the same `must_discover` scorecard
+  onto the candidate; `persona_block` reads catalog then candidate, returns empty rather than raising. Composed get no
+  `session_beats`/`stresses`. Honesty fix in `signals/structure.py`: a composed persona's `how_to_surface` is written from the candidate's
+  side, unmatchable by question overlap — the allowlist already excluded them, the printed reason was wrong.
+* **Addition**: `POST /sessions/{id}/report` (generate/regenerate, toggles ride as query params into provenance), `GET .../report`, `GET
+  .../report.html`. 409 when nothing was said; 404 unknown/ungenerated.
+* **Decision — the console embeds the engine's HTML rather than re-drawing it** ("Download as PDF" is the browser printing that document; a
+  second React layout would drift). `render.py` gains a print stylesheet. Server-side PDF (WeasyPrint / headless Chrome) considered and
+  rejected.
+* **Fix**: the table kept offering "Generate" for an existing report (parent doesn't refetch); `ReportView` reports back until the next real
+  load. Verified against a running server on a copy of the real DB (incl. `english_weight=0.1` rescaling to 0.27/0.225/0.225/0.18+0.10). 38
+  tests.
 
 ## 2026-08-26 (language gate: default reversed, detection corrected)
-
-* **Reversal**: `scoring_options.language_gate` now defaults to **`false`** — a non-English session is **scored**, not refused. The original default of `true` was wrong and production proved it: a real Frontline Sales Executive session came back `NOT SCORED — language_unsupported` and the manager got nothing. An interview happens in whatever language the room speaks; declining to report on one is the tool failing its user, not protecting them. The gate remains available for an org that would rather have no number than a shaky one, but it is opt-in.
-
-* **Addition**: the honest half of scoring anyway. `LANGUAGE_SENSITIVE` in `report_engine/signals/__init__.py` names the 22 signals computed from English lexicons or English syntax; `_downgrade_for_language` marks any criterion carrying them **low confidence** with the affected share spelled out ("100% of this criterion's evidence is counted from English patterns, and this session was detected as 'non-latin'"). The score still stands — what changes is the claim made about it. A Hindi question matches no English question pattern; an Urdu turn trips no English protected-topic phrase.
-
-* **Fix — a false positive that refused English sessions.** `the` was in the romanised-Hindi wordlist (Hindi *थे*) and is also the commonest English word, so it counted for both sides: **"Walk me through the last time the store missed the target."** scored `hi-en` at 0.5 English share and was **gated**. The wordlists are now disjoint, asserted by a test. Also removed for the same ambiguity: *par*, *hum*, *ya*, *tha*, *ho*, *tum*. Precision beats recall here, because the cost of a false positive was a refused report.
-
-* **Fix — script detection covered only Devanagari.** The production session that triggered this was part **Urdu**, which is written in Arabic script, so the Devanagari check never fired and the verdict came entirely from the Latin half (via the `the` collision above — two bugs conspiring to produce a plausible-looking wrong answer). Detection now spans Arabic/Urdu plus Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada and Malayalam.
-
-* **Fix**: the English share is now computed from Latin-script tokens **regardless** of a script hit. A session that is mostly English with one Urdu turn was being reported as "0% English function words", which misdescribes it — the script hit changes the verdict, not the arithmetic.
-
-* **Fix**: `GET /sessions/{id}/report` on an unknown session said "no report generated for this session yet" rather than "session not found" — `_report_or_404` ran before the session lookup, sending someone to the generate button for an id that does not exist.
-
-* **Fix**: `build-artifacts.sh` tars with `--no-xattrs`. A tarball built on macOS carried `com.apple.provenance` attributes that GNU tar on the instance cannot read, emitting ~130 warning lines into the deploy output — enough noise to hide a real error.
-
-  Four new tests (42 total): pure English is never mistaken for code-mixed, the wordlists are disjoint, non-Latin script is caught beyond Devanagari, a non-English session is scored by default, and its English-dependent criteria come back low confidence.
+* **Reversal**: `scoring_options.language_gate` now defaults to **`false`** — a non-English session is **scored**, not refused. Production
+  proved it: a real Frontline Sales session came back `NOT SCORED — language_unsupported` and the manager got nothing. The gate stays
+  available, opt-in.
+* **Addition**: `LANGUAGE_SENSITIVE` names the 22 signals computed from English lexicons/syntax; `_downgrade_for_language` marks any criterion
+  carrying them **low confidence** with the affected share spelled out. The score stands; the claim about it changes.
+* **Fix — a false positive that refused English sessions**: `the` was in the romanised-Hindi wordlist (Hindi *थे*) and is the commonest
+  English word, so *"Walk me through the last time the store missed the target."* scored `hi-en` and was gated. Wordlists now disjoint
+  (asserted); also removed *par, hum, ya, tha, ho, tum*.
+* **Fix**: script detection covered only Devanagari — the triggering session was part **Urdu** (Arabic script). Now spans Arabic/Urdu,
+  Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam.
+* **Fix**: English share now computed from Latin-script tokens regardless of a script hit.
+* **Fix**: `GET .../report` on an unknown session said "no report generated" not "session not found" (`_report_or_404` ran before the session
+  lookup).
+* **Fix**: `build-artifacts.sh` tars with `--no-xattrs` (macOS `com.apple.provenance` emitted ~130 warning lines into deploy output). 42
+  tests.
 
 ## 2026-08-26 (the report gets its own screen)
-
-* **Change**: the development report is now a **screen**, not a panel wedged above the sessions table. `App.jsx` gains a `report` screen alongside `list`/`create`/`detail`/`session` — the same `useState` switch the console already uses instead of a router — with its own breadcrumb trail (`Interview Training › <role> › <candidate> · report`) and the full viewport height. It is a document a trainer reads end to end and prints from; squeezing it into a strip above a table fought that.
-
-  `InterviewDetail` no longer owns any report state: the row calls `onOpenReport(session)` and the parent switches screens. That also removed the `justReported` set it kept to stop a freshly generated report still reading "Generate" — leaving the report screen now refetches the session list, so the row reflects the server rather than a local guess.
+* **Change**: the development report is now a **screen** (`App.jsx` `report` alongside `list`/`create`/`detail`/`session`), with its own
+  breadcrumb and full viewport — it is a document read end to end, not a strip above a table. `InterviewDetail` no longer owns report state;
+  leaving the screen refetches the session list so a row reflects the server, not a local guess.
 
 ## 2026-08-26 (audio analysis agent, and the report built from it)
-
-* **Addition**: `analysis_agent/` — a new sibling package (`llm ← analysis_agent ← control_plane`) that analyses a session's **recording** rather than its stored transcript. Prompted by evidence, not preference: on a real session the live STT transcript rendered *"May I know what's your background?"* as *"May I introduce myself?"* — a different interview behaviour entirely — and turned a Hindi question into Urdu script that matched no English pattern. The audio is the source of truth.
-
-  **The instructions are a shipped document, not a string literal.** `analysis_agent/INSTRUCTIONS.md`, versioned `v1.1` and read at runtime, so the rules every report rests on are reviewable as prose and a change to them shows up in a diff as prose. Every observation type carries an explicit test rather than a description: *the subject of the sentence* decides whether a shift-pattern question is a requirement question or a protected-topic one; **surfaced** requires both that the manager asked *and* that the candidate revealed; a `must_discover` whose `how_to_surface` says not to ask is a **restraint** item where surfaced means the manager refrained.
-
-* **Decision — 60% how the manager handled *this persona*, 40% expectation coverage**, composed in code where the model never sees the weights. The expectation is a plan made before anyone spoke; the interview is a conversation with a specific person. The case that forced it: a manager who reads a disengaged or unsuited candidate in the first minutes and closes politely and early has done the right thing and will have covered almost none of the plan. Coverage is therefore scored against **reachable** items, and `EarlyEndAssessment` separates a *judged close* (evidence gathered, fair chance given, civil exit) from an *abandoned interview* — the test is not duration, it is whether there was evidence before the decision.
-
-* **Addition**: the windowing harness. It exists for context size and for a defect measured on real audio: un-windowed, the model returned **21 of 53 turns ending after the recording did**, the furthest at 9m06s on a 5m46s file. Four-minute windows with code applying the offsets brought anchors back in range. Anchors are validated against **the window they came from**, not merely the whole recording — a late window's overshoot otherwise hides under the earlier windows' headroom, which is exactly how a 352s timestamp survived a 346s recording. Rejected anchors are surfaced as `dropped_anchors`, never hidden. Windows run concurrently, so a twenty-minute interview costs about the same wall-clock as a six-minute one.
-
-* **Addition**: `AudioModel` port in `llm/base.py` and `GeminiAudioModel`. `AUDIO_PROVIDERS` is **deliberately partial**, like the realtime table: only Gemini reads audio natively, so `audio_analysis_available()` lets the UI hide the button rather than show one that errors. Also found and fixed while adding the port: the new class had been inserted between `@dataclass(frozen=True)` and `RealtimeCredential`, silently stealing the decorator and un-freezing the credential.
-
-* **Addition**: `session_analyses` — one row per session, written **before** the work starts so a caller can tell "running" from "never asked"; a failure stores its reason rather than reducing to a status, because the logs live on the instance. `POST /sessions/{id}/analyze` returns **202** and runs in the background (about 40s for a six-minute recording); `GET .../analysis` polls; `GET .../analysis/full` returns the body. Report generation 409s while analysis is running: building one then would quietly produce the counted half alone and present it as the whole thing.
-
-* **Addition**: the report now has two halves and says which is which. `report_engine/signals/assessed.py` turns the analysis into signals marked `source="assessed"`, rendered as **heard** against the counted signals' **counted**. The language downgrade deliberately does not touch them — they heard the language actually spoken. On the real session this moved Fair & Inclusive from **10.0** (counted-only, "no protected topics detected") to **6.24**, because the audio contained questions about household composition and salary history asked in Hindi.
-
-* **Addition**: **the basis panel**, printed on every report — how many signals were counted versus heard, which model and instruction version produced the analysis, the languages heard, how many anchors were discarded and why, and the standing caution that a clean counted-fairness result is not evidence nothing was asked. A trainer acting on a number is owed that in the reader's language, not in a design document they will never open.
-
-* **Addition**: `ReportConfig` — configurable **perspective** (`manager` / `coach` / `reviewer`) and **skills**. Perspective changes the person the sentence is written in and never how hard it lands; Kluger & DeNisi's task-versus-self split is what makes the second person safe, and the coaching lines are already written about the question rather than the person. Configured skills replace the shipped role-family competency pack, which is a stand-in for the job-analysis-based content that is the first of Campion, Palmer & Campion's fifteen structure components.
-
-  Verified end to end against a running server with a real recording attached: 404 before asking, 202 to start, 409 on report while running, complete at 38s with `instructions_version` and `model_used` stamped. 30 new tests (`tests/test_analysis_agent.py`, plus report-engine coverage of the assessed half), wired into `scripts/check.sh`. `analysis_agent` added to `PACKAGES`, `ALLOWED_IMPORTS`, mypy, `pyproject`, and **`infra/build-artifacts.sh`** — the omission that took the site down once already.
+* **Addition — `analysis_agent/`**, a new sibling (`llm ← analysis_agent ← control_plane`) that analyses a session's **recording**, not its
+  stored transcript. Prompted by evidence: live STT rendered *"May I know what's your background?"* as *"May I introduce myself?"* — the audio
+  is the source of truth.
+* **The instructions are a shipped document** — `analysis_agent/INSTRUCTIONS.md`, versioned `v1.1`, read at runtime. Each observation type
+  carries an explicit test (the sentence subject decides requirement vs protected-topic; **surfaced** requires the manager asked *and* the
+  candidate revealed; a `how_to_surface` that says not to ask is a **restraint** item).
+* **Decision — 60% how the manager handled *this persona*, 40% expectation coverage**, composed in code (the model never sees the weights).
+  Coverage is scored against **reachable** items; `EarlyEndAssessment` separates a *judged close* (evidence, fair chance, civil exit) from an
+  *abandoned interview* — the test is evidence-before-decision, not duration.
+* **Windowing harness** — un-windowed, the model returned **21 of 53 turns ending after the recording did** (furthest 9m06s on a 5m46s file).
+  Four-minute windows with code applying offsets; anchors validated against **their own window**; rejected ones surfaced as `dropped_anchors`.
+  Windows run concurrently.
+* **Addition**: `AudioModel` port + `GeminiAudioModel`. `AUDIO_PROVIDERS` deliberately partial (Gemini-only); `audio_analysis_available()`
+  lets the UI hide the button. Fixed a bug where the new class stole the `@dataclass(frozen=True)` decorator from `RealtimeCredential`.
+* **Addition**: `session_analyses` — one row per session, written **before** the work starts (so "running" ≠ "never asked"); a failure stores
+  its reason. `POST /sessions/{id}/analyze` → **202**, background (~40 s); `GET .../analysis` polls; `.../analysis/full` for the body. Report
+  generation 409s while analysis is running.
+* **Addition**: the report now has two halves — `signals/assessed.py` marks `source="assessed"`, rendered **heard** vs the counted signals'
+  **counted**; the language downgrade doesn't touch them. Moved Fair & Inclusive from **10.0** to **6.24** on the real session
+  (household/salary questions asked in Hindi).
+* **Addition — the basis panel**, printed on every report: counted vs heard, model + instruction version, languages heard, dropped anchors,
+  and the caution that a clean counted-fairness result is not evidence nothing was asked.
+* **Addition**: `ReportConfig` — perspective (`manager`/`coach`/`reviewer`) + skills; perspective changes person, never how hard it lands
+  (Kluger & DeNisi task-vs-self). Configured skills replace the shipped competency pack.
+* Verified end to end against a running server (complete at 38 s with `instructions_version`/`model_used`). 30 new tests. `analysis_agent`
+  added to `PACKAGES`, `ALLOWED_IMPORTS`, mypy, `pyproject`, and **`infra/build-artifacts.sh`** — the omission that took the site down once
+  already.
 
 ## 2026-08-26 (documentation: okf, README, and what a session costs)
-
-* **Addition**: [`docs/PRICING_PER_SESSION.md`](/references/pricing.md) — what one session actually costs, measured rather than estimated where measurement was possible. Token counts come from instrumenting a real 346-second recording through the real windowing path and reading `usage_metadata` off each response; they fit a straight line, which gives a model rather than a single data point: **5,592 prompt tokens per window + 31.9 per second of audio**, and **2,137 output + 17.8 per second**. Vendor rates are quoted from the pricing pages with links and the date, and the Gemini figures are flagged as introductory (they rise on 2027-01-01).
-
-  The finding worth acting on: **the live voice call costs roughly four times what analysing it does** — ~$0.85 against $0.19 for a twenty-minute session — so the largest lever is the realtime model, not the analysis. Report generation calls no model and is free.
-
-  The voice-call figure is the one estimate in the document and it says so, showing its working: OpenAI publishes a token price but not a tokens-per-second rate for realtime audio, so the conversion is inferred from the previous generation's reported per-minute cost. Treated as a floor, with a budgeting range.
-
-* **Addition**: `subsystems/analysis-agent.md`, `references/analysis-instructions.md`, `references/pricing.md`. Updated: `subsystems/{index,report-engine,llm-port,test-suite}`, `contracts/{database-schema,rest-api,storage-ports}`, `references/index`, `repo-map` (six routing rows), `index` (freshness).
-
-* **Change**: `README.md` — the pipeline is now six steps rather than four, opening with the fact the rest of the repo assumes and the README did not say: **the hiring manager is the one assessed, not the candidate**. New sections on the two-halves report and on session cost, and `analysis_agent/`, `evaluation_agent/`, `report_engine/` and `okf/` added to the layout, which had gone stale.
+* **Addition**: [`docs/PRICING_PER_SESSION.md`](/references/pricing.md) — measured by instrumenting a real 346 s recording: **5,592 prompt
+  tokens/window + 31.9/s audio**, **2,137 output + 17.8/s**. Finding worth acting on: **the live voice call costs ~4× analysing it** (~$0.85
+  vs $0.19 for 20 min) — the largest lever is the realtime model. Report generation calls no model and is free. The voice-call figure is the
+  one estimate (a floor).
+* New pages `subsystems/analysis-agent.md`, `references/{analysis-instructions,pricing}.md`. `README.md` — six steps now, opening with **the
+  hiring manager is the one assessed, not the candidate**.
 
 ## 2026-08-27 (the report a manager can read, and the judge that writes it)
-
-A hiring manager was shown a report and said it was difficult to read. She was
-right: it opened with *How this report was produced*, ran six pages, and was
-mostly signal tables. She supplied a two-page sample generated by another
-SkillBrew service as the target. This is that report.
-
-* **Change (same day, after review)**: the manager was shown the two-page report
-  and cut it further — she wants **only** the four competencies, the Q&A, the
-  strengths against gaps, and the areas to improve. So the **readiness dial and
-  the summary paragraph left her pages**. Both are still computed, stored and
-  stamped — spec section 9's comparability rules need the index to exist — and
-  both now print in the working. A headline number nobody asked for is a
-  headline number that gets argued about.
-
-  Two sections came back the other way. **Q&A** lists every question she asked —
-  time, verbatim, one tag — replacing the five-column table that was behind the
-  detail flag and was part of what she called unreadable; the working's copy of
-  it is deleted rather than duplicated. **BEI questions** lists the behavioural
-  questions actually asked and the ones that came out as hypotheticals instead,
-  with the swap to rehearse. Neither needed a new signal: `behavioural` and
-  `situational` are two of the six types `acts.classify` already assigns, so the
-  sections are a view over the data the score uses, not a second opinion about
-  it. The classifier's vocabulary is translated on the way out — `double_barrelled`
-  prints as *two questions in one*.
-
-* **Change**: the default render is **two pages** — readiness dial, one summary
-  paragraph, four competency cards at `x/4` with a weight, a narrative and up to
-  three plain-language bullets each, then strengths against gaps and numbered
-  areas to improve with the sentence to say instead. The old view is not gone: it
-  is `to_html(report, detail=True)` / `?detail=1`, off by default, and the
-  console has a **Show working** toggle. `detail` is a *render* argument, not a
-  stored option, so the report stays a pure function of the stored JSON and one
-  artifact is shown at two depths. Updated [Report engine](/concepts/subsystems/report-engine.md), [REST API](/concepts/contracts/rest-api.md).
-
-  The one thing that did **not** move behind the toggle is the counted/heard
-  split. A one-line basis now prints in the footer of every report, because the
-  real session where the counted fairness detector returned 10/10 on an interview
-  containing salary-history and household questions asked in Hindi is exactly the
-  case where a reader must not have to opt in to learning which half of a number
-  was heard.
-
-* **Addition**: `report_engine/narrate.py` — the sentences code can compose from
-  the measurements alone: the opening summary, a per-criterion narrative, and up
-  to three bullets drawn from `coach.py`'s behaviour lines. A weak criterion gets
-  the extra line for what went wrong and a strong one for what went right, so the
-  card reads the way the score does. This is what makes the offline report a
-  complete report rather than a table with the headings missing.
-
-* **Addition**: **spec phase 6 — the judge.** `report_engine/judge.py` makes one
-  structured call at temperature 0.1 and authors prose only;
-  `report_engine/validate.py` decides what survives. Three vetoes: a span must
-  appear in the transcript **verbatim**; a `surfaced: true` must be the
-  *candidate* speaking after a manager question, not the manager's own words;
-  and prose must state **no number** outside a quotation, because every number is
-  computed here and printed beside the sentence, and a judge free to write them
-  too could contradict them. A vetoed claim falls back to the composed sentence,
-  so a veto costs polish and never costs a section. Updated [Determinism split](/concepts/determinism.md) — the table of what the judge may and may not author.
-
-  The spec also asks for "a manager question act **in the same topic**". It is
-  written down as **not** a check: topics are clustered from the manager's own
-  questions, so the nearest preceding act is in the evidence's topic by
-  construction, and shipping that assertion would be a test that cannot fail.
-
-  A surviving `must_discover` verdict becomes a `discovery_surfaced` signal —
-  distinct from the counted `discovery_attempted`, and reaching the restraint
-  items that one deliberately excludes — and the report is **rebuilt** through
-  `build_report(bundle, extra_signals=[...])` rather than patched, because a
-  patched score is one code did not derive. `source` now has a third value,
-  `judged`, printed on the page beside `counted` and `heard`.
-
-* **Decision**: the judge does **not** relax `ALLOWED_IMPORTS["report_engine"] =
-  set()`, which spec section 10 assumed it would. The model arrives as a
-  `Protocol` that `llm.base.StructuredModel` satisfies structurally, and
-  `control_plane/reporting.py` does the wiring. The consequence, stated where it
-  will be found: **the CLI cannot run the judge**, so `python -m report_engine`
-  is always the deterministic report — which is also what the regression suite
-  runs.
-
-* **Change**: strengths and gaps are capped at **three each**, down from four.
-  The same convention as `max_development_areas` and the same Kluger & DeNisi
-  argument — diffuse feedback shifts attention from the task to the self. It is
-  now a named constant with that reasoning rather than a literal `4`. Selection
-  is unchanged, and every signal is still in `criteria[].signals`.
-
-* **Change**: `SCORING_VERSION` is **not** bumped. No threshold, transfer
-  function or signal weight moved on the deterministic path, and a judged report
-  is separated from an unjudged one by `judge_model`/`judge_version` on
-  provenance — which the cohort rule in spec section 9 already requires to match
-  before two reports may be averaged.
-
-* **Addition**: `CriterionScore.narrative` / `.bullets`, `AssessmentReport.summary`
-  and `.started_at`, `SignalResult.checklist` (which turns "4 of 5 role facts
-  conveyed" into a covered/missed strip a reader can act on), and
-  `Provenance.judge_model` / `.judge_version`.
-
-* **Addition**: eight render tests in `tests/test_report_engine.py` pinning the
-  section list, that the readiness index and summary appear in the working and
-  **not** on the manager's pages, that every question act reaches the Q&A list
-  with its timestamp, that a leading question and a protected topic are flagged
-  there, and that the classifier's internal vocabulary never reaches the reader.
-
-* **Addition**: `tests/test_report_judge.py` (25 tests), wired into
-  `scripts/check.sh`. Every one drives `judge.overlay` — the whole judge minus
-  the network hop — with hand-written model output, so the veto is tested without
-  a model. Updated [Test suite](/concepts/subsystems/test-suite.md), [Checks](/concepts/runbooks/checks.md).
-
-* **Change**: [what a session costs](/references/pricing.md) — report generation
-  is no longer free. Scoring still calls no model; the judge is one call at
-  **$0.005 – $0.007**, estimated from prompt length. The behavioural change worth
-  knowing is that **regenerating now costs money**, and `judge=false` is the
-  free path.
+A hiring manager said the six-page, signal-table report was hard to read and supplied a two-page sample. This is that report.
+* **Change (same day, after review)**: cut to **only** the four competencies, Q&A, strengths vs gaps, and areas to improve — **the readiness
+  dial and summary paragraph left her pages** (both still computed/stored/stamped for spec §9 comparability, and print in the working). Two
+  sections came back: **Q&A** (every question — time, verbatim, one tag) and **BEI questions** (behavioural asked vs those that came out as
+  hypotheticals) — both views over `acts.classify` data, not a second opinion; `double_barrelled` prints as *two questions in one*.
+* **Change**: the default render is **two pages**; the old view is `to_html(report, detail=True)` / `?detail=1` behind a **Show working**
+  toggle. `detail` is a *render* argument, not stored, so the report stays a pure function of the JSON. The counted/heard split did **not**
+  move behind the toggle — a one-line basis prints in every footer.
+* **Addition**: `report_engine/narrate.py` — the summary, per-criterion narrative, and up to three bullets from `coach.py`.
+* **Addition — spec phase 6, the judge**: `report_engine/judge.py` makes one structured call at temp 0.1, prose only;
+  `report_engine/validate.py` decides what survives with **three vetoes** — a span must appear **verbatim**; a `surfaced: true` must be the
+  *candidate* speaking after a manager question; prose states **no number** outside a quotation. A vetoed claim falls back to the composed
+  sentence (costs polish, never a section). The spec's "manager question act in the same topic" is written down as **not** a check (topics are
+  clustered from the manager's own questions — it would be a test that cannot fail). A surviving `must_discover` verdict becomes a
+  `discovery_surfaced` signal (reaching the restraint items `discovery_attempted` excludes) and the report is **rebuilt** via
+  `build_report(..., extra_signals=[...])`, not patched. `source` gains a third value, `judged`.
+* **Decision**: the judge does **not** relax `ALLOWED_IMPORTS["report_engine"] = set()` (spec §10 assumed it would) — the model arrives as a
+  `Protocol`, `reporting.py` does the wiring. **Consequence: the CLI cannot run the judge**, so `python -m report_engine` is always the
+  deterministic report (also what the regression suite runs).
+* **Change**: strengths and gaps capped at **three each** (down from four; Kluger & DeNisi), now a named constant.
+* **Change**: `SCORING_VERSION` is **not** bumped (no threshold/transfer-function/weight moved; a judged report is separated by
+  `judge_model`/`judge_version` on provenance, which spec §9's cohort rule already requires to match).
+* **Addition**: `CriterionScore.narrative`/`.bullets`, `AssessmentReport.summary`/`.started_at`, `SignalResult.checklist`,
+  `Provenance.judge_model`/`.judge_version`. Eight render tests + `tests/test_report_judge.py` (25 tests, drives `judge.overlay` without a
+  model), wired into `check.sh`.
+* **Change**: [pricing](/references/pricing.md) — report generation is no longer free; the judge is one call at **$0.005–$0.007**;
+  **regenerating now costs money**, and `judge=false` is the free path.
 
 ## 2026-08-27 (deployed to prod, and the dependency that went with it)
-
-* **Deployed**: the report work above, plus the three commits prod was behind —
-  so `analysis_agent/` reached the instance for the first time. Artifact pulled
-  and extracted over SSM with a service restart rather than a reboot; the data
-  volume was never touched. The judge ran against a live model for the first
-  time on 9 regenerated reports: **no bare numbers in prose, no unanchored
-  quotes**, so the veto holds on real output and not only on hand-written test
-  input.
-
-* **Fixed**: `AudioError: ffmpeg/ffprobe not found on PATH`. The deploy shipped
-  the analysis agent to a box that had never been provisioned for it —
-  `infra/` predates the package, and **nothing in this bundle named the
-  dependency**, which is the actual reason it got through. Amazon Linux 2023
-  carries no ffmpeg package at all (not `ffmpeg`, not `ffmpeg-free`, nothing in
-  `amazonlinux` or `kernel-livepatch`), so
-  `infra/terraform/templates/bootstrap.sh.tftpl` now installs the pinned static
-  build into `/usr/local/bin` beside Caddy, checksum-compared against the
-  publisher's md5 — which catches a truncated download and proves nothing about
-  the publisher, and the comment says so. Documented in
-  [Audio analysis agent](/concepts/subsystems/analysis-agent.md) and
-  [Dev setup](/concepts/runbooks/dev-setup.md).
-
-  Verified the way it should have been the first time: not by `command -v`, but
-  by running a real analysis on a real production recording. 346 s of audio, two
-  windows, `en` + `hi` heard, and the report rebuilt on top of it carries **22
-  counted, 6 heard and 1 judged** signal — all three provenances in one report.
-
-* **Correction**: `infra/README.md` opened with "**Nothing in this repository
-  has been applied to AWS**". That has been false since 2026-08-23; the state
-  file in `infra/terraform/` is a live `prod` environment. It now says so, and
-  carries the warning that was missing: editing `bootstrap.sh.tftpl` changes
-  `user_data`, and `user_data_replace_on_change = true` means the next
+* **Deployed**: the report work + three commits prod was behind, so `analysis_agent/` reached the instance for the first time (artifact over
+  SSM, service restart, data volume untouched). The judge ran live on 9 regenerated reports: **no bare numbers, no unanchored quotes** — the
+  veto holds on real output.
+* **Fixed**: `AudioError: ffmpeg/ffprobe not found on PATH` — the deploy shipped the analysis agent to a box never provisioned for it, and
+  **nothing in this bundle named the dependency**. AL2023 carries no ffmpeg, so `bootstrap.sh.tftpl` now installs the pinned static build
+  (checksum-compared).
+* **Correction**: `infra/README.md` opened "Nothing in this repository has been applied to AWS" — false since 2026-08-23; the state file is a
+  live `prod`. It now warns that editing `bootstrap.sh.tftpl` changes `user_data`, and `user_data_replace_on_change = true` means the next
   `terraform apply` **destroys and recreates the instance**.
-
-* **Known, pre-existing, not fixed**: `engined` has been crash-looping since the
-  instance's first boot on 2026-08-23 — 61,762 identical failures. In
-  `-dev-sample-contract` mode it reads the sample contract from a path resolved
-  at *build* time on the developer's laptop
-  (`/Users/.../engine/internal/contract/testdata/engine_contract_sample.json`),
-  a test fixture that ships in no artifact. Voice sessions have therefore never
-  worked on this instance. This is implementation-plan task 46 (no control-plane
-  `ContractSource`) surfacing as a hard boot failure, not a regression from this
-  deploy.
+* **Known, pre-existing, not fixed**: `engined` has been crash-looping since first boot on 2026-08-23 — **61,762 identical failures**. In
+  `-dev-sample-contract` mode it reads the sample from a path resolved at *build* time on the developer's laptop, a fixture that ships in no
+  artifact. **Voice sessions have never worked on this instance.** Implementation-plan task 46 (no control-plane `ContractSource`), not a
+  regression.
 
 ## 2026-09-01 (interviews that actually differ — contract v1.4)
+* **Fix (the whole point of the product was leaking)**: **no job-spec field ever reached the persona's runtime prompt.**
+  `_compile_system_prompt` took persona fields and skill names only — job title, JD, location, department, manager level and the interview's
+  `clarity_facts` stopped at the interview row, so two interviews for different roles compiled near-identical prompts and opened the same way.
+* **Change (contract v1.4)**: `_compile_system_prompt`/`build_engine_contract` gain `job_title`, `jd`, `company_type`, `experience_level`,
+  `job_location_type`, `location` and emit a **THE ROLE YOU ARE INTERVIEWING FOR** section. **`ENGINE_CONTRACT_VERSION` v1.3 → v1.4** (prompt
+  text changed ⇒ bump). Renders **only when `job_title` is non-empty**, so hand-built contracts, the handover sample and the Go fixtures
+  compile byte-identically to v1.3 apart from the version string.
+* **Decision**: the JD is truncated by **`jd_precis(jd, limit=400)` — code-owned, deterministic, no model call** (a model summary would make
+  the same interview compile different bytes on every cast, which is what `ENGINE_CONTRACT_VERSION` pins). See
+  [determinism](/concepts/determinism.md).
+* **Change**: the **casting** prompt gains `location`, `department`, `manager_level`, `clarity_facts` (the model writes
+  `opening_line`/`sample_phrases`/`background` and they are *stored* — anything it can't see is permanently missing). Empty scalars render
+  `(not specified)`, empty checklist `(none)`, in code.
+* **Fix**: `POST /sessions` cast with `expectation=None` and a hardcoded `interview_type="mixed"`, so the "Create & chat" path produced a
+  **weaker persona than enrolling the same archetype**; it now reads `get_expectation(...)` and passes the whole job spec.
+  `SessionWorkflowStore` gained `ExpectationStore` (mypy caught the composition didn't carry it; the port was widened, not bypassed).
+* **Fix (UI)**: `Wizard.jsx` shipped a **fully pre-filled** job spec submitted unchanged (how identical interviews got created).
+  `EMPTY`/`START_SKILLS` are now blank, the sample moved to placeholders. Corrected the false step-2 copy *"A different person of that type is
+  cast each session"* — the opposite of how casting works and the thing that makes managers comparable.
+* **Tests (offline)**: `test_two_job_specs_compile_two_different_system_prompts` (the regression for the whole bug), plus section ordering,
+  the empty-`job_title` byte-identity guarantee, `jd_precis` determinism/sentence-boundary/hard-cut, and
+  `test_starting_a_session_casts_with_the_stored_expectation_and_job_spec`.
+* **Regenerated**: both schemas and both `engine_contract_sample.json` copies; the Go fixture's only change is `v1.3`→`v1.4` (pinned by
+  `contract_test.go`). No engine code change — parses by **major**, v1.4 adds no field. Updated: `determinism`, `engine-contract`,
+  `storage-ports`, two modules, three subsystems, `GO_ENGINE_CONTRACT.md`.
 
-* **Fix (the whole point of the product was leaking)**: **no job-spec field ever
-  reached the persona's runtime prompt.** `_compile_system_prompt`
-  (`candidate_agent/engine_contract.py`) took persona fields and skill names and
-  nothing else — job title, JD, location, department, manager level and the
-  interview's `clarity_facts` were captured by the wizard, stored on the
-  interview row, and stopped there. Two interviews for completely different roles
-  compiled prompts that differed only by whatever background paragraph the casting
-  model happened to write, so the candidates were interchangeable and every
-  session opened the same way. Three compounding causes, all fixed here.
-
-* **Change (contract v1.4)**: `_compile_system_prompt` and
-  `build_engine_contract` gain `job_title`, `jd`, `company_type`,
-  `experience_level`, `job_location_type` and `location` (all defaulting to `""`),
-  and emit a **THE ROLE YOU ARE INTERVIEWING FOR** section between BACKGROUND and
-  HOW YOU TALK: the title with its qualifiers, a JD précis, and *"Everything you
-  say about your experience and motivation is anchored to THIS role."*
-  `ENGINE_CONTRACT_VERSION` v1.3 → **v1.4** per the standing rule (prompt text
-  changed ⇒ bump). The section renders **only when `job_title` is non-empty**, the
-  same conditional trick `_realism_section` uses — so hand-built contracts, the
-  handover sample and the Go fixtures compile byte-identically to v1.3 apart from
-  the version string, which the regenerated sample diff confirms (one line).
-
-* **Decision**: the JD is truncated by **`jd_precis(jd, limit=400)` — code-owned,
-  deterministic, no model call**: whitespace normalisation, then a cut at the last
-  `.`/`!`/`?`/newline inside the limit, then a hard cut if there is none. A model
-  summarising the JD here would make the same interview compile different prompt
-  bytes on every cast, which is the one thing `ENGINE_CONTRACT_VERSION` exists to
-  pin. See [determinism](/concepts/determinism.md).
-
-* **Change**: the **casting** prompt gains the other half of the spec —
-  `location`, `department`, `manager_level` and `clarity_facts` on
-  `build_user_prompt` and `VirtualCandidateAgent.generate`. Same reason the realism
-  layer reaches casting: the model writes `opening_line`, `sample_phrases` and
-  `background`, and they are *stored*, so anything it cannot see is permanently
-  missing from the artifact that runs. Empty scalars render `(not specified)` and
-  an empty checklist `(none)`, both in code; a `ClarityFact` with an empty
-  statement is not on the checklist and is not rendered.
-
-* **Fix**: `POST /sessions` cast the persona with `expectation=None` and a
-  hardcoded `interview_type="mixed"`, so the "Create & chat / Create & talk" path
-  — the one a first-time user takes — produced a **weaker persona than enrolling
-  the identical archetype**. It now reads `repo.get_expectation(...)` and passes
-  the whole job spec, mirroring `enroll_candidates`. `SessionWorkflowStore` gained
-  `ExpectationStore` accordingly (mypy caught that the composition did not carry
-  it; the port was widened rather than the handler reaching past its port).
-
-* **Fix (UI)**: `ui/src/Wizard.jsx` shipped a **fully pre-filled** job spec — a
-  Jaipur retail-sales role and four skills — and it was being submitted unchanged,
-  which is how identical interviews got created in the first place. `EMPTY` and
-  `START_SKILLS` are blank; the sample text moved to `placeholder` attributes
-  (`Combo` takes a `placeholder` prop now). `canAdvance` already required a real
-  title, JD and one skill. Also corrected the false copy on step 2 — it claimed
-  *"A different person of that type is cast each session"*, the opposite of how
-  casting works and the thing that makes managers comparable at all.
-
-* **Tests (offline)**: `test_two_job_specs_compile_two_different_system_prompts`
-  is the regression test for the whole bug; plus section ordering, the
-  empty-`job_title` byte-identity guarantee, `jd_precis` determinism /
-  sentence-boundary / hard-cut, the four new casting-prompt fields with their
-  `(not specified)` / `(none)` fallbacks, and two API tests capturing the kwargs
-  both cast sites hand the agent (`test_starting_a_session_casts_with_the_stored_expectation_and_job_spec`).
-
-* **Regenerated**: `owner_handover/{candidate_output,engine_contract}_schema.json`
-  and both copies of `engine_contract_sample.json` (`scripts/export_schemas.py`,
-  `scripts/export_engine_contract_sample.py`). The Go-side fixture's only change
-  is `v1.3` → `v1.4`; `engine/internal/contract/contract_test.go` pins that string,
-  so its literal moved with it. No engine code change — the engine parses by
-  **major** version and v1.4 adds no field.
-
-* Updated: `concepts/determinism.md`, `concepts/contracts/engine-contract.md`,
-  `concepts/contracts/storage-ports.md`,
-  `concepts/modules/candidate-agent-engine-contract.md`,
-  `concepts/modules/candidate-agent-agent.md`,
-  `concepts/subsystems/{ui,control-plane,candidate-agent}.md` and
-  `docs/GO_ENGINE_CONTRACT.md`. `scripts/check.sh` green.
 ## 2026-09-01 (Gemini Live becomes the default talker; noise suppression and STT surfaced)
+* **Change**: **Gemini Live (`gemini-3.1-flash-live-preview`) is now the default voice provider**, OpenAI Realtime behind
+  `VOICE_PROVIDER=openai`. `llm/gemini_live.py` `GeminiLiveBroker` mints an ephemeral token via `auth_tokens.create` and returns it as
+  `RealtimeCredential` with `call_url` **empty** (the Live API is a WebSocket the vendor SDK opens). `REALTIME_PROVIDERS` gained a gemini row
+  **first**; `build_realtime_broker` falls back to `available[0]`, so **table order is behaviour** and is documented as such.
+* **Decision (the seal)**: the *entire* session config — system instruction, voice, `responseModalities`, both transcriptions, VAD,
+  resumption, history — goes into `CreateAuthTokenConfig.live_connect_constraints` (verified against `google-genai` 2.21.0). Constrained
+  fields are enforced server-side for the token's life, so a browser still passing config on `live.connect` cannot override them;
+  `lock_additional_fields` pins `temperature`/`top_p`/`top_k`. `uses=2` (the ~15-min audio cap makes one reconnect normal);
+  `new_session_expire_time` 120 s so a leaked token can't start a fresh call later.
+* **Decision**: the non-secret half travels to the browser as `client_config` (transcription toggles, VAD timings, `sessionResumption`,
+  `historyConfig`) in the Live API's **camelCase wire names**, translated into typed SDK objects on the way into the token (SDKs stay inside
+  `llm/`). Two tests assert the prompt and opening line are absent from it.
+* **Fix**: **the voice path never delivered `opening_line`** — authored at cast, written as turn 0 in text mode, silently dropped in voice
+  (every spoken interview opened with an improvised greeting). `build_voice_system_prompt` gained `opening_line` and appends a `THE FIRST
+  THING YOU SAY` block for both providers. An instruction alone isn't enough (neither vendor speaks until something arrives), so each browser
+  path nudges once (`openai` `response.create` on `onopen`; `gemini` one synthetic `sendClientContent`). **The nudge is never stored** — the
+  transcript carries the persona's actual reply.
+* **Change (seam split)**: `build_realtime_session` and `build_gemini_live_session` each emit their vendor's own document; a
+  `_SESSION_BUILDERS` table dispatches (a lookup — `test_ocp_new_provider_needs_no_agent_change`). Shared are the *decisions* (same compiled
+  prompt, opening line, persona voice, "the human can always interrupt"). New `session_facts()` reads the client-visible half back out, so
+  `mint_realtime_credential` never branches on a provider name.
+* **Change**: the 30-name voice roster moved to `llm.gemini_live.GEMINI_LIVE_VOICES` and `engine_contract.GEMINI_TTS_VOICES` **re-exports the
+  same object** (`candidate_agent → llm` is the allowed direction). Order/membership unchanged, append-only (two copies of an order-sensitive
+  tuple is exactly the drift `tts_voice_id` can't survive). The Gemini builder prefers the stored `tts_voice_id`.
+* **Change (Phase C)**: `RealtimeCredentialResponse` gained `provider`, `stt_source`, `noise_reduction`, `client_config`; `call_url` defaults
+  `""`. The OpenAI document gained `audio.input.noise_reduction: near_field`, an injected transcribe model (`TRANSCRIBE_MODEL`, default
+  **`gpt-4o-transcribe`** — up from mini, the interviewer's words are half the evidence), and a transcription vocabulary `prompt` composed
+  **in code** from `sorted(contract.knowledge_ceiling)`.
+* **Change (UI)**: `@google/genai` **2.20.0** pinned exact (preview protocol). New `ui/src/geminiLive.js` and `ui/src/audio/pcmWorklet.js`.
+  `VoiceSessionView.jsx` branches on `cred.provider`; **the recording graph is untouched**. Header shows a mic device picker and
+  noise-suppression toggle; both swap the track live via `replaceTrack()`/`setStream()`. `getUserMedia` gained `autoGainControl` +
+  `channelCount: 1`.
+* **Decision (in code + OKF)**: **no client-side denoising.** Echo cancellation and AGC are non-negotiable and noise suppression is the
+  operator's switch, but nothing between the mic and the recorder processes the signal — the raw recording is the evidence `validate.py`
+  checks quotes against, and a rewritten recording is not evidence.
+* **Fix (build)**: Vite inlined the capture worklet as a `data:` URL that `AudioWorklet.addModule` doesn't fetch reliably → a targeted
+  `build.assetsInlineLimit` predicate forces that one file to a real asset.
+* **Tests**: `tests/test_voice.py` extended (opening-line delivery + empty-contract fallback, injected transcriber, vocabulary hint,
+  `near_field`, five Gemini compilation properties, dispatch, roster identity, `client_config` carrying neither prompt nor opening line). New
+  `tests/test_gemini_live_mint.py` (`--live` smoke). `test_architecture.py` passes **unmodified**.
+* **Change**: SkillBrew branding — real logo in `Shell.jsx` and as favicon. Asset-only.
+* **Fix (docs)**: `infra/README.md` redeploy rewritten — a reboot doesn't redeploy (cloud-init `runcmd` is per-instance), a bare
+  `bootstrap.sh` re-run leaves old processes serving; the sequence is build-artifacts → SSM `bootstrap.sh && systemctl restart control-plane
+  engined`.
+* **Fix (persona coherence)**: **a persona cast as a woman could speak in a man's voice** — `pick_voice` hashed over all thirty voices, so
+  `gender_presentation` had no bearing on `tts_voice_id`. Three parts: (1) `GEMINI_FEMALE_VOICES` (14) / `GEMINI_MALE_VOICES` (16) frozensets
+  recording the **vendor-documented** voice gender, living beside the roster, which they must partition exactly
+  (`test_the_gender_sets_partition_the_roster`) and never reclassify; (2) `voices_for_presentation(voices, gender_presentation)` narrows to
+  the matching subset **in roster order** (`non_binary`/`unspecified`/absent unchanged — no vendor-neutral subset exists); (3)
+  `build_engine_contract` filters before `pick_voice`, only when `human_traits is not None`. `pick_voice` stays signature-stable (the
+  no-traits fallback still resolves against the full roster).
+* **Change**: `ENGINE_CONTRACT_VERSION` **v1.4 → v1.5** — the first bump where **the compiled prompt text does not change** (identical inputs
+  now compile a different `tts_voice_id`, which neither `fingerprint` nor `seed_fingerprint` covers). No Go change (pins by major).
+  **Already-cast personas are untouched** (`tts_voice_id` is written once at cast time). Byte-stability fixtures needed no update.
+  `determinism` and `engine-contract` now state the general form of the bump rule.
+* **Change (UI)**: **the voice session header no longer names our models** — it rendered `voice`, `model` and `stt_source` off the credential,
+  an operator diagnostic a hiring manager was reading. Both lines removed (header is the persona label + *spoken interview*); `cred` and the
+  API fields are kept because the browser needs them to connect, they are just never rendered. A sweep found no other user-visible
+  vendor/model string.
+* **Fix (the v1.5 gap, found in production)**: a persona named **Tanvi** spoke with a man's voice — v1.5's gender match only engaged when
+  `human_traits` was present, and the **default** cast path has none (`enroll_candidates` casts `(key, None, None)`). Code can't close this
+  alone (a name is not a gender table), so the split moves by exactly one field: `CANDIDATE_DRAFT_JSON_SCHEMA` gains **`presented_gender`**
+  (`woman | man | neutral`, enum-constrained, `required`), asked as a description of the model's own output (rule 12); `casting_realism_note`
+  requires it to match a stated `gender_presentation` and the name. `engine_contract.normalize_presented_gender` accepts only the three values
+  and returns `""` otherwise, **never raises** (losing a whole cast over a voice hint is worse). Precedence is **code over model**:
+  `human_traits.gender_presentation` wins where present. `agent.generate` reads the field, so neither cast site changed signature.
+* **Change**: `PERSONA_VERSION` **v1.2 → v1.3** (`VirtualCandidate` gained `presented_gender`, pattern `^(woman|man|neutral)?$`, empty for
+  every persona stored before v1.3; the declared value folds into `fingerprint`) and `ENGINE_CONTRACT_VERSION` **v1.5 → v1.6** (`tts_voice_id`
+  moves again). No Go change.
+* **Note on the tests (last round's nearly couldn't fail)**: the new cast tests run over **eight** interview ids whose unfiltered `pick_voice`
+  results are mixed (3 male, 5 female); with a single id the `woman` case passed with the fix reverted (that id's unfiltered pick was already
+  female). The test now also asserts `moved` (the filter changed at least one pick). Verified by reverting the precedence line.
+* **Change (UI)**: the icon rail is single-product — four `disabled` "not part of this service" entries removed (a column of dead icons reads
+  as broken); the logo and the one active icon stay.
+* **Addition — silent failover to a second Gemini key**: `llm/failover.py` holds four wrappers
+  (`FailoverStructuredModel`/`ChatModel`/`AudioModel`/`RealtimeBroker`), each holding one inner per key. **The wrapper *is* the port** (same
+  interface, same `ModelError` contract) so nothing outside `llm/` knows it exists. `FALLBACK_API_KEY_VARS = {"gemini":
+  ("GEMINI_API_KEY2",)}`; `build_*` wraps only when there's more than one key (single-key path returns the bare adapter).
+* **Design notes**: (1) **only key-shaped failures retry** — `looks_like_a_key_failure` reads a 401/403/429 off the exception, then falls back
+  to specific markers; a malformed request / 500 / 503 propagates on the first attempt. (2) **markers are deliberately specific** — the short
+  "rate" is a substring of `generate_content` (in every Gemini failure's message); a test asserts that near-miss and `429` vs `4291`. (3)
+  **stickiness is process-wide**, module-level (`build_model` is called per agent); `reset_preferences()` for tests. (4) each key is tried at
+  most once, last failure raised unchanged.
+* **Boundaries kept**: `API_KEY_VARS` still decides whether a provider is *configured* — reads only the primary, so `GEMINI_API_KEY2` alone is
+  not a deployment (tested). Wrapping happens **after** the table lookup; `test_architecture.py` (which pins the vendor constructor
+  signatures) is unmodified.
+* **Change (infra, terraform only — nothing applied)**: `ssm.tf` gains `GEMINI_API_KEY2`; `iam.tf` needed no change (path-scoped);
+  `bootstrap.sh.tftpl` reads it tolerantly. ⚠️ the bootstrap on the running instance is an **older render**, so prod pickup needs the
+  hand-applied step. The **Go engine has no failover** — `GEMINI_API_KEY2` written into `engined.env` is inert there.
+* **Addition**: `tests/test_key_failover.py` (29 tests, offline) + its `run` line (`test_every_test_file_is_wired_into_the_gate`).
 
-* **Change**: **Gemini Live (`gemini-3.1-flash-live-preview`) is now the default
-  voice provider**, with the OpenAI Realtime path preserved behind
-  `VOICE_PROVIDER=openai`. New `llm/gemini_live.py` mirrors `openai_realtime.py`:
-  `GeminiLiveBroker` mints an ephemeral auth token via `auth_tokens.create` and
-  returns it as the `RealtimeCredential` — `call_url` is **empty**, because the
-  Live API is a WebSocket the vendor's own SDK opens. `REALTIME_PROVIDERS` gained
-  a gemini row **first**, which is the whole default flip: `build_realtime_broker`
-  falls back to `available[0]`, so table order is behaviour and is now documented
-  as such.
+## 2026-09-10 (naming cleanup: one concept, one name)
+* **Change — a repo-wide rename with no behaviour change**, four names that taught a false model: * **`sessions.persona_key` → `archetype`**
+  (stores exactly
+`candidate.archetype`); `trait_dimensions.persona_key()` → `archetype_key()`. * **`interviews.candidate_notes` → `persona_notes`** (colour
+on the archetype's casting prompt, never notes about a job applicant). * **`clarity_facts` / `ClarityFact` / `CLARITY_FACT_KEYS` →
+`role_facts` / `RoleFact` / `ROLE_FACT_KEYS`** (the endpoint was already `POST /role-facts`). * **`clarity` the competency deliberately left
+alone** — "Hiring with Clarity" is one of the four scored things, a *different thing* from the facts. `signals/clarity.py`, `rubric.py`'s
+`id="clarity"`, the `stresses` key, `render.py`'s glyph, and the persisted signal id `clarity_fact_coverage` are all untouched (renaming
+that id would be a data migration). The rename separates the **input** (facts) from the **competency**; over-applying it would re-merge
+them. * `ANALYSIS_INSTRUCTIONS_VERSION` was **not** bumped — its rule is "bumped when INSTRUCTIONS.md changes what the model is asked to
+do", and a noun swap does not (bumping would declare every prior analysis incomparable).
+* **Change — `interview_assignments` reshaped** (zero rows/readers/writers, so a redesign not a migration): `interviewer_id` → `user_id` (the
+  SkillBrew user id); `interviewer_type` + CHECK **dropped** (a leftover from the pre-pivot framing); `task_status` → `status`; new
+  `candidate_id` carrying **no FOREIGN KEY** — like `sessions.candidate_id`, because a re-cast rewrites `virtual_candidates`' primary key in
+  place via `ON CONFLICT ... DO UPDATE`. Index renamed to `idx_assignments_user`.
+* **Change — `interviews.recording_id` dropped** (a recording belongs to a *session*; verified NULL in all 1788 rows of `control_plane.db`
+  first). `started_at`/`completed_at` **stay**.
+* **Addition**: `scripts/rename_columns_sqlite.py` — there are no migrations here, and `_SCHEMA` is `CREATE TABLE IF NOT EXISTS`, so a DDL
+  rename is **invisible** to an existing database. The script is idempotent (skips already-renamed columns), refuses to drop `recording_id`
+  unless NULL everywhere, **aborts** if `interview_assignments` is non-empty, and plans the whole migration before writing (Python `sqlite3`
+  doesn't wrap DDL in a transaction). Both guards exercised against a copy of the real DB.
+* **Verification**: `check.sh` green end to end; `export_schemas.py --check` clean; `npm run build` green; the migration run against
+  `control_plane.db` and the API confirmed serving the renamed fields off migrated rows.
 
-* **Decision (the seal)**: the *entire* session config — system instruction,
-  voice, `responseModalities`, both transcriptions, VAD, resumption, history —
-  goes into `CreateAuthTokenConfig.live_connect_constraints`, verified against the
-  installed `google-genai` 2.21.0 rather than assumed. Constrained fields are
-  enforced server-side for the life of the token, so the browser still passing a
-  config on `live.connect` cannot override any of them, and
-  `lock_additional_fields` pins `temperature`/`top_p`/`top_k` — knobs we
-  deliberately did not set. `uses=2` because the ~15-minute audio cap makes one
-  reconnect the normal path, not an error case; `new_session_expire_time` is 120 s
-  so a leaked token cannot start a fresh call later.
+## 2026-09-10 (architecture rules that survive Postgres + S3)
+* **Change**: `tests/test_architecture.py` re-cut so the rules keep biting after SQLite → Postgres + S3. The motivating rule
+  `test_srp_generation_does_not_persist` asserted `"sqlite3" not in roots` — correct today, **silently inert** the day the adapter becomes
+  psycopg (an agent could then import `psycopg`/`boto3` freely).
+* **Addition**: `STORAGE_DRIVERS` (`psycopg`, `psycopg_pool`, `boto3`, `botocore`, `sqlite3`) and `STORAGE_ADAPTERS` — the only four modules
+  allowed to import one: `control_plane/{database,repository,migrate,object_store}.py`. `test_dip_storage_drivers_only_inside_the_adapters` is
+  parametrized over every module in every package. `migrate.py`/`object_store.py` are named before they exist (the allowlist needs no edit
+  when the migration lands). Proved it can fail (a temporary import in `api.py` / `candidate_agent`).
+* **Removal**: `test_srp_generation_does_not_persist` — both halves now enforced more widely (`sqlite3` by the driver allowlist; the
+  `control_plane` import ban by `ALLOWED_IMPORTS` via `test_layering_respects_the_allowed_direction`). A comment records the trade so it isn't
+  reintroduced as a gap.
+* **Change**: `test_dip_handlers_depend_on_ports_not_the_sqlite_adapter` → `..._not_the_adapters`, broadened — it unparses every *parameter*
+  annotation in `api.py` and rejects `InterviewRepository`, `ObjectStore`, `S3ObjectStore`, `FilesystemObjectStore` (so `Annotated`, dotted,
+  and quoted forward refs are all caught). Return annotations exempt.
+* **Change**: `test_isp_sqlite_adapter_satisfies_every_port` → `test_isp_postgres_adapter_satisfies_every_port`, and it no longer needs a
+  database (built with `__new__`; the `:memory:` helper deleted). The suite's "no database, no network" promise is now literally true.
+* **Fix**: `NARROW_PORTS`/`COMPOSITION_PORTS` were four/five entries behind `ports.py` — `AnalysisStore`, `ReportStore`,
+  `AnalysisWorkflowStore`, `ReportWorkflowStore` were checked by nothing; all four added.
+* **Verification**: 342 passed (was 268); ruff/mypy clean. `check.sh` deliberately **not** run — the tree is mid-migration. Updated:
+  [Architecture](/concepts/architecture.md), [Conventions](/concepts/conventions.md).
 
-* **Decision**: the non-secret half travels to the browser as
-  `client_config` — transcription toggles, VAD timings, `sessionResumption`,
-  `historyConfig` — because a WebSocket client has to supply its own connect
-  config and none of those fields author persona behaviour. It is emitted in the
-  Live API's **camelCase wire names** so the browser uses it verbatim, and the
-  broker translates it into typed SDK objects on the way into the token, keeping
-  vendor SDKs inside `llm/`. Two tests assert the prompt and the opening line are
-  absent from it.
+## 2026-09-10 (the Postgres side, built beside SQLite)
+* **Addition**: `control_plane/migrations/0001_initial.sql` — the whole schema as Postgres DDL. **Purely additive: the service still runs on
+  SQLite** (`init_db`/`_SCHEMA`, `repository.py`, `api.py`, `main.py` untouched). Type mapping: JSON-bearing `TEXT` → `jsonb` (with
+  `jsonb_typeof` CHECKs), `*_at` → `timestamptz`, `language_gate` → `boolean`, `byte_size` → `bigint`, non-negative CHECKs. Ids stay `text`
+  (derived from a cast seed, not uuids). `CHECK (x IN (...))` over native enums (`ALTER TYPE ... ADD VALUE` can't run in the txn that reads
+  the value). `interview_assignments` carried over.
+* **The decision that matters — `sessions.candidate_id` gets no FOREIGN KEY** even though SQLite declared one (never enforced). Two shipped
+  behaviours depend on the reference being inert: deleting a persona leaves its sessions readable as `"(deleted persona)"` with `POST /turns`
+  answering 410 (a cascade would destroy the transcript, the evaluation layer's only evidence); and re-casting **rewrites** the primary key
+  via `ON CONFLICT ... DO UPDATE`, which a referencing row would block. `interview_assignments.candidate_id` likewise. **Every other `ON
+  DELETE CASCADE` becomes real.**
+* **Addition**: `control_plane/migrate.py` — forward-only. `schema_migrations` created before the first read; `NNNN_name.sql` applied in
+  ascending order, each in **one transaction that first takes `pg_advisory_xact_lock`** so two runners serialise. sha256 recorded on apply.
+  CLI `python -m control_plane.migrate [--dsn] [--check]`, `--check` exits **0** current / **1** pending / **2** drift. **No down-migrations,
+  by decision** (recovery is a restore plus a new forward migration; consequence: `CREATE INDEX CONCURRENTLY` can't live in a migration file).
+* **Addition**: `database.py` gains `database_url_from_env()`, `spool_dir_from_env()`, `open_pool()` (`psycopg_pool.ConnectionPool`, 1–8,
+  `dict_row`, `SET timezone TO 'UTC'`). **`autocommit=True` is deliberate and fully commented**: with it off, a read opens an implicit
+  transaction, a later `with conn.transaction():` degrades to a SAVEPOINT that never commits, and the pool rolls the request back — the write
+  vanishes with no error.
+* **Addition**: `tests/infra.py` — one provisioning helper for `conftest.py` and `check.sh`; uses `TEST_DATABASE_URL`/`TEST_S3_*` when set,
+  else starts throwaway `postgres:16-alpine` + `minio` with **Apple `container`** (Docker is not installed; `docker.io/...` is a registry
+  hostname, not a runtime). It does not run `container system start` itself (a one-time kernel download) — an unavailable runtime raises
+  `InfraUnavailableError` for the caller to turn into NOT RUN. MinIO provided now though its consumer lands next.
+* **Addition**: `tests/conftest.py` — session-scoped `database_url` runs `migrate.apply` (so **every run exercises the migrations**) and drops
+  at teardown. Isolation is `TRUNCATE ... CASCADE`, **not a database per test** (~1 s each would put the gate minutes behind the ~30 s bar).
+  Every fixture is lazy, so offline suites still run with no database; the `init_db(":memory:")` suites are untouched (move with the
+  repository switch).
+* **Addition**: `tests/test_migrations.py` (18 tests) — apply to a fresh DB, the checksum, `--check`'s three exit codes, no-op re-apply, drift
+  (edited/deleted applied file), pending, a mid-file failure recording nothing, and **the advisory lock serialising two concurrent runners**
+  (the migration sleeps so the second thread is guaranteed mid-transaction). Plus the two FK decisions and the type mapping.
+* **Change**: `check.sh` gains a Postgres block after the offline gates; infra comes up **once** for the whole run (torn down by a `trap`).
+  Unavailable infra goes through **`missing()`, not `skip()`** — NOT RUN, failing the gate unless `ALLOW_MISSING_TOOLS=1`.
+* Updated: [Database schema](/concepts/contracts/database-schema.md), [Test suite](/concepts/subsystems/test-suite.md),
+  [Checks](/concepts/runbooks/checks.md), [Dev setup](/concepts/runbooks/dev-setup.md), [Repo Map](/concepts/repo-map.md).
 
-* **Fix**: **the voice path never delivered `opening_line`.** It was authored at
-  cast time, stored, written as turn 0 in *text* mode — and silently dropped in
-  voice, so every spoken interview opened with an improvised generic greeting
-  regardless of persona. `build_voice_system_prompt` gained `opening_line` and
-  appends (never interpolates) a `THE FIRST THING YOU SAY` block, used by both
-  providers. An instruction alone is not enough — neither vendor generates
-  anything until something arrives — so each browser path nudges once: `openai`
-  sends `response.create` on the data channel's `onopen`, `gemini` seeds one
-  synthetic `sendClientContent` turn ("[The call connects…]"). **The nudge is
-  never stored**; what lands in the transcript is the persona's actual reply,
-  through the normal transcription path.
+## 2026-09-10 — the object store (port + two adapters)
+* **Addition**: `control_plane/object_store.py` — the byte half of the storage boundary. `ObjectStore` (`put(key, source: Path, *,
+  content_type)`, `open(key) -> ByteSource | None`) and `ByteSource` (`size`, `content_type`, `read(start, end)`), both `Protocol`. **`put`
+  takes a path and `open` returns a stream — neither says `bytes`** (an hour of stereo Opus should not be held in memory).
+  `FilesystemObjectStore` is the no-S3 dev default (production code; content type in a `<name>.content-type` sidecar to match S3's round
+  trip). `S3ObjectStore` uses `upload_file` + `head_object` + ranged `get_object`/`iter_chunks`. `object_store_from_env()` picks by
+  `S3_BUCKET`.
+* **Decision — range semantics identical in both adapters** (one `_resolve_range`): inclusive both ends; an `end` past EOF is **clamped**; a
+  `start` at/beyond EOF reads **nothing**; a negative bound **raises** (416 is the handler's decision, not the port's). Keys validated the
+  same way, `..` included.
+* **Decision — no `delete`** (retention is manual; a `delete` would be dead code someone wires up later without reading the decision).
+* **Measured, not assumed**: a `head_object` **404 does not prove the object is missing** — a HEAD has no body, so botocore reports a bare 404
+  for a missing *bucket* exactly as for a missing key (verified against MinIO); `open` confirms with `head_bucket` before returning `None`.
+  boto3's multipart threshold is **8 MiB** (not S3's 5 MiB), so the suite uploads 9 MiB and asserts the ETag part count.
+* **Addition**: `tests/test_object_store.py` (39 tests) — one behavioural set over both adapters + three S3-only facts; the S3 half runs
+  against a **real MinIO** and **errors rather than skips** without one (18 passed / 21 errors on a machine with no object store).
+* **Change**: `test_architecture.py` gains `test_isp_object_store_adapters_satisfy_the_port` (built with `__new__`; `S3ObjectStore.__init__`
+  builds a client). `check.sh` uses `tests.infra up all` (adds MinIO); still `missing()`, not `skip()`.
+* **Nothing is wired up yet** — `repository.py` still appends chunks straight to `RECORDINGS_DIR` and reads a whole recording into memory; the
+  chunk → spool → finalize state machine S3 needs lands with the next work package.
+* Updated: [Storage ports](/concepts/contracts/storage-ports.md), [Session recording](/concepts/contracts/session-recording.md), [Test
+  suite](/concepts/subsystems/test-suite.md), [Checks](/concepts/runbooks/checks.md), [Repo Map](/concepts/repo-map.md).
 
-* **Change (the seam split)**: `candidate_agent/voice.py` did what its own
-  docstring said to do when a second provider landed — and the answer was
-  **not** a neutral schema. `build_realtime_session` and
-  `build_gemini_live_session` each emit their vendor's own document; a
-  `_SESSION_BUILDERS` table dispatches (a lookup, not an `== "gemini"` — which
-  `test_ocp_new_provider_needs_no_agent_change` would fail anyway). What is
-  shared is the *decisions*: same compiled prompt, same opening line, same
-  persona voice, same "the human can always interrupt". New `session_facts()`
-  reads the client-visible half back out of whichever document it is handed, so
-  `mint_realtime_credential` never branches on a provider name and no longer
-  reaches into `config["audio"]["output"]["voice"]`.
+## 2026-09-10 (Apple `container`: the kernel, and the port that only looked open)
+* **The runtime needed a kernel, and its own downloader could not fetch one**: `container system kernel set --recommended` failed with
+  `StreamClosed(... ProtocolError)` — an HTTP/2 transport fault. Refetching `kata-static-3.28.0-arm64.tar.zst` (596,775,193 bytes) with `curl
+  --http1.1 --retry 10 --retry-all-errors -C -` ran at ~216 KB/s and completed; `container system kernel set --tar <file> --binary
+  ./opt/kata/.../vmlinux.container` installed it from disk. The earlier "~2 KB/s" reading was the broken HTTP/2 path mistaken for the network.
+* **Change (`tests/infra.py`)**: containers are no longer started with `-p`. Apple `container` 1.2.0 binds a host listener that completes a
+  TCP handshake then drops the connection once a protocol exchange begins — `nc` calls the port open, `psycopg` gets "server closed the
+  connection unexpectedly". The helper now reads `.status.networks[0].ipv4Address` from `container inspect` and talks to the container
+  directly; `_free_port`/`_publish_specs`/`_looks_like_a_port_rejection`/`port_form_used` are gone.
+* **Consequence**: a check that only opens a socket would have called this stack healthy — `_wait_for_postgres` connecting with psycopg is
+  what caught it.
+* `scripts/check.sh` is green end to end through Apple `container` with no `TEST_*` overrides: **26 gates PASS** (incl. `migrations
+  (postgres)` and `object store (minio)`), `live model scenarios` SKIP by design. Updated: `test-suite`, `checks`.
 
-* **Change**: the 30-name voice roster moved to
-  `llm.gemini_live.GEMINI_LIVE_VOICES` and `engine_contract.GEMINI_TTS_VOICES`
-  **re-exports the same object** (`candidate_agent` → `llm` is the allowed
-  direction). Order and membership unchanged, append-only comment carried with
-  it. Two copies of an order-sensitive tuple is exactly the drift `tts_voice_id`
-  cannot survive — it is chosen once at cast time from one list and spoken months
-  later from the other. The Gemini builder prefers the stored `tts_voice_id` over
-  re-deriving it, so the session voice matches the stall clips the Go engine
-  pre-synthesized.
+## 2026-09-10 (the portal meets the control plane halfway)
+* **Addition**: three additive changes so the SkillBrew organization portal can call this service from `localhost:3002` and its deployed
+  origin, none altering a status code, response body or stored value the `ui/` console already sees. WP0 of
+  `docs/INTERVIEWER_PRACTICE_PORTAL_PLAN.md` (decision D2).
+  1. **CORS, off by default** — `cors_allowed_origins()` (`CORS_ALLOWED_ORIGINS`, comma-separated); `build_app` installs `CORSMiddleware`
+     (`allow_credentials=True`) **only** when the list is non-empty. Unset installs nothing rather than a wildcard (the portal's browsers carry
+     an org cookie).
+  2. **An error envelope beside `detail`** — `install_error_envelope(app)` returns the same status and `detail` (the pydantic 422 list included)
+     plus `status: false` and a `message`. Load-bearing for 409/422 (the portal's axios layer toasts `response.data?.message`). Registered on
+     **starlette's** `HTTPException` (the 404 is enveloped too); 204/304 still carry no body.
+  3. **A multipart door onto the recording chunks** — `POST /sessions/{id}/recording/chunks` now also accepts `multipart/form-data` with a
+     `chunk` file field (the portal's axios can't send a raw `audio/webm` body). `_read_chunk` branches on content type (the raw path untouched);
+     on multipart the *part's* content type is stored on `seq=0`. seq ordering / 409s / 422 are one path for both. `python-multipart` is now a
+     dependency.
+* **Test**: `tests/test_portal_compat.py` (13 tests, offline), wired into `check.sh`. Each assertion was confirmed to fail against a
+  deliberately broken implementation first.
+* `scripts/check.sh` green on Apple `container`: **27 gates PASS**, `live model scenarios` SKIP by design. Updated: `rest-api`,
+  `session-recording`, `control-plane-api`, `control-plane`, `test-suite`, `checks`, `dev-setup`.
 
-* **Change (Phase C)**: `RealtimeCredentialResponse` gained `provider`,
-  `stt_source`, `noise_reduction` and `client_config`, and `call_url` now
-  defaults to `""`. The OpenAI session document gained
-  `audio.input.noise_reduction: near_field`, an injected transcribe model
-  (`llm.factory.resolve_transcribe_model()`, `TRANSCRIBE_MODEL`, default
-  **`gpt-4o-transcribe`** — up from the mini one, since the interviewer's words
-  are half the evidence the report reads), and a transcription vocabulary
-  `prompt` composed **in code** from `sorted(contract.knowledge_ceiling)`.
-  Transcribers mangle exactly the domain nouns the evaluation layer looks for.
+## 2026-09-11 (OKF made current, and log.md compressed)
+* **Update**: refreshed the two stale spots the recent work left. [Project overview](/concepts/project-overview.md) build state (was dated 2026-08-27): the storage line now records that a **PostgreSQL** schema and an **object-store port with two adapters** (filesystem + S3/MinIO) exist beside SQLite and are exercised by `check.sh` under Apple `container`; a new **Consumers** line records that the **SkillBrew Organization portal** (separate repo) is now a second HTTP consumer of this control plane, behind the CORS/envelope/multipart compatibility layer. [Model providers](/references/model-providers.md): added the operational trap that the `gemini-3.7-flash` default rate-limits (`429`/`503` → `502`) under sustained load, that a `429` fails over but a `503` does not, and that the fix is config-only — pin `LLM_MODEL`/`<ROLE>_MODEL` and give the deployment a real-quota key. Measured live 2026-09-11 while debugging voice: primary key `403` project-denied, fallback key free-tier `429`; moving the default off 3.7-flash to `gemini-3.5-flash` restored typed and spoken sessions until the fallback key's per-minute quota was exhausted.
+* **Optimize**: this file was **1397 lines / ~29,300 words / 210 KB** — the single biggest file in the bundle and ~15% of it. Compressed to **~700 lines / ~10,000 words / 79 KB** (word count to 34% of the original). August history, superseded by the concept pages, was cut hard; the ten tiny `2026-08-23` engine-milestone entries were collapsed into one `## 2026-08-23 (engine, phases 0–4 — build milestones)` section that keeps each milestone's decision/fix/gap and points to [Live-session engine](/concepts/subsystems/engine.md). September entries were trimmed lightly. Preserved intact: every dated section header, every carried-forward decision, every not-built / not-tested / not-enforced gap note, every version bump (`ENGINE_CONTRACT_VERSION`, `PERSONA_VERSION`, catalog, scoring/analysis), and every named regression test. No code changed; documentation only.
 
-* **Change (UI)**: `@google/genai` **2.20.0** pinned (exact, not a range — this
-  is a preview protocol). New `ui/src/geminiLive.js` (connect, PCM up, gapless
-  24 kHz playback through one `GainNode`, barge-in, `goAway`/resumption) and
-  `ui/src/audio/pcmWorklet.js` (Float32 → Int16 LE, ~2048-sample batches, plus
-  the RMS the "hearing you" indicator reads). `VoiceSessionView.jsx` branches on
-  `cred.provider`; **the recording graph is untouched** — mic on merger channel 0,
-  persona on channel 1, which on Gemini is the playback `GainNode` wired to both
-  the speakers and the merger. Header now shows `Talker … · STT … · NS on/off`, a
-  mic device picker (populated after the permission prompt, when labels exist)
-  and a noise-suppression toggle; both swap the track live via
-  `sender.replaceTrack()` / `setStream()` without renegotiating the call.
-  `getUserMedia` also gained `autoGainControl` and `channelCount: 1`.
-
-* **Decision (recorded in a code comment and in the OKF)**: **no client-side
-  denoising.** Echo cancellation and AGC are non-negotiable (a laptop speaker
-  otherwise feeds the persona back into the persona) and noise suppression is the
-  operator's switch, but nothing between the mic and the recorder processes the
-  signal — no RNNoise, no gate, no worklet. The raw recording is the evidence
-  `report_engine/validate.py` checks quotes against; a recording we have quietly
-  rewritten is not evidence of anything.
-
-* **Fix (build)**: Vite inlined the capture worklet as a `data:text/javascript`
-  URL, which `AudioWorklet.addModule` does not fetch reliably — the call would
-  have failed at connect time with nothing in the build to explain it. A
-  targeted `build.assetsInlineLimit` predicate forces that one file to a real
-  asset; everything else keeps the default.
-
-* **Tests**: `tests/test_voice.py` extended — opening-line delivery and its
-  empty-contract fallback, injected transcriber, vocabulary hint, `near_field`,
-  the five Gemini compilation properties, dispatch by provider and the
-  `ValueError` for an unknown one, roster identity, `client_config` carrying
-  neither prompt nor opening line, and a `FakeGeminiBroker` endpoint test.
-  `FakeBroker` now answers `openai` (a provider nobody can compile for is its own
-  separately tested error). New `tests/test_gemini_live_mint.py` — a `--live`
-  smoke test that the vendor still accepts the sealed config on the configured
-  model id, wired into `scripts/check.sh`'s live block.
-  `tests/test_architecture.py` passes **unmodified**.
-
-* **Regenerated**: `owner_handover/session_realtime_schema.json`
-  (`scripts/export_schemas.py`). `.env.example`'s voice section rewritten.
-
-* Updated: `concepts/contracts/realtime-voice.md` (rewritten for two providers —
-  the transport table, the two seals, opening-line delivery per provider,
-  resumption, and the unchanged recording path),
-  `concepts/contracts/rest-api.md` (the response's fields),
-  `concepts/determinism.md` (voice table: opening line, per-provider turn
-  detection, one roster), `concepts/subsystems/{llm-port,ui,control-plane,candidate-agent,test-suite}.md`,
-  `concepts/modules/{candidate-agent-voice,llm-factory}.md`,
-  `concepts/runbooks/checks.md`, `concepts/repo-map.md`.
-  `scripts/check.sh` green; `cd ui && npm run build` green.
-* **Change**: SkillBrew branding in the UI — the real logo (`ui/public/logo.{svg,png}`) replaces the placeholder mark in `Shell.jsx`'s rail and becomes the favicon / touch icon in `index.html`. Asset-only; no behaviour change.
-* **Fix (docs)**: `infra/README.md` redeploy section rewritten from what 2026-09-01's deploy actually required: a reboot does not redeploy (cloud-init `runcmd` is per-instance), and a bare `bootstrap.sh` re-run extracts the tarball but leaves the old processes serving (`systemctl enable --now` does not restart a running service). The documented sequence is now build-artifacts → SSM `bootstrap.sh && systemctl restart control-plane engined`.
-* **Fix (persona coherence)**: **a persona cast as a woman could speak in a
-  man's voice.** `pick_voice(candidate_id, voices)` hashes
-  `sha256(candidate_id) % len(voices)` over whatever roster it is handed, and
-  `build_engine_contract` handed it all thirty — so `human_traits.
-  gender_presentation` had no bearing on `tts_voice_id` at all, and roughly half
-  of gendered personas contradicted their own profile the moment they spoke. This
-  is the audible twin of the bug the casting realism note fixed on 2026-08-27,
-  where a persona whose profile said *gender presentation: woman* was cast under
-  a man's name. Three parts: (1) `llm/gemini_live.py` gains
-  `GEMINI_FEMALE_VOICES` (14) and `GEMINI_MALE_VOICES` (16), frozensets recording
-  the **vendor-documented** voice gender of every roster member from Google's
-  Gemini-TTS voice table — they live beside the roster they classify, must
-  partition it exactly (`test_the_gender_sets_partition_the_roster` asserts union
-  and disjointness, so a voice appended without a classification fails), and a
-  voice is never reclassified because moving a name between the sets would
-  silently re-voice every persona cast since; (2)
-  `engine_contract.voices_for_presentation(voices, gender_presentation)` narrows
-  the offered roster — `woman`/`man` to the matching subset **in roster order**,
-  `non_binary`/`unspecified`/absent to the roster unchanged, since there is no
-  vendor-neutral subset and inventing one would be this repo deciding what
-  non-binary sounds like; (3) `build_engine_contract` filters through it before
-  calling `pick_voice`, and only when `human_traits is not None`. Order is
-  preserved deliberately: `pick_voice` is a modulus into a sequence, so the
-  subset's order is contract as much as the roster's is. `pick_voice` itself is
-  **signature-stable** — the fallback in `candidate_agent/voice.py` for old
-  contracts with no `tts_voice_id` has no traits in scope and still resolves
-  against the full roster. The sets are imported from `llm.gemini_live`, never
-  restated (`candidate_agent` → `llm` is the allowed direction).
-* **Change**: `ENGINE_CONTRACT_VERSION` **v1.4 → v1.5**, and this is the first
-  bump where **the compiled prompt text does not change**. The rule in
-  `concepts/determinism.md` is *bump the constant that covers what moved*, and
-  what moved is the compiled contract: identical inputs now compile a different
-  `tts_voice_id`. Neither `fingerprint` (which covers `system_prompt`) nor
-  `seed_fingerprint` covers that field, so the contract version is the only thing
-  that records it. Regenerated as on the v1.4 bump:
-  `engine/internal/contract/contract_test.go` literal,
-  `engine/internal/contract/testdata/engine_contract_sample.json`,
-  `owner_handover/engine_contract_sample.json` and the two handover schemas (the
-  Pydantic default moved), `docs/GO_ENGINE_CONTRACT.md`. **No Go engine change** —
-  it pins by major version. **Already-cast personas are untouched**:
-  `tts_voice_id` is written once at cast time and never recomputed at session
-  time, so an existing persona keeps the voice its managers know it by; only new
-  casts are gender-matched. The byte-stability fixtures needed no update —
-  `_contract_for` casts without `human_traits`, and the handover sample is
-  generated with `human_traits=None`, so both compile the same voice they did at
-  v1.4. Both `concepts/determinism.md` and
-  `concepts/contracts/engine-contract.md` now state the general form of the bump
-  rule rather than only the prompt-text case.
-* **Change (UI)**: **the voice session header no longer names our models.**
-  `ui/src/VoiceSessionView.jsx` rendered `· voice "{cred.voice}"` and a second
-  line `Talker {cred.model} · STT {cred.stt_source} · NS on/off`, straight off
-  the credential — an operator diagnostic that had become a hiring manager
-  reading which vendor and which model we run. Both lines removed; the header is
-  the persona label and *spoken interview*. Noise suppression stays visible on
-  the NS toggle button, which already shows its own state. `cred` state is kept —
-  the provider branch and both transports need it — and the API response still
-  carries `provider`, `model`, `stt_source` and `voice`, because the browser
-  needs them to connect. They are simply never rendered. A sweep of `ui/src`
-  found no other user-visible vendor or model string; the remaining `gemini` /
-  `openai` occurrences are identifiers, imports and comments.
-* Updated: `concepts/determinism.md` (voice table row + a section on the
-  gender-matched subsets and why v1.5 is a bump; the version rule generalised),
-  `concepts/contracts/engine-contract.md` (version line, the `tts_voice_id` row,
-  a **v1.5** section, the changing-this-file rule),
-  `concepts/modules/candidate-agent-engine-contract.md`
-  (`voices_for_presentation`), `concepts/subsystems/llm-port.md` (the
-  classification's ownership and its partition invariant),
-  `concepts/subsystems/ui.md` (the header names no vendor, model or voice),
-  `concepts/subsystems/test-suite.md` (the new offline tests).
-  `scripts/check.sh` green; `cd ui && npm run build` green.
-* **Fix (the v1.5 gap, found in production)**: a persona named **Tanvi** spoke
-  with a man's voice. v1.5's gender match only engaged when `human_traits` was
-  present — and the **default** cast path has none: `enroll_candidates` casts the
-  fixed catalog archetypes as `(key, None, None)` and the lazy session-start cast
-  passes no traits either. So the fix covered the custom-persona minority and left
-  the majority hashing over all thirty voices. Code cannot close this alone — a
-  name is not a gender lookup table, and writing one would be this repo guessing
-  at an identity the model authored — so the split moves by exactly one field.
-  `CANDIDATE_DRAFT_JSON_SCHEMA` gains **`presented_gender`** (`woman | man |
-  neutral`, enum-constrained and `required`), the casting prompt asks for it as a
-  *description of the model's own output* ("a persona named Tanvi is 'woman'")
-  with rule 12 and an output-list line, and `casting_realism_note` now says the
-  declaration must match a stated `gender_presentation` as well as the name.
-  Code owns everything after that: `engine_contract.normalize_presented_gender`
-  accepts only the three values and returns `""` for anything else — a missing
-  key, `None`, `"female"`, an int — and **never raises**, because losing a whole
-  cast over a voice hint is the worse failure; `voices_for_presentation` maps it,
-  with `neutral` taking the same full-roster branch as `non_binary`. Precedence
-  in `build_engine_contract` is **code over model**: `human_traits.
-  gender_presentation` wins outright where a persona has one. `agent.generate`
-  reads the field off the parsed draft and passes it down, so neither
-  `control_plane/api.py` cast site changed signature and the agent stays
-  vendor- and persistence-free.
-* **Change**: `PERSONA_VERSION` **v1.2 → v1.3** and `ENGINE_CONTRACT_VERSION`
-  **v1.5 → v1.6**. Persona: `VirtualCandidate` gained `presented_gender`
-  (pattern `^(woman|man|neutral)?$` — empty for every persona stored before
-  v1.3) and the casting prompt changed, which is the same pair of reasons v1.1
-  and v1.2 were bumped. Contract: the compiled `tts_voice_id` moves again for
-  identical inputs, the rule generalised in this log's v1.5 entry. The declared
-  value is folded into `fingerprint` — it is model-authored, stored, and decides
-  what a manager hears, which is precisely the integrity claim's job;
-  `seed_fingerprint` is unaffected except through `PERSONA_VERSION`. Regenerated
-  as before: Go literal, both contract samples, both handover schemas,
-  `docs/GO_ENGINE_CONTRACT.md`. **No Go engine change** — it pins by major
-  version, and no contract field was added.
-* **Note on the tests, because the last round's nearly could not fail**: the
-  new cast tests run over **eight** interview ids whose *unfiltered* `pick_voice`
-  results are deliberately mixed (three male, five female), not one. With a
-  single id the `woman` case passed with the fix reverted — the unfiltered pick
-  for that id happened to be `Pulcherrima`, already female. The test now also
-  asserts `moved`, that the filter changed at least one pick, so a future
-  regression cannot make it vacuous. Verified by reverting the precedence line:
-  both parametrizations fail, then pass again restored.
-* **Change (UI)**: **the icon rail is single-product.** `ui/src/Shell.jsx` carried
-  five entries — Home, BrewVoice, AI Interviews, Interview Training, Assessments
-  — with every one but Interview Training rendered `disabled` and titled *"not
-  part of this service"*. A column of dead icons reads as a broken console rather
-  than a bigger one. The four are gone, with `RailIcon`'s disabled branch and the
-  now-orphaned `.rail .ri:disabled` rule in `ui/src/index.css`; the logo and the
-  one active icon stay so it still reads as a rail.
-* Updated: `concepts/determinism.md` (a `presented_gender` row in the candidate
-  table, the voice row, and a section on who declares presentation when there are
-  no traits), `concepts/contracts/engine-contract.md` (version line + a **v1.6**
-  section), `concepts/contracts/virtual-candidate.md` (`PERSONA_VERSION` v1.3 and
-  the new field), `concepts/modules/candidate-agent-engine-contract.md` (the
-  resolution order and `normalize_presented_gender`),
-  `concepts/modules/candidate-agent-agent.md` (where the field is read, and the
-  fingerprint), `concepts/subsystems/ui.md` (the rail),
-  `concepts/subsystems/test-suite.md` (the new cast tests).
-  `scripts/check.sh` green; `cd ui && npm run build` green.
-* **Addition**: **silent failover to a second Gemini key.** A Gemini key stops
-  working for reasons that have nothing to do with the request — free-tier quota
-  resets on the project's clock, a key is rotated out of the console, a burst
-  trips the per-key rate limit — and any one of those takes down casting, the
-  live session and the Voice button at once. New `llm/failover.py` holds four
-  wrappers (`FailoverStructuredModel`, `FailoverChatModel`, `FailoverAudioModel`,
-  `FailoverRealtimeBroker`), each holding one inner instance per key and
-  delegating. The wrapper *is* the port — same interface, same `ModelError`
-  contract, same `provider`/`model_id`/`temperature` — so nothing outside `llm/`
-  knows it exists: no API change, nothing visible to the browser. The factory
-  gained `FALLBACK_API_KEY_VARS = {"gemini": ("GEMINI_API_KEY2",)}` and
-  `_credentials(provider)`; every `build_*` constructs one adapter per key and
-  wraps only when there is more than one, so the single-key path returns the bare
-  adapter and carries no machinery at all.
-* **Design notes on the failover, because a retry layer is easy to get wrong**:
-  (1) **only key-shaped failures retry.** `looks_like_a_key_failure` reads a
-  401/403/429 off the vendor exception's `code`/`status_code`/`response.status_code`,
-  then falls back to markers in the flattened message (`resource_exhausted`,
-  `permission_denied`, `unauthenticated`, `quota`, `rate limit`, an invalid or
-  expired key) and a word-bounded bare status number. Everything else — a
-  malformed request, unparseable JSON, a 500, a 503 — propagates on the first
-  attempt, because it fails identically on every key and running it twice doubles
-  the latency and the bill to reach the same exception. (2) **The markers are
-  deliberately specific.** The obvious short one, "rate", is a substring of
-  `generate_content`, which appears in the message of *every* Gemini failure — it
-  would classify everything as key-shaped. A test asserts that exact near-miss in
-  both directions, along with `429` classifying while the `4291` of a request id
-  does not. (3) **Stickiness is process-wide**, module-level in `failover.py`,
-  because `build_model` is called per agent and per-instance memory would forget
-  the switch immediately; a dead primary is paid for once per process, not once
-  per call. `reset_preferences()` exists so tests do not leak it into each other.
-  (4) **Each key is tried at most once** and the last failure is raised unchanged.
-  One warning per switch, server-side.
-* **Boundaries kept**: `API_KEY_VARS` still decides whether a provider is
-  *configured* — `resolve_provider`, `realtime_providers_available` and
-  `audio_analysis_available` read only the primary, so `GEMINI_API_KEY2` alone is
-  not a Gemini deployment (tested). Wrapping happens **after** the table lookup,
-  never inside `PROVIDERS`/`REALTIME_PROVIDERS`, because `tests/test_architecture.py`
-  pins the vendor constructors at `(model_id, temperature, api_key)` and
-  `(model_id, api_key)`; the architecture suite is unmodified and green.
-  `llm/failover.py` is mypy-clean against the port ABCs — `call_with_failover` is
-  generic in its return type rather than returning `Any`.
-* **Change (infra, terraform only — nothing applied)**: `infra/terraform/ssm.tf`
-  gains `/interview-watcher/<env>/GEMINI_API_KEY2` in the same shape as the
-  existing secrets (SecureString, placeholder value, `ignore_changes = [value]`),
-  with a `gemini_api_key2_placeholder` variable. The instance IAM policy in
-  `iam.tf` **needed no change** — `ReadSecretParameters` is already scoped by path
-  (`parameter/${var.project}/${var.environment}/*`), not by literal parameter
-  names. `templates/bootstrap.sh.tftpl` reads the parameter **tolerantly**
-  (`2>/dev/null || true`, plus mapping `REPLACE_ME` and the CLI's `None` to
-  empty) so an environment that predates the parameter still boots, and writes
-  `GEMINI_API_KEY2` into both `control-plane.env` and `engined.env` for symmetry.
-  ⚠️ The bootstrap script **on the running instance is an older render**, so prod
-  pickup needs the hand-applied step, not just a reboot — see the redeploy
-  sequence in `infra/README.md`. Note also that the **Go engine has no failover**:
-  `internal/config` reads named variables only, so the `GEMINI_API_KEY2` written
-  into `engined.env` is inert there. Written down in `.env.example` so the
-  symmetry is not mistaken for a feature.
-* **Addition**: `tests/test_key_failover.py` (29 tests, offline, no key) and its
-  `run` line in `scripts/check.sh` — required by
-  `test_every_test_file_is_wired_into_the_gate`.
-* Updated: `concepts/subsystems/llm-port.md` (a section on the two keys — what
-  fails over, what does not, stickiness, and the two boundaries),
-  `concepts/modules/llm-factory.md` (`FALLBACK_API_KEY_VARS`, `_credentials`, and
-  the two invariants wrapping must not break),
-  `concepts/runbooks/dev-setup.md` (the credential table + why a fallback key is
-  not a configuration), `concepts/runbooks/checks.md` (the new gate),
-  `concepts/subsystems/test-suite.md` (the new suite),
-  `concepts/repo-map.md` (`llm/failover.py`), `.env.example`.
-  `scripts/check.sh` green; `cd ui && npm run build` green.
+## 2026-09-12
+* **Change**: `owner_handover/` is now ignored and untracked (`git rm -r --cached`, rule in `.gitignore`). The 18 schema/sample JSON files are regenerated by `scripts/export_schemas.py`, so a fresh checkout must run it before `scripts/check.sh` (the `--check` step reports every file stale when the directory is absent). `docs/` stays tracked. See [OKF maintenance](/concepts/runbooks/okf-maintenance.md).

@@ -215,7 +215,7 @@ class AnalysisContext(BaseModel):
     job_title: str = ""
     job_description: str = ""
     skills_required: list[str] = Field(default_factory=list)
-    clarity_facts: list[dict[str, str]] = Field(default_factory=list)
+    role_facts: list[dict[str, str]] = Field(default_factory=list)
     language_setting: str = ""
 
     persona_label: str = ""

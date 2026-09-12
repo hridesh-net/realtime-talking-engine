@@ -202,7 +202,7 @@ human read it.
 
 You are given what this interview was meant to achieve: the persona's
 `must_discover` list (what this candidate was hiding, and how to surface it),
-the role's required skills, and the clarity facts the manager was meant to
+the role's required skills, and the role facts the manager was meant to
 convey.
 
 For each `must_discover` item, decide **surfaced / not surfaced / unclear** by

@@ -6,8 +6,10 @@ resource: /control_plane/api.py
 tags: [contract, api, fastapi, rest]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  at: "2026-09-10T12:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
@@ -81,7 +83,7 @@ when a candidate is assigned, so `resume_probing.required` is currently always
 
 | Method | Path | Port used | Status | Notes |
 |---|---|---|---|---|
-| `POST` | `/api/v1/role-facts` | — | 200 / **502** | `{job_title, jd, location}` → `list[ClarityFact]`. **Calls the model.** Stores nothing. |
+| `POST` | `/api/v1/role-facts` | — | 200 / **502** | `{job_title, jd, location}` → `list[RoleFact]`. **Calls the model.** Stores nothing. |
 | `GET` | `/api/v1/candidate-archetypes` | — | 200 | `{catalog_version, defaults, rubric_criteria[], stress_labels[], archetypes[]}`. Pure data, no I/O. |
 | `GET` | `/api/v1/trait-dimensions` | — | 200 | `trait_dimensions.dimension_catalog()` — every preset/vocabulary a `custom_persona` value can come from. Pure data, no I/O. |
 | `POST` | `/api/v1/interviews/{id}/candidates` | `EnrollmentStore` | **201** / 404 / 422 | **Calls the model, once per archetype or custom persona.** Body optional. |
@@ -172,7 +174,7 @@ handler never branches on a provider name. See
 
 | Method | Path | Port used | Status | Notes |
 |---|---|---|---|---|
-| `POST` | `/api/v1/sessions/{id}/recording/chunks?seq=N` | `RecordingWorkflowStore` | **201** / 404 / 409 / 422 | Body: raw bytes. `seq` must equal the recording's `next_seq` → 409 otherwise. `seq=0` creates the row and its `Content-Type` becomes the stored `mime_type`. 409 on a non-`voice` session, or once the recording is `complete`. 422 on an empty body. |
+| `POST` | `/api/v1/sessions/{id}/recording/chunks?seq=N` | `RecordingWorkflowStore` | **201** / 404 / 409 / 422 | Body: raw bytes, **or** `multipart/form-data` with a file field named `chunk`. `seq` must equal the recording's `next_seq` → 409 otherwise. `seq=0` creates the row and the `Content-Type` — the request's on the raw path, the *part's* on the multipart one — becomes the stored `mime_type`. 409 on a non-`voice` session, or once the recording is `complete`. 422 on an empty body or an empty part, and on a multipart body with no `chunk` field. |
 | `POST` | `/api/v1/sessions/{id}/recording/finalize` | `RecordingStore` | 200 / 404 | No body. Idempotent — a second call returns the same record, `updated_at` unmoved. 404 when there is no recording for the session. |
 | `GET` | `/api/v1/sessions/{id}/recording` | `RecordingStore` | 200 / 404 | Serves the audio bytes, `Content-Type` from the stored `mime_type`. Serves a **partial** recording too (`status='recording'`) — a crashed session's partial file is the honest artifact, not a 404. |
 
@@ -220,7 +222,8 @@ say — see [Evaluation agent](/concepts/subsystems/evaluation-agent.md).
 
 ## Cross-cutting
 
-* Errors are FastAPI's `{"detail": ...}`; the UI's fetch wrapper unwraps `detail` when it is a string.
+* Errors are FastAPI's `{"detail": ...}` **plus** `{"status": false, "message": "…"}`; the UI's fetch wrapper unwraps `detail` when it is a string and never sees the other two. Status codes and `detail` values are unchanged — `detail` is still the pydantic error *list* on a 422 — and `message` is the same string when `detail` is one, a joined `loc: msg` summary for a validation failure, and `json.dumps(detail)` otherwise. Registered on starlette's `HTTPException`, so the unmatched-route 404 carries it too; 204/304 still carry no body, and an exception's own headers survive. Added for the SkillBrew portal, whose shared axios layer toasts `response.data?.message` on 409/422/408 unconditionally and reads a boolean `status` to tell failure from success — no success body here has one. See [Control plane](/concepts/subsystems/control-plane.md).
+* **CORS is off unless configured.** `CORS_ALLOWED_ORIGINS` (comma-separated) installs `CORSMiddleware` with `allow_credentials=True` and all methods/headers; empty or unset installs nothing at all, so the same-origin console is unaffected and no wildcard origin is ever offered. See [Dev setup](/concepts/runbooks/dev-setup.md).
 * No authentication, rate limiting, or pagination anywhere.
 * `get_repo()` opens a **new SQLite connection per request** via `init_db()`. The source notes this should be a pooled dependency in production.
 * Dependency injection is `Depends(get_repo)` / `Depends(get_expectation_agent)` / `Depends(get_candidate_agent)` / `Depends(get_session_agent)` / `Depends(get_role_facts_agent)` / `Depends(get_realtime_broker)` — override these in tests rather than patching modules. `tests/test_session.py` does exactly that.

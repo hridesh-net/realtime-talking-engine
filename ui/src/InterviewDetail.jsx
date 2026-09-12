@@ -197,8 +197,8 @@ export default function InterviewDetail({
                             <div>
                               <div className="nm">{s.candidate_name}</div>
                               <div className="mt">
-                                {archetypes.find((a) => a.key === s.persona_key)?.label ||
-                                  s.persona_key}
+                                {archetypes.find((a) => a.key === s.archetype)?.label ||
+                                  s.archetype}
                               </div>
                             </div>
                           </div>

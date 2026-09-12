@@ -129,7 +129,7 @@ class VirtualCandidateAgent:
         duration_minutes: int,
         interview_type: str = "mixed",
         language: str = DEFAULT_LANGUAGE,
-        candidate_notes: str = "",
+        persona_notes: str = "",
         expectation: Any | None = None,
         seed_override: str | None = None,
         avoid_names: list[str] | None = None,
@@ -139,7 +139,7 @@ class VirtualCandidateAgent:
         location: str = "",
         department: str = "",
         manager_level: str = "",
-        clarity_facts: list[dict[str, str]] | None = None,
+        role_facts: list[dict[str, str]] | None = None,
     ) -> VirtualCandidate:
         """Cast one persona for this interview and archetype.
 
@@ -155,7 +155,7 @@ class VirtualCandidateAgent:
             duration_minutes: Interview length.
             interview_type: Type from the expectation document.
             language: The language the persona speaks. Code owns this list.
-            candidate_notes: Extra colour layered on the archetype; never overrides it.
+            persona_notes: Extra colour layered on the archetype; never overrides it.
             expectation: Expectation document to ground the persona in, if any.
             seed_override: Replaces the default seed for reproducible casts.
             avoid_names: Names already used in this training set.
@@ -174,8 +174,8 @@ class VirtualCandidateAgent:
                 and the compiled runtime prompt.
             department: The team the role sits in, for the casting prompt.
             manager_level: Who the role reports to, for the casting prompt.
-            clarity_facts: The role facts the interviewer is expected to be
-                able to state (`evaluation_agent.schema.ClarityFact` dumps).
+            role_facts: The role facts the interviewer is expected to be
+                able to state (`evaluation_agent.schema.RoleFact` dumps).
                 The persona is the one who has to notice whether they were
                 said, so it is told what they are.
 
@@ -212,7 +212,7 @@ class VirtualCandidateAgent:
                 session_beats=archetype.session_beats,
                 realism_directives=casting_realism_note(human_traits),
                 language=language,
-                candidate_notes=candidate_notes,
+                persona_notes=persona_notes,
                 traits=traits,
                 speech=archetype.speech,
                 policy=archetype.answer_policy,
@@ -227,7 +227,7 @@ class VirtualCandidateAgent:
                 location=location,
                 department=department,
                 manager_level=manager_level,
-                clarity_facts=clarity_facts,
+                role_facts=role_facts,
             )
         )
 

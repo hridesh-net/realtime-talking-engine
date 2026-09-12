@@ -908,7 +908,7 @@ def compose_human_traits(
     )
 
 
-def persona_key(spec: Mapping[str, object]) -> str:
+def archetype_key(spec: Mapping[str, object]) -> str:
     """Content-addressed key for a composed persona — same spec, same key.
 
     Deliberately derived rather than random: re-submitting an unchanged spec
@@ -958,7 +958,7 @@ def compose_custom_persona(
     hand-written archetype faces. Nothing is registered: the returned archetype
     belongs to one cast, not to the catalog.
     """
-    key = persona_key(
+    key = archetype_key(
         {
             "label": label,
             "verdict": verdict,

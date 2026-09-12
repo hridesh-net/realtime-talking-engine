@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from evaluation_agent.schema import CLARITY_FACT_KEYS, ClarityFact
+from evaluation_agent.schema import ROLE_FACT_KEYS, RoleFact
 
 
 class InterviewConfigInput(BaseModel):
@@ -20,7 +20,7 @@ class InterviewConfigInput(BaseModel):
 
 LANGUAGES = ("english_indian", "hinglish", "hindi")
 
-__all__ = ["CLARITY_FACT_KEYS", "ClarityFact"]  # re-exported for handlers and the schema export
+__all__ = ["ROLE_FACT_KEYS", "RoleFact"]  # re-exported for handlers and the schema export
 
 #: The report sections a manager may be shown, and whether they are on by
 #: default. Order is the order they render in. The two `False` entries are the
@@ -83,7 +83,7 @@ class InterviewCreateRequest(BaseModel):
         pattern="^(off|identity|full)$",
         description="Recorded on the interview. No camera is accessed at any setting.",
     )
-    candidate_notes: str = Field(
+    persona_notes: str = Field(
         "",
         max_length=2000,
         description=(
@@ -91,7 +91,7 @@ class InterviewCreateRequest(BaseModel):
             "archetype, the knowledge ceiling, or the universal safety rules."
         ),
     )
-    clarity_facts: list[ClarityFact] = Field(
+    role_facts: list[RoleFact] = Field(
         default_factory=list,
         description="Left empty, these are extracted from the job description at creation.",
     )
@@ -146,8 +146,8 @@ class InterviewResponse(BaseModel):
     manager_level: str = ""
     language: str = "english_indian"
     proctoring: str = "off"
-    candidate_notes: str = ""
-    clarity_facts: list[ClarityFact] = Field(default_factory=list)
+    persona_notes: str = ""
+    role_facts: list[RoleFact] = Field(default_factory=list)
     report_sections: dict[str, bool] = Field(default_factory=lambda: dict(REPORT_SECTIONS))
     status: str
     config: InterviewConfigInput
@@ -319,7 +319,7 @@ class SessionResponse(BaseModel):
     id: str
     interview_id: str
     candidate_id: str
-    persona_key: str
+    archetype: str
     candidate_name: str
     status: str = Field(..., pattern="^(live|completed|abandoned)$")
     modality: str = Field(
@@ -383,7 +383,7 @@ class SessionSummary(BaseModel):
 
     id: str
     interview_id: str
-    persona_key: str
+    archetype: str
     candidate_name: str
     status: str = Field(..., pattern="^(live|completed|abandoned)$")
     modality: str = Field("text", pattern="^(text|voice)$")

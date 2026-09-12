@@ -26,7 +26,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "demo_turns.json"
 
 def _bundle(**overrides) -> SessionBundle:
     raw = json.loads(FIXTURE.read_text())
-    archetype = archetypes.get(raw.pop("persona_key"))
+    archetype = archetypes.get(raw.pop("archetype"))
     raw["persona"] = {
         "archetype_key": archetype.key,
         "label": archetype.label,

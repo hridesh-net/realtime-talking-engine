@@ -315,7 +315,7 @@ def test_a_voice_session_does_not_prewrite_the_opening_line(repo):
     session = repo.create_session(
         interview_id=interview_id,
         candidate_id=candidate_id,
-        persona_key="nervous_fresher",
+        archetype="nervous_fresher",
         planned_minutes=20,
         opening_line="Hi, thanks for the time.",
         modality="voice",
@@ -330,7 +330,7 @@ def test_a_text_session_still_prewrites_it(repo):
     session = repo.create_session(
         interview_id=interview_id,
         candidate_id=candidate_id,
-        persona_key="nervous_fresher",
+        archetype="nervous_fresher",
         planned_minutes=20,
         opening_line="Hi.",
     )

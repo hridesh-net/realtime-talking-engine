@@ -10,11 +10,13 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from candidate_agent.agent import VirtualCandidateAgent
 from candidate_agent.session import CandidateSessionAgent
 from control_plane import api as api_module
 from control_plane.database import init_db
 from control_plane.main import build_app
 from control_plane.repository import InterviewRepository
+from tests.test_control_plane_candidates_api import FakeModel
 from tests.test_session import FakeChatModel, _seed_candidate
 
 # ---------------------------------------------------------------------------
@@ -33,7 +35,7 @@ def _voice_session(repo: InterviewRepository) -> str:
     session = repo.create_session(
         interview_id=interview_id,
         candidate_id=candidate_id,
-        persona_key="nervous_fresher",
+        archetype="nervous_fresher",
         planned_minutes=20,
         opening_line="Hi, thanks for the time.",
         modality="voice",
@@ -102,7 +104,7 @@ def test_get_session_carries_recording_meta_and_list_flags_it(repo):
     session = repo.create_session(
         interview_id=interview_id,
         candidate_id=candidate_id,
-        persona_key="nervous_fresher",
+        archetype="nervous_fresher",
         planned_minutes=20,
         opening_line="Hi.",
         modality="voice",
@@ -135,6 +137,15 @@ def client(repo):
     app.dependency_overrides[api_module.get_repo] = lambda: repo
     app.dependency_overrides[api_module.get_session_agent] = lambda: CandidateSessionAgent(
         FakeChatModel()
+    )
+    # Without this the endpoint tests below cast a persona through the REAL
+    # provider: `_open_voice_session` POSTs /candidates, and an un-overridden
+    # `get_candidate_agent` builds an agent from the environment. This file is
+    # labelled offline and is run by the offline gate, so a live call here is
+    # a paid, slow, network-dependent step hiding inside a check that claims
+    # to need none of those things.
+    app.dependency_overrides[api_module.get_candidate_agent] = lambda: VirtualCandidateAgent(
+        model=FakeModel("fake-1", 0.35)
     )
     with TestClient(app) as c:
         yield c

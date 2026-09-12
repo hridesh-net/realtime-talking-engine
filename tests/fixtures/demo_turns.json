@@ -1,5 +1,5 @@
 {
-  "persona_key": "inflated_resume",
+  "archetype": "inflated_resume",
   "session": {
     "session_id": "demo-0001",
     "manager_name": "Rahul Khandelwal",
@@ -12,7 +12,7 @@
     "job_title": "Assistant Store Manager — Jaipur",
     "summary": "Sell SIM and broadband plans at retail touchpoints. Handle walk-in customers, pitch and close upgrades. Daily targets, rotational shifts.",
     "role_family": "sales",
-    "clarity_facts": [
+    "role_facts": [
       {"key": "targets", "statement": "Daily target of 12 activations and 4 broadband upgrades per store day."},
       {"key": "shifts", "statement": "Rotational shifts across a six-day week, including weekends."},
       {"key": "location", "statement": "Based at the Vaishali Nagar store with cover across three Jaipur touchpoints."},

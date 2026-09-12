@@ -9,6 +9,8 @@ generated:
   at: "2026-08-23T19:30:00Z"
 verified:
   - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
+  - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
@@ -46,7 +48,7 @@ class TurnRequest(BaseModel):              # POST /api/v1/sessions/{id}/turns
     text: str                              # min_length=1
 
 class SessionResponse(BaseModel):
-    id, interview_id, candidate_id, persona_key, candidate_name
+    id, interview_id, candidate_id, archetype, candidate_name
     status: str        # ^(live|completed|abandoned)$
     modality: str      # ^(text|voice)$ — "text" today
     planned_minutes: int

@@ -6,8 +6,10 @@ resource: /control_plane/api.py
 tags: [api, fastapi, routes, di]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  at: "2026-09-10T12:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
@@ -43,6 +45,10 @@ Handlers, in order: `create_interview`, `get_interview`, `list_interviews`,
 `delete_candidate`, `start_session`, `take_turn`, `end_session`, `get_session`,
 `voice_capability`, `mint_realtime_credential`, `append_transcript_turn`,
 `append_recording_chunk`, `finalize_recording`, `get_recording`.
+
+The CORS switch and the error envelope are **not** here — they are applied to
+the whole app in `control_plane/main.py`; see
+[Control plane](/concepts/subsystems/control-plane.md).
 
 One module-level helper backs `enroll_candidates`'s `custom_personas` path:
 
@@ -98,7 +104,7 @@ Four decisions worth knowing:
 * **Skip-unless-regenerate** — an already-enrolled archetype (or previously-cast custom-persona key) is returned untouched, so the endpoint is safe to re-POST.
 * **`avoid_names` accumulates within the loop** — independent casts converge on the same names, and a training set of identical names is confusing.
 * **The expectation is optional** — fetched if present to ground personas in the flags the interviewer is watching for, but enrollment must not require it. `interview_type` falls back to `"mixed"`.
-* **The interview's `language` and `candidate_notes` ride into every cast** — here and in `start_session`'s on-the-spot cast — so a Hinglish interview produces a Hinglish persona no matter which endpoint triggers the cast.
+* **The interview's `language` and `persona_notes` ride into every cast** — here and in `start_session`'s on-the-spot cast — so a Hinglish interview produces a Hinglish persona no matter which endpoint triggers the cast.
 
 Generation is **sequential** — one awaited model call per archetype. Enrolling
 six is six serial round trips; there is no `asyncio.gather`, and adding one would
@@ -156,9 +162,8 @@ saying so lets the UI show something truthful.
 ```python
 session = repo.get_session(session_id)               # 404
 if session.modality != "voice": ... 409               # handler-owned, not the adapter's
-data = await request.body()
+data, mime_type = await _read_chunk(request)
 if not data: ... 422
-mime_type = request.headers.get("content-type", "application/octet-stream")
 try:
     return repo.append_recording_chunk(session_id, seq, mime_type, data)
 except ValueError as exc:
@@ -167,9 +172,32 @@ except ValueError as exc:
 
 The modality check lives here, not in `InterviewRepository.append_recording_chunk` —
 same split as `take_turn` checking `session.status` before calling `append_turn`.
-`request: Request` and `await request.body()` read the body as raw bytes rather
-than through a Pydantic model, since this is audio, not JSON; `Content-Type` on
-the request becomes the recording's stored `mime_type`, read once, on `seq=0`.
+`request: Request` reads the body directly rather than through a Pydantic model,
+since this is audio, not JSON; the content type becomes the recording's stored
+`mime_type`, read once, on `seq=0`.
+
+```python
+async def _read_chunk(request: Request) -> tuple[bytes, str]
+```
+
+The one module-level helper on this path, and the reason the endpoint takes two
+body shapes without the console noticing. It branches on the request's own
+`Content-Type`: anything but `multipart/form-data` is the original
+`await request.body()` with that header as the mime type; a multipart body is
+read through `await request.form()` and the file field named `chunk` supplies
+both the bytes and — from the *part's* content type — the mime type. A missing
+or non-file `chunk` field is a **422**, and an empty part falls through to the
+same empty-body 422 as before.
+
+Two things this deliberately does **not** do. It does not declare an
+`UploadFile` parameter: FastAPI would then require a form on every request and
+422 the console's raw `audio/webm` body, which is the one regression this change
+could not afford. And the `isinstance` check is against
+`starlette.datastructures.UploadFile`, not `fastapi.UploadFile` — the latter is
+a subclass FastAPI builds for declared parameters, and checking against it
+rejects every part a hand-read form produces. (This is also why
+`python-multipart` is now in `requirements.txt`: Starlette imports it lazily and
+`request.form()` raises without it.)
 
 `finalize_recording` and `get_recording` take the narrower `RecordingStore` —
 neither needs the session, only the recording, which either exists or does
@@ -184,5 +212,5 @@ chunk protocol.
 * `req: CandidateEnrollRequest | None = None` then `req = req or CandidateEnrollRequest()` — a body-less POST is valid and enrolls the defaults.
 * Route order matters for the FastAPI matcher: `/candidates/{cid}` sits under the router alongside `/interviews/{id}/candidates`; they do not collide, but adding `/candidates/search` would need to precede `/candidates/{cid}`.
 * `B008` is ignored for this file — `Depends()` in a default is the framework's calling convention.
-* `tests/test_session.py` and `tests/test_voice.py` cover the session and voice handlers (201/404/409/410/422/502 and the full round trips) with `TestClient` and `Depends` overrides. `tests/test_recording.py` covers the recording handlers the same way, plus the adapter directly against `:memory:` with `recordings_dir=tmp_path`. The interview, expectation, and enrollment handlers still have no test.
+* `tests/test_session.py` and `tests/test_voice.py` cover the session and voice handlers (201/404/409/410/422/502 and the full round trips) with `TestClient` and `Depends` overrides. `tests/test_recording.py` covers the recording handlers the same way, plus the adapter directly against `:memory:` with `recordings_dir=tmp_path`; `tests/test_portal_compat.py` covers the multipart chunk door against the raw one. The interview, expectation, and enrollment handlers still have no test.
 * `voice_capability` is the one route that answers rather than fails when misconfigured. Resist making it 503: the UI's question is "should I show the button", and an exception is a worse answer than `false`.

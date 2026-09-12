@@ -94,9 +94,9 @@ def _fact_coverage(ctx: Context) -> SignalResult:
         basis="The job card's checklist. A fact with an empty statement is not "
         "on this interview's list and is neither counted nor scored against",
     )
-    facts = [f for f in ctx.bundle.job_card.clarity_facts if f.statement.strip()]
+    facts = [f for f in ctx.bundle.job_card.role_facts if f.statement.strip()]
     if not facts:
-        out.reason = "the job card carried no clarity facts"
+        out.reason = "the job card carried no role facts"
         return out
 
     conveyed = 0

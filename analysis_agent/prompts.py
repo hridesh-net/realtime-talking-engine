@@ -37,7 +37,7 @@ def context_block(ctx: AnalysisContext) -> str:
             "job_title": ctx.job_title,
             "description": ctx.job_description,
             "skills_required": ctx.skills_required,
-            "clarity_facts_the_manager_should_convey": ctx.clarity_facts,
+            "role_facts_the_manager_should_convey": ctx.role_facts,
             "configured_language": ctx.language_setting,
         },
         "candidate_persona": {

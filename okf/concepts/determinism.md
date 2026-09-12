@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-21T19:17:54Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
 status: stable
@@ -274,7 +276,7 @@ makes them the newest place the split could leak.
 model never picks a language and never authors the instruction that describes
 one.
 
-**`candidate_notes`** — free text, and the only unstructured operator input that
+**`persona_notes`** — free text, and the only unstructured operator input that
 reaches casting. It is rendered beneath an explicit subordination clause, and
 every structural guarantee is still enforced in code afterwards: the knowledge
 clamp, the trait bounds, the scorecard weights, `UNIVERSAL_FORBIDDEN`. A note
@@ -283,7 +285,7 @@ them cleverer than their band, change their archetype, or unlock a forbidden
 behaviour — `test_operator_notes_cannot_override_the_archetype` asserts both the
 prompt framing and the clamp.
 
-**`clarity_facts`** — the *keys* are fixed in `evaluation_agent.schema`; only the
+**`role_facts`** — the *keys* are fixed in `evaluation_agent.schema`; only the
 *statements* are drafted, and a drafted key that is not on the list is discarded.
 The checklist a manager is measured against is never something a model chose.
 
@@ -351,11 +353,11 @@ bytes on every cast, and `ENGINE_CONTRACT_VERSION` exists precisely to pin those
 bytes.
 
 The casting prompt gained the other half of the spec — `location`, `department`,
-`manager_level` and the interview's `clarity_facts` — for the reason stated
+`manager_level` and the interview's `role_facts` — for the reason stated
 above: the casting model writes `opening_line`, `sample_phrases` and `background`
 and they are *stored*, so anything it cannot see is permanently missing from the
 artifact that runs. Empty scalars render `(not specified)` and an empty checklist
-renders `(none)`, both in code; a `ClarityFact` with an empty statement is not on
+renders `(none)`, both in code; a `RoleFact` with an empty statement is not on
 this interview's checklist and is not rendered at all.
 
 Consequence for [the two fingerprints](#the-two-fingerprints): `fingerprint`

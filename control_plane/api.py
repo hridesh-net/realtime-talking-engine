@@ -16,6 +16,11 @@ from fastapi import (
     status,
 )
 
+# The form parser's own UploadFile, not `fastapi.UploadFile`: the latter is a
+# subclass FastAPI builds for declared parameters, and an isinstance check
+# against it silently rejects every part a hand-read form produces.
+from starlette.datastructures import UploadFile
+
 from analysis_agent import AnalysisContext, AudioAnalysisAgent
 from candidate_agent import archetypes as archetype_catalog
 from candidate_agent import trait_dimensions
@@ -50,12 +55,12 @@ from control_plane.repository import InterviewRepository
 from control_plane.schemas import (
     AnalysisMeta,
     CandidateEnrollRequest,
-    ClarityFact,
     CustomPersonaSpec,
     InterviewCreateRequest,
     InterviewResponse,
     RealtimeCredentialResponse,
     RecordingMeta,
+    RoleFact,
     RoleFactsRequest,
     SessionCreateRequest,
     SessionResponse,
@@ -188,11 +193,11 @@ def get_analysis_agent() -> AudioAnalysisAgent:
     return AudioAnalysisAgent(build_audio_model("analysis", ANALYSIS_TEMPERATURE))
 
 
-@router.post("/role-facts", response_model=list[ClarityFact])
+@router.post("/role-facts", response_model=list[RoleFact])
 async def draft_role_facts(
     req: RoleFactsRequest,
     agent: RoleFactsAgent = Depends(get_role_facts_agent),
-) -> list[ClarityFact]:
+) -> list[RoleFact]:
     """Draft the role-fact checklist from a job description; calls the model.
 
     Returns every key on the fixed checklist, in order, with an empty statement
@@ -317,7 +322,7 @@ async def enroll_candidates(
                 duration_minutes=interview.config.duration_minutes,
                 interview_type=(expectation.interview_type if expectation else "mixed"),
                 language=interview.language,
-                candidate_notes=interview.candidate_notes,
+                persona_notes=interview.persona_notes,
                 expectation=expectation,
                 seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
                 avoid_names=taken,
@@ -327,7 +332,7 @@ async def enroll_candidates(
                 location=interview.location,
                 department=interview.department,
                 manager_level=interview.manager_level,
-                clarity_facts=[f.model_dump() for f in interview.clarity_facts],
+                role_facts=[f.model_dump() for f in interview.role_facts],
             )
         except ModelError as exc:
             # A casting failure is the provider's answer, not a bug in this
@@ -458,14 +463,14 @@ async def start_session(
                 duration_minutes=interview.config.duration_minutes,
                 interview_type=(expectation.interview_type if expectation else "mixed"),
                 language=interview.language,
-                candidate_notes=interview.candidate_notes,
+                persona_notes=interview.persona_notes,
                 expectation=expectation,
                 avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
                 voices=GEMINI_TTS_VOICES,
                 location=interview.location,
                 department=interview.department,
                 manager_level=interview.manager_level,
-                clarity_facts=[f.model_dump() for f in interview.clarity_facts],
+                role_facts=[f.model_dump() for f in interview.role_facts],
             )
         except ModelError as exc:
             # A casting failure is the provider's answer, not a bug in this
@@ -477,7 +482,7 @@ async def start_session(
     return repo.create_session(
         interview_id=req.interview_id,
         candidate_id=candidate.candidate_id,
-        persona_key=candidate.archetype,
+        archetype=candidate.archetype,
         planned_minutes=req.planned_minutes,
         opening_line=candidate.engine_contract.opening_line,
         modality=req.modality,
@@ -679,6 +684,27 @@ def append_transcript_turn(
 # ---------------------------------------------------------------------------
 
 
+async def _read_chunk(request: Request) -> tuple[bytes, str]:
+    """The chunk's bytes and the mime type to store, from either body shape.
+
+    Branching on the request's ``Content-Type`` rather than declaring an
+    ``UploadFile`` parameter is what keeps the raw path byte-for-byte what it
+    was: FastAPI would otherwise require a form on every request and reject the
+    console's ``audio/webm`` body with a 422 it never used to get.
+    """
+    content_type = request.headers.get("content-type", "application/octet-stream")
+    if content_type.partition(";")[0].strip().lower() != "multipart/form-data":
+        return await request.body(), content_type
+    form = await request.form()
+    part = form.get("chunk")
+    if not isinstance(part, UploadFile):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="multipart body needs a file field named 'chunk'",
+        )
+    return await part.read(), part.content_type or "application/octet-stream"
+
+
 @router.post(
     "/sessions/{session_id}/recording/chunks",
     response_model=RecordingMeta,
@@ -697,6 +723,16 @@ async def append_recording_chunk(
     ``POST /sessions/{id}/end`` as the browser flushes its MediaRecorder on
     hangup, and gating on the recording's own status -- open until finalized --
     keeps acceptance deterministic instead of racing session teardown.
+
+    Two body shapes, one protocol. The console posts the MediaRecorder blob as
+    the **raw** request body and the request's own ``Content-Type`` becomes the
+    stored ``mime_type``. The SkillBrew portal cannot: its shared axios layer
+    sends JSON or multipart and nothing else, so a ``multipart/form-data`` body
+    with a file field named ``chunk`` is accepted too, and then the *part's*
+    content type is what seq 0 stores. Everything after that -- the seq
+    ordering, the 409s, the 422 on an empty chunk -- is the same code on both
+    paths, because two producers writing the same recording table must not be
+    able to disagree about when a chunk is acceptable.
     """
     session = repo.get_session(session_id)
     if not session:
@@ -706,12 +742,11 @@ async def append_recording_chunk(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"session modality is {session.modality}, not voice",
         )
-    data = await request.body()
+    data, mime_type = await _read_chunk(request)
     if not data:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="empty chunk body"
         )
-    mime_type = request.headers.get("content-type", "application/octet-stream")
     try:
         return repo.append_recording_chunk(session_id, seq, mime_type, data)
     except ValueError as exc:

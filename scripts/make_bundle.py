@@ -65,7 +65,7 @@ def from_db(session_id: str, db: Path) -> dict[str, Any]:
     conn.close()
 
     keys = set(session.keys())
-    persona_key = session["persona_key"] if "persona_key" in keys else "cooperative_trap"
+    archetype = session["archetype"] if "archetype" in keys else "cooperative_trap"
     return {
         "session": {
             "session_id": session_id,
@@ -78,10 +78,10 @@ def from_db(session_id: str, db: Path) -> dict[str, Any]:
             "job_title": (interview["job_title"] if interview else "") or "Unknown role",
             "summary": "",
             "role_family": "sales",
-            "clarity_facts": [],
+            "role_facts": [],
         },
         "persona": persona_block(
-            persona_key if persona_key in archetypes.ARCHETYPES else "cooperative_trap"
+            archetype if archetype in archetypes.ARCHETYPES else "cooperative_trap"
         ),
         "turns": [
             {
@@ -119,7 +119,7 @@ def from_transcript(path: Path, persona: str, title: str, family: str) -> dict[s
         )
     return {
         "session": {"session_id": path.stem, "modality": "text"},
-        "job_card": {"job_title": title, "role_family": family, "clarity_facts": []},
+        "job_card": {"job_title": title, "role_family": family, "role_facts": []},
         "persona": persona_block(persona),
         "turns": normalised,
         "recording": None,
@@ -149,8 +149,8 @@ def main() -> int:
 
     if args.demo:
         core = json.loads((ROOT / "tests" / "fixtures" / "demo_turns.json").read_text())
-        core["persona"] = persona_block(core["persona_key"])
-        core.pop("persona_key")
+        core["persona"] = persona_block(core["archetype"])
+        core.pop("archetype")
     elif args.session:
         core = from_db(args.session, args.db)
     elif args.transcript:

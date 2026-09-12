@@ -20,6 +20,9 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "pydantic>=2.0",
     "python-dotenv>=1.0",
+    "psycopg[binary]>=3.2.10",
+    "psycopg-pool>=3.2.6",
+    "boto3>=1.35",
     "google-genai>=1.0",
     "openai>=1.30",
 ]
@@ -30,6 +33,9 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27", "ruff>=0.4"]
 [tool.setuptools.package-data]
 # The agent reads its instructions at runtime, so they ship with the package.
 analysis_agent = ["INSTRUCTIONS.md"]
+# The migration runner reads .sql files off disk at runtime; without this a
+# wheel would install a control_plane that cannot migrate its own database.
+control_plane = ["migrations/*.sql"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -112,5 +118,5 @@ show_error_codes = true
 
 [[tool.mypy.overrides]]
 # Third-party packages without bundled stubs.
-module = ["google.*", "openai.*", "dotenv.*"]
+module = ["google.*", "openai.*", "dotenv.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true

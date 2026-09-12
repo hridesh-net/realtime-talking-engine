@@ -340,7 +340,7 @@ def test_starting_a_session_casts_with_the_stored_expectation_and_job_spec():
             "location": "Kochi",
             "department": "Network",
             "manager_level": "Frontline manager",
-            "clarity_facts": [{"key": "targets", "statement": "Six installs a day."}],
+            "role_facts": [{"key": "targets", "statement": "Six installs a day."}],
         },
     ).json()["id"]
     repo.save_expectation(_expectation(interview_id), model_used="offline-fixture")
@@ -359,7 +359,7 @@ def test_starting_a_session_casts_with_the_stored_expectation_and_job_spec():
     assert agent.kwargs["location"] == "Kochi"
     assert agent.kwargs["department"] == "Network"
     assert agent.kwargs["manager_level"] == "Frontline manager"
-    assert agent.kwargs["clarity_facts"] == [{"key": "targets", "statement": "Six installs a day."}]
+    assert agent.kwargs["role_facts"] == [{"key": "targets", "statement": "Six installs a day."}]
 
 
 def test_enrollment_casts_with_the_same_job_spec_the_session_path_uses():
@@ -382,4 +382,4 @@ def test_enrollment_casts_with_the_same_job_spec_the_session_path_uses():
     assert agent.kwargs["location"] == "Kochi"
     assert agent.kwargs["department"] == "Network"
     assert agent.kwargs["manager_level"] == "Frontline"
-    assert agent.kwargs["clarity_facts"] == []
+    assert agent.kwargs["role_facts"] == []

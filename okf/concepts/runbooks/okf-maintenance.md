@@ -67,9 +67,12 @@ done
 `index.md` files carry **no** frontmatter except `okf_version` in the bundle root.
 Full spec summary: [OKF v0.2](/references/okf-spec.md).
 
-## `.gitignore` — resolved 2026-08-22
+## `.gitignore` — `owner_handover/` untracked 2026-09-12
 
-The rules that ignored `owner_handover/` and `docs/` — directly above a comment
-saying those deliverables were *"tracked on purpose"* — were removed, and the
-comment now explains why they must stay tracked. `okf/` is deliberately **not**
-ignored: this bundle travels with the repo.
+`owner_handover/` is ignored and untracked by decision: it is regenerated from
+the Pydantic models by `scripts/export_schemas.py`, so the JSON on disk is a
+local build product. (It had been tracked since 2026-08-22, when an earlier
+ignore rule was removed.) Run the exporter after a fresh checkout before
+`scripts/check.sh`, whose `--check` step compares the code against those files.
+`docs/` and `okf/` are deliberately **not** ignored: the plans and this bundle
+travel with the repo.

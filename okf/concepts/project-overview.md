@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-opus-4-8
+    at: "2026-09-11T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5
@@ -68,7 +70,7 @@ it.** The boundary is deliberate: that repo owns the *how* of a live
 conversation, this one owns the *what* of an interview. See
 [the sibling-repo reference](/references/smart-interview-relationship.md).
 
-## Build state (2026-08-27)
+## Build state (2026-09-11)
 
 * **Working**: interview creation, expectation generation and storage, **the v2.0 seven-archetype persona library** (each stressing one manager competency, with session beats and a stress profile), enrollment with re-cast and seeding, engine-contract and scorecard endpoints, **the live text session** (start, turn, end, stored transcript, browser chat view), **the live voice session** (OpenAI Realtime over WebRTC from the browser, deterministic per-persona voice, transcript ingest), **browser-captured session recording** for voice sessions (dual-channel, chunked upload, playback and download in the UI — see [Session recording](/concepts/contracts/session-recording.md)), session listing per interview, the React console aligned to the SkillBrew.AI design mockup, the offline check suite, schema export.
 * **Partly built**: the Phase 0 MVP defined by `interview_training_wizard (1).html`. **M1 shipped** — the full interview configuration (location, department, manager level, language, proctoring, operator notes, the fixed role-fact checklist and report-section toggles), plus `evaluation_agent/` holding the rubric and the role-fact checklist. M2 (hiring-manager cohort), M3 (evaluation layer and report) and M4 (report UI) are open. Plan: `~/.claude/plans/humble-tinkering-ocean.md`.
@@ -77,7 +79,8 @@ conversation, this one owns the *what* of an interview. See
 * **Working (2026-08-27)**: the **evaluation layer** — pivot plan Phase 4, and no longer on the designed-not-built list. Deterministic signals, the analytical report, and as of 2026-08-27 the **judge pass**: one model call that writes the report's prose while `report_engine/validate.py` vetoes any quote that is not in the transcript verbatim and any sentence that states a number. The report a manager reads is two pages of plain language; the signal tables are behind a `detail` flag. Spec phase 7, the audio-derived English module, is still open. See [Report engine](/concepts/subsystems/report-engine.md).
 * **Designed, not built**: the manager-assessment domain model (role cards replacing job specs) — Phase 2; the manager cohort (roster, CSV upload, invites) — nowhere in the plan yet, though the design mockup shows it; interviewer assignment (`interview_assignments` table exists and is unused). On the engine side: the recorder and grading bundle (the `producer='engine'` half of [Session recording](/concepts/contracts/session-recording.md)), the WebRTC transport, and an independent ASR adapter (every session currently runs `degraded:asr`).
 * **Deployed**: `prod` is live at `https://interview.opsintelai.com` on one EC2 instance (see `infra/README.md`). The control plane, the UI and the report engine work there; **`engined` has never started successfully on it** — in `-dev-sample-contract` mode it reads the sample contract from a build-machine path that ships in no artifact, so voice sessions do not run on the deployed stack. The analysis agent needs `ffmpeg`/`ffprobe` on PATH, which the instance now installs.
-* **Stand-in**: SQLite. The schema ports to PostgreSQL with minimal change, and Postgres is the intended bridge to the runtime engine.
+* **Storage (2026-09-10)**: SQLite is still the zero-config default, but a **PostgreSQL** schema and an **object-store port with two adapters** (filesystem + S3/MinIO) now exist beside it, and `check.sh` exercises both under Apple `container` (`migrations (postgres)`, `object store (minio)`). Postgres is the intended bridge to the runtime engine. See the 2026-09-10 `log.md` entries.
+* **Consumers (2026-09-10)**: two frontends now call this control plane over HTTP — the in-repo `ui/` Vite console, and the **SkillBrew Organization portal** (`skillbrew-organization`, a *separate* repo) as one "Interviewer Practice" sidebar tab. The portal drove a small **compatibility layer** in this repo: opt-in `CORS_ALLOWED_ORIGINS`, an error envelope beside `detail` (`status: false` + `message`), and a multipart door on the recording-chunk endpoint. See [REST API](/concepts/contracts/rest-api.md) and [Session recording](/concepts/contracts/session-recording.md).
 * **Legacy**: `control_plane/persona.py` — the original BRD §4.3 seeded persona, attached at creation for `training_interviewer` mode. Superseded by [`candidate_agent`](/concepts/subsystems/candidate-agent.md) but still wired in.
 
 ## Layout

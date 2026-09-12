@@ -1,13 +1,17 @@
 ---
 type: Contract
 title: Storage ports
-description: Five narrow persistence protocols and five compositions, depended on instead of the SQLite adapter.
+description: Seven narrow row-storage protocols and their compositions, plus the object-store port for bytes — depended on instead of the adapters.
 resource: /control_plane/ports.py
-tags: [contract, ports, isp, dip, protocol]
+tags: [contract, ports, isp, dip, protocol, object-store, s3]
 generated:
-  by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  by: claude-opus-5
+  at: "2026-09-10T18:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T18:00:00Z"
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
@@ -16,9 +20,16 @@ status: stable
 sources:
   - resource: /control_plane/ports.py
   - resource: /control_plane/api.py
+  - resource: /control_plane/object_store.py
+  - resource: /tests/test_object_store.py
 ---
 # Storage ports
 
+> **The object store is new (2026-09-10)** and is *not* one of these seven —
+> it holds bytes, not rows, and lives in `control_plane/object_store.py`. It is
+> documented at the bottom of this page. Nothing calls it yet: wiring it into
+> `repository.py` and the recording routes is the next work package.
+>
 > **Seven narrow ports now.** `AnalysisStore` joined them with the audio
 > analysis; `AnalysisWorkflowStore` deliberately does **not** compose the report
 > store, because a handler that can both analyse and report will eventually do
@@ -51,7 +62,7 @@ class CandidateStore(Protocol):
     def delete_candidate(self, candidate_id: str) -> bool
 
 class SessionStore(Protocol):
-    def create_session(self, *, interview_id: str, candidate_id: str, persona_key: str,
+    def create_session(self, *, interview_id: str, candidate_id: str, archetype: str,
                        planned_minutes: int, opening_line: str,
                        modality: str = "text") -> SessionResponse
     def get_session(self, session_id: str) -> SessionResponse | None
@@ -131,6 +142,93 @@ Depending on the narrowest port is the ISP discipline, and it is tested: ports
 must stay small and **non-overlapping** (no shared method names), and the SQLite
 adapter must satisfy every one of them via `isinstance` against an in-memory
 connection.
+
+# The object store — the same discipline, for bytes
+
+`control_plane/object_store.py`, added 2026-09-10. Rows have had a port since
+the beginning; the recording's *bytes* did not, and `repository.py` wrote them
+straight to `RECORDINGS_DIR` with an `open(...).write()`. This is the port that
+replaces that, and the reason it is separate from `RecordingStore` is that the
+two things fail differently: a row write is a transaction, a byte write is a
+transfer that can be resumed, retried, or spooled.
+
+```python
+class ByteSource(Protocol):
+    size: int
+    content_type: str
+    def read(self, start: int = 0, end: int | None = None) -> Iterator[bytes]: ...
+
+@runtime_checkable
+class ObjectStore(Protocol):
+    def put(self, key: str, source: Path, *, content_type: str) -> None: ...
+    def open(self, key: str) -> ByteSource | None: ...   # None == no such object
+```
+
+**`put` takes a filesystem path and `open` returns a stream — neither takes or
+returns `bytes`.** An hour of stereo Opus is not something the API process
+should be asked to hold, and the moment one method's signature says `bytes`
+every caller downstream inherits that. `upload_file` streams parts from disk;
+`shutil.copyfile` streams; `read` yields 1 MiB at a time.
+
+`content_type` is on `ByteSource` as well as on `put` so the round trip is the
+same on both adapters — the filesystem one records it in a sibling
+`<name>.content-type` file, which is why keys ending in that suffix are refused
+by **both** adapters.
+
+**There is no `delete`.** Retention is manual by decision (see
+[Session recording](/concepts/contracts/session-recording.md)), so a `delete`
+would have no caller — and dead code in a storage adapter is the kind someone
+wires up later without reading the retention decision.
+
+## The two adapters
+
+| | `FilesystemObjectStore(root)` | `S3ObjectStore(bucket, *, region, prefix, endpoint, force_path_style)` |
+|---|---|---|
+| When | `S3_BUCKET` unset — the dev default, **not** a test fake | `S3_BUCKET` set; `S3_ENDPOINT` + `S3_FORCE_PATH_STYLE` point it at MinIO |
+| `put` | `shutil.copyfile` into `root/key`, parents created, plus the content-type sidecar | `upload_file` with `ContentType`; boto3 splits above its own 8 MiB threshold |
+| `open` | `None` unless the file exists; ranges by `seek` | `head_object` for size and type; ranges by `get_object(Range=...)` + `iter_chunks` |
+| Credentials | n/a | **boto3's default chain, never read here** — the same rule as an agent taking an injected model |
+
+`object_store_from_env()` chooses between them. The *bucket* is the switch
+rather than a separate `OBJECT_STORE_BACKEND`, so "S3 without a bucket" and
+"disk with one" cannot be written down, let alone need a runtime error.
+
+## Range semantics — decided once, identical in both
+
+Both adapters go through one `_resolve_range`, because a port whose two
+implementations disagree at the edges is worse than no port: the disagreement
+only shows up in the environment you did not test.
+
+* **Inclusive at both ends**, like HTTP Range. `read(4, 8)` is five bytes.
+* **`end` past the last byte is clamped**, not an error — a caller asking for "a megabyte from here" at the tail of a recording wants the tail.
+* **`start` at or beyond the end reads nothing** — an empty iterator, not an exception. HTTP would answer 416, but that is the *handler's* decision; the port's answer is "there are no bytes there". S3 really does raise `InvalidRange` for this, so the S3 adapter uses the size it already has and never sends the request.
+* **A negative bound raises.** In HTTP's grammar a negative offset means "from the end"; nothing here needs suffix ranges, and quietly reading -1 as 0 would hide a caller's bug.
+* Keys are validated identically: `/`-joined non-empty segments, no leading or trailing `/`, no `.`/`..` (which the filesystem adapter would resolve against the host and write outside its root), and nothing ending in the sidecar suffix.
+
+## Key layout is shared with the Go engine
+
+Callers pass `sessions/{session_id}/recording.webm`; the S3 adapter prepends
+`S3_PREFIX`. That is deliberate: the engine's Finalizer writes `audio.wav`,
+`transcript.jsonl` and `events.jsonl` under the same
+`{prefix}/sessions/{session_id}/` (`docs/ENGINE_IMPLEMENTATION_PLAN.md` §9), so
+one session's artifacts sit together whichever process produced them.
+
+## Two facts worth not re-deriving
+
+* **A `head_object` 404 does not prove the object is missing.** A HEAD reply has
+  no body, so botocore has no error code and a missing *bucket* arrives as the
+  same bare `404` as a missing key (measured against MinIO). `open` therefore
+  confirms with `head_bucket` before returning `None` and raises otherwise —
+  without that, a wrong or undeployed bucket reads as "no session has a
+  recording", silently, for every session at once.
+* **boto3's multipart threshold is 8 MiB, not S3's 5 MiB part minimum.** The
+  suite uploads 9 MiB and asserts the ETag carries a part count (`<hex>-2`),
+  which is the only evidence that `put` really took the multipart path rather
+  than that a default was assumed.
+
+`tests/test_object_store.py` is one behavioural set parametrized over both
+adapters, with the S3 half against a **real MinIO** — never a stub, and never
+skipped when MinIO is missing (the fixture raises, the suite goes red).
 
 ## Rules when editing
 

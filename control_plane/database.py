@@ -1,10 +1,21 @@
-"""SQLite storage for the interview control-plane."""
+"""Storage wiring for the interview control-plane.
+
+Two backends live here during the SQLite → Postgres migration. `init_db` and
+`_SCHEMA` are the SQLite side the service still runs on; `open_pool` and
+`database_url_from_env` are the Postgres side, whose schema is applied by
+`python -m control_plane.migrate` rather than on startup. Nothing has been
+switched over yet — the repository still takes a `sqlite3.Connection`.
+"""
 
 from __future__ import annotations
 
 import os
 import sqlite3
 from pathlib import Path
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS interviews (
@@ -25,8 +36,8 @@ CREATE TABLE IF NOT EXISTS interviews (
     -- Recorded only. Nothing in this service accesses a camera at any setting.
     proctoring TEXT NOT NULL DEFAULT 'off'
         CHECK (proctoring IN ('off', 'identity', 'full')),
-    candidate_notes TEXT NOT NULL DEFAULT '',
-    clarity_facts TEXT NOT NULL DEFAULT '[]',
+    persona_notes TEXT NOT NULL DEFAULT '',
+    role_facts TEXT NOT NULL DEFAULT '[]',
     report_sections TEXT NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'scheduled'
         CHECK (status IN ('scheduled', 'in_progress', 'completed', 'failed', 'cancelled')),
@@ -35,7 +46,6 @@ CREATE TABLE IF NOT EXISTS interviews (
     scheduled_at TEXT,
     started_at TEXT,
     completed_at TEXT,
-    recording_id TEXT,
     metadata TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -81,13 +91,24 @@ CREATE TABLE IF NOT EXISTS session_reports (
     updated_at TEXT NOT NULL
 );
 
+-- Designed, not built: nothing reads or writes this table yet. It is the
+-- shape an assignment takes when a SkillBrew user is given an interview to
+-- conduct against a chosen persona -- the user's performance *as the
+-- interviewer* is what gets assessed. Identity belongs to SkillBrew, which
+-- owns the email invitation and always hands us an opaque user id; there is
+-- no AI assignee, so there is no assignee-type column.
 CREATE TABLE IF NOT EXISTS interview_assignments (
     id TEXT PRIMARY KEY,
     interview_id TEXT NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
-    interviewer_id TEXT NOT NULL,
-    interviewer_type TEXT NOT NULL CHECK (interviewer_type IN ('human', 'ai')),
-    task_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (task_status IN ('pending', 'accepted', 'rejected', 'completed')),
+    user_id TEXT NOT NULL,
+    -- The persona assigned. No FOREIGN KEY, for the same reason
+    -- sessions.candidate_id has none: virtual_candidates.candidate_id is
+    -- derived from the cast seed, so re-casting with a seed_prefix rewrites
+    -- that primary key in place via repository.py's
+    -- `ON CONFLICT ... DO UPDATE SET candidate_id = excluded.candidate_id`.
+    candidate_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'rejected', 'completed')),
     accepted_at TEXT,
     completed_at TEXT,
     created_at TEXT NOT NULL
@@ -106,7 +127,7 @@ CREATE TABLE IF NOT EXISTS ai_personas (
 CREATE INDEX IF NOT EXISTS idx_interviews_status ON interviews(status);
 CREATE INDEX IF NOT EXISTS idx_interviews_experience_level ON interviews(experience_level);
 CREATE INDEX IF NOT EXISTS idx_assignments_interview ON interview_assignments(interview_id);
-CREATE INDEX IF NOT EXISTS idx_assignments_interviewer ON interview_assignments(interviewer_id);
+CREATE INDEX IF NOT EXISTS idx_assignments_user ON interview_assignments(user_id);
 
 CREATE TABLE IF NOT EXISTS virtual_candidates (
     candidate_id TEXT PRIMARY KEY,
@@ -135,7 +156,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     interview_id TEXT NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
     candidate_id TEXT NOT NULL REFERENCES virtual_candidates(candidate_id) ON DELETE CASCADE,
-    persona_key TEXT NOT NULL,
+    archetype TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'live'
         CHECK (status IN ('live', 'completed', 'abandoned')),
     modality TEXT NOT NULL DEFAULT 'text' CHECK (modality IN ('text', 'voice')),
@@ -193,6 +214,15 @@ CREATE TABLE IF NOT EXISTS session_recordings (
 
 DEFAULT_DB_PATH = "control_plane.db"
 
+#: Postgres DSN when DATABASE_URL is unset. A local socket connection as the
+#: current user, so `createdb interview_watcher` is the whole local setup.
+DEFAULT_DATABASE_URL = "postgresql:///interview_watcher"
+
+#: Local disk buffer for in-flight session artifacts before they are uploaded
+#: to the object store (SPOOL_DIR env). Shared with the Go engine, which spools
+#: its session bundle into the same directory.
+DEFAULT_SPOOL_DIR = "spool"
+
 #: Where session audio artifacts land on disk (RECORDINGS_DIR env), relative
 #: to the process working directory, mirroring DEFAULT_DB_PATH.
 DEFAULT_RECORDINGS_DIR = "recordings"
@@ -206,6 +236,53 @@ def db_path_from_env() -> str:
 def recordings_dir_from_env() -> str:
     """Recordings directory from RECORDINGS_DIR, falling back to the default."""
     return os.getenv("RECORDINGS_DIR") or DEFAULT_RECORDINGS_DIR
+
+
+def database_url_from_env() -> str:
+    """Postgres DSN from DATABASE_URL, falling back to the default."""
+    return os.getenv("DATABASE_URL") or DEFAULT_DATABASE_URL
+
+
+def spool_dir_from_env() -> str:
+    """Spool directory from SPOOL_DIR, falling back to the default."""
+    return os.getenv("SPOOL_DIR") or DEFAULT_SPOOL_DIR
+
+
+def _configure(conn: psycopg.Connection) -> None:
+    """Run once per pooled connection, before anyone gets it."""
+    # Every timestamp this service stores is UTC. Pinning the session timezone
+    # means a `timestamptz` read back is tz-aware UTC regardless of what the
+    # server or the host is set to, so the ISO strings the API emits do not
+    # change when the deployment moves region.
+    conn.execute("SET timezone TO 'UTC'")
+
+
+def open_pool(database_url: str | None = None) -> ConnectionPool:
+    """Build the connection pool. Not opened — call `.open()` on the result.
+
+    `open=False` keeps construction side-effect free, so importing this module
+    never dials a database; the app's lifespan opens it and closes it.
+
+    **`autocommit=True` is deliberate, and is not a "don't use transactions"
+    setting.** With autocommit off, psycopg opens an implicit transaction on
+    the *first* statement — including a plain SELECT — and a later
+    `with conn.transaction():` then finds itself already inside one and
+    degrades to a SAVEPOINT. That savepoint releases cleanly, nothing commits,
+    and the pool rolls the whole connection back when the handler returns: the
+    write disappears with no error anywhere. With autocommit on, a bare
+    statement is its own transaction and `with conn.transaction():` emits a
+    real BEGIN/COMMIT. Every multi-statement write in this service must
+    therefore be wrapped in `with conn.transaction():` explicitly.
+    """
+    return ConnectionPool(
+        conninfo=database_url or database_url_from_env(),
+        open=False,
+        min_size=1,
+        max_size=8,
+        timeout=10,
+        configure=_configure,
+        kwargs={"row_factory": dict_row, "autocommit": True},
+    )
 
 
 def init_db(db_path: str | Path | None = None) -> sqlite3.Connection:

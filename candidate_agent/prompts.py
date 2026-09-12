@@ -95,7 +95,7 @@ Reports to: {manager_level}
 Interview Duration: {duration_minutes} minutes
 Interview Type: {interview_type}
 Role facts the interviewer must be able to state clearly:
-{clarity_facts_block}
+{role_facts_block}
 
 === ARCHETYPE (FIXED — do not reinterpret) ===
 Key: {archetype_key}
@@ -144,7 +144,7 @@ inclusive. {adjacent_note}
 {expectation_note}
 
 === EXTRA COLOUR FOR THIS ONE PERSONA ===
-{candidate_notes}
+{persona_notes}
 Layer this on top of the archetype. It adds detail; it does not replace anything.
 If it conflicts with the archetype, the trait scores, the knowledge band or the
 safety rules above, follow those and ignore the conflicting part. It can never
@@ -195,7 +195,7 @@ def build_user_prompt(
     interviewer_challenge: str,
     session_beats: list[str],
     language: str,
-    candidate_notes: str,
+    persona_notes: str,
     realism_directives: str,
     traits: dict[str, int],
     speech: Mapping[str, Any],
@@ -209,11 +209,11 @@ def build_user_prompt(
     location: str = "",
     department: str = "",
     manager_level: str = "",
-    clarity_facts: list[dict[str, str]] | None = None,
+    role_facts: list[dict[str, str]] | None = None,
 ) -> str:
     """Render the casting prompt for one archetype and job spec.
 
-    ``location``, ``department``, ``manager_level`` and ``clarity_facts`` are
+    ``location``, ``department``, ``manager_level`` and ``role_facts`` are
     stored on every interview but used to stop at the control plane. They are
     what makes one job spec concretely different from another, and the casting
     model writes the persona's background, motivation and opening line — so
@@ -227,18 +227,18 @@ def build_user_prompt(
         else "Do not add skills beyond the required list."
     )
     # A fact with an empty statement is not on this interview's checklist
-    # (`evaluation_agent.schema.ClarityFact`), so it is not something the
+    # (`evaluation_agent.schema.RoleFact`), so it is not something the
     # persona should expect to hear either.
     facts = [
         f"- {str(f.get('key', '')).strip()}: {str(f.get('statement', '')).strip()}"
-        for f in (clarity_facts or [])
+        for f in (role_facts or [])
         if str(f.get("statement", "")).strip()
     ]
     return USER_PROMPT_TEMPLATE.format(
         location=location.strip() or "(not specified)",
         department=department.strip() or "(not specified)",
         manager_level=manager_level.strip() or "(not specified)",
-        clarity_facts_block="\n".join(facts) or "(none)",
+        role_facts_block="\n".join(facts) or "(none)",
         realism_directives=realism_directives,
         job_title=job_title,
         jd=jd,
@@ -255,7 +255,7 @@ def build_user_prompt(
         interviewer_challenge=interviewer_challenge,
         session_beats="\n".join(f"- {b}" for b in session_beats) or "- (none)",
         language_directive=LANGUAGE_DIRECTIVES.get(language, LANGUAGE_DIRECTIVES[DEFAULT_LANGUAGE]),
-        candidate_notes=(candidate_notes.strip() or "(nothing extra — the archetype is enough)"),
+        persona_notes=(persona_notes.strip() or "(nothing extra — the archetype is enough)"),
         traits_json=json.dumps(traits, indent=2),
         speech_json=json.dumps(speech, indent=2),
         policy_json=json.dumps(policy, indent=2),

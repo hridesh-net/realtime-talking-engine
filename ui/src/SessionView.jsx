@@ -100,7 +100,7 @@ export default function SessionView({ session, personaLabel, onExit }) {
           <div>
             <h2 className="h2">{session.candidate_name}</h2>
             <div className="sub">
-              {personaLabel || session.persona_key} · typed interview
+              {personaLabel || session.archetype} · typed interview
             </div>
           </div>
         </div>

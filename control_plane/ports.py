@@ -102,7 +102,7 @@ class SessionStore(Protocol):
         *,
         interview_id: str,
         candidate_id: str,
-        persona_key: str,
+        archetype: str,
         planned_minutes: int,
         opening_line: str,
         modality: str = "text",
@@ -256,7 +256,7 @@ class ReportWorkflowStore(
 ):
     """The ports report generation needs, and no more.
 
-    Generating a report reads the interview (the job card and its clarity
+    Generating a report reads the interview (the job card and its role
     facts), the session (the transcript and the persona faced), the cast
     candidate - because a *composed* persona has no catalog entry, and its
     `must_discover` scorecard lives on the candidate rather than in code - and

@@ -54,6 +54,7 @@ run "persona rubric (offline)"      $PY -m pytest tests/test_candidate_rubric.py
 run "live session (offline)"        $PY -m pytest tests/test_session.py -q
 run "voice session (offline)"       $PY -m pytest tests/test_voice.py -q
 run "session recording (offline)"   $PY -m pytest tests/test_recording.py -q
+run "portal compat (offline)"       $PY -m pytest tests/test_portal_compat.py -q
 run "trait composition (offline)"   $PY -m pytest tests/test_trait_dimensions.py -q
 run "custom personas (offline)"     $PY -m pytest tests/test_custom_persona_integration.py -q
 run "candidates API (offline)"      $PY -m pytest tests/test_control_plane_candidates_api.py -q
@@ -63,6 +64,45 @@ run "analysis agent (offline)"     $PY -m pytest tests/test_analysis_agent.py -q
 run "report engine (offline)"      $PY -m pytest tests/test_report_engine.py -q
 run "report judge (offline)"       $PY -m pytest tests/test_report_judge.py -q
 run "full pipeline (offline)"       $PY -m pytest tests/test_full_interview_pipeline_integration.py -q
+
+# -------------------------------------------------------------- postgres ----
+# The database-backed suites need a real Postgres. It is brought up ONCE here
+# and shared by every suite line below, because provisioning costs seconds and
+# this gate runs one pytest session per suite — paying for a container per
+# session would dominate the run.
+#
+# `tests/infra.py` uses TEST_DATABASE_URL if it is set and otherwise starts a
+# throwaway container with Apple `container` (never Docker — it is not
+# installed here). If it can do neither, that is `missing`, NOT `skip`: read
+# the comment above missing() for what a gate that silently did not run has
+# already cost this repo once.
+PG_HANDLE=""
+teardown_infra() {
+    local code=$?
+    if [[ -n "$PG_HANDLE" ]]; then
+        "$PY" -m tests.infra down "$PG_HANDLE" >/dev/null 2>&1 || true
+    fi
+    return $code
+}
+trap teardown_infra EXIT
+
+INFRA_LOG=$(mktemp)
+# `up all`, not `up postgres`: the object-store suite below needs a real
+# S3-compatible server, so the stack this block brings up is now Postgres *and*
+# MinIO. Narrow this argument again only if every suite that needs one of them
+# goes away — a gate must not be held up by infrastructure none of its suites
+# touch, and it must not silently run without infrastructure one of them does.
+if INFRA_ENV=$("$PY" -m tests.infra up all 2>"$INFRA_LOG"); then
+    eval "$INFRA_ENV"
+    PG_HANDLE="${TEST_INFRA_HANDLE:-}"
+    [[ -s "$INFRA_LOG" ]] && cat "$INFRA_LOG"
+    run "migrations (postgres)"     $PY -m pytest tests/test_migrations.py -q
+    run "object store (minio)"      $PY -m pytest tests/test_object_store.py -q
+else
+    missing "postgres + object store gates" \
+        "no test infrastructure: $(tr '\n' ' ' < "$INFRA_LOG" | cut -c1-300)"
+fi
+rm -f "$INFRA_LOG"
 
 # -------------------------------------------------------------------- go ----
 # The live-session engine is a Go module rooted at engine/, so every gate runs

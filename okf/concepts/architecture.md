@@ -10,6 +10,8 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
+  - by: claude-opus-5/architecture-rules
+    at: "2026-09-10T00:00:00Z"
 status: stable
 sources:
   - resource: /tests/test_architecture.py
@@ -58,21 +60,24 @@ two lists agree.
 ## The rules, and where each is enforced
 
 Every principle below is a *failing test*, not a review convention. All of them
-run offline in `tests/test_architecture.py` (331 lines, AST-based).
+run offline in `tests/test_architecture.py` (704 lines, AST-based) — with no
+database, no container and no network, so they are the checks that still run on
+the machine where everything else is unavailable.
 
 | Principle | Rule | How it fails |
 |---|---|---|
 | **DIP** | Vendor SDKs (`google`, `openai`, `google.genai`) only inside `llm/` | AST import scan over every module in every package |
 | **DIP** | Agents accept an injected model and never read provider credentials | Signature inspection + source scan for `os.getenv`/`API_KEY` |
-| **DIP** | Handlers type against ports, not `InterviewRepository` | `control_plane/api.py` must not annotate the SQLite adapter |
-| **ISP** | `InterviewStore` / `ExpectationStore` / `CandidateStore` / `SessionStore` stay small and non-overlapping | Method-count and set-intersection checks per protocol |
+| **DIP** | Storage drivers (`psycopg`, `psycopg_pool`, `boto3`, `botocore`, `sqlite3`) only inside `control_plane/{database,repository,migrate,object_store}.py` | AST import scan over every module in every package, against a named adapter allowlist |
+| **DIP** | Handlers type against ports, never `InterviewRepository` **or** an object store | Parameter annotations in `control_plane/api.py`, unparsed and matched against the banned concretions |
+| **ISP** | Every narrow port — Interview, Expectation, Candidate, Session, Recording, Analysis, Report — stays small (≤ 5 methods) and non-overlapping | Method-count and set-intersection checks per protocol |
 | **ISP** | `StructuredModel`, `ChatModel` and `RealtimeBroker` stay separate ports | None subclasses another; none exposes another's method |
-| **ISP** | The SQLite adapter satisfies every port | `runtime_checkable` isinstance against an in-memory connection |
+| **ISP** | The repository adapter satisfies every port, narrow and composed | `runtime_checkable` isinstance against an uninitialised instance — conformance is a property of the class, so no connection is opened |
 | **LSP** | Every `StructuredModel`, `ChatModel` and `RealtimeBroker` shares its base signature, implements the whole contract, and constructs identically | Signature comparison across all five adapters |
 | **LSP** | Every archetype honours the same shape | Parametrized over the whole catalog |
 | **OCP** | A new archetype or provider flows through with no agent edit | The test **registers one at runtime** and proves it works |
 | **OCP** | `REALTIME_PROVIDERS` names only known providers, each with a realtime model id — a *documented subset*, not a mirror of the text tables | Subset assertion, with the reason in the docstring |
-| **SRP** | Agents never import `sqlite3` or `control_plane`; generation does not persist | Import scan |
+| **SRP** | An agent generates and never persists: no storage driver, no `control_plane` | The driver scan above plus `ALLOWED_IMPORTS` — the two together replaced a narrower check that named only `sqlite3` |
 | **SRP** | Prompt modules perform no I/O; schema modules hold no logic | AST scan for calls / function defs |
 | **Layering** | No package imports one above it | `ALLOWED_IMPORTS` |
 | **Layering** | No relative imports anywhere | AST scan for `ImportFrom` with `level > 0` (also banned by ruff `TID`) |

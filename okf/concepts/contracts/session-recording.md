@@ -6,8 +6,10 @@ resource: /control_plane/database.py
 tags: [contract, recording, audio, voice, storage, consent]
 generated:
   by: claude-opus-5
-  at: "2026-08-23T19:30:00Z"
+  at: "2026-09-10T19:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T18:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
 status: stable
@@ -20,8 +22,22 @@ sources:
   - resource: /ui/src/VoiceSessionView.jsx
   - resource: /ui/src/api.js
   - resource: /tests/test_recording.py
+  - resource: /tests/test_portal_compat.py
 ---
 # Session recording
+
+> **In flight (2026-09-10): the bytes are moving to an object store.**
+> `control_plane/object_store.py` now exists — a port with a filesystem adapter
+> (the no-S3 default) and an S3 adapter, tested against a real MinIO. See
+> [Storage ports](/concepts/contracts/storage-ports.md).
+>
+> **Nothing on this page has changed yet.** `repository.py` still writes chunks
+> straight to `RECORDINGS_DIR` with an append, and still reads a whole
+> recording into memory in `read_recording`. The chunk → spool → finalize state
+> machine that S3 needs — S3 objects cannot be appended to, so chunks must land
+> in `SPOOL_DIR` and be uploaded once at finalize — is **designed, not built**,
+> and lands with the next work package. Read the chunk protocol below as what
+> runs today, not as what will run after the switch.
 
 ```python
 class RecordingMeta(BaseModel):
@@ -107,6 +123,7 @@ needing a separate code path.
 
 ```
 POST /sessions/{id}/recording/chunks?seq=N     raw bytes body        -> 201 RecordingMeta
+POST /sessions/{id}/recording/chunks?seq=N     multipart, field "chunk" -> 201 RecordingMeta
 POST /sessions/{id}/recording/finalize          no body                -> 200 RecordingMeta
 GET  /sessions/{id}/recording                   -> audio bytes, Content-Type: <stored mime_type>
 ```
@@ -115,9 +132,20 @@ GET  /sessions/{id}/recording                   -> audio bytes, Content-Type: <s
   `InterviewRepository.append_recording_chunk`, the same discipline as
   `append_turn`'s `MAX(idx) + 1` — ordering is the adapter's job, not the
   caller's. A mismatch is a **409**, not silently reordered or dropped.
-* **`seq == 0` creates the row.** The chunk's `Content-Type` header becomes the
+* **`seq == 0` creates the row.** The chunk's `Content-Type` becomes the
   stored `mime_type` for the whole recording — there is no separate "start
   recording" call.
+* **Two body shapes, one protocol (2026-09-10).** The console posts the
+  `MediaRecorder` blob as the raw body and the *request's* `Content-Type` is
+  what seq 0 stores. A `multipart/form-data` body with a file field named
+  `chunk` is accepted too, and then the *part's* content type is what is
+  stored. The multipart door exists because the SkillBrew portal's shared axios
+  layer can send JSON or multipart and nothing else; the handler branches on the
+  request's content type only to read the bytes, so the seq ordering, the 409s
+  and the 422 are one code path for both producers — two clients writing the
+  same recording table must not be able to disagree about when a chunk is
+  acceptable. An empty part is the same **422** as an empty raw body; a
+  multipart body with no `chunk` field is a 422 as well.
 * **Chunks are accepted while the recording is unfinalized, regardless of
   session status.** The last chunk legitimately lands around
   `POST /sessions/{id}/end`, as the browser flushes its `MediaRecorder` on

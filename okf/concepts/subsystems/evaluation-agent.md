@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-22T20:10:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: kimi-code/okf-curator
     at: "2026-08-22T21:10:00Z"
 status: draft
@@ -38,10 +40,10 @@ on, so it landed with M1 rather than waiting for M3.
 ## The fixed checklist
 
 ```python
-CLARITY_FACT_KEYS = ("targets", "shifts", "location",
+ROLE_FACT_KEYS = ("targets", "shifts", "location",
                      "comp_band", "growth_path", "next_steps")
 
-class ClarityFact(BaseModel):
+class RoleFact(BaseModel):
     key: str          # one of the above
     statement: str    # this interview's wording; "" means not applicable here
 ```
@@ -57,11 +59,11 @@ five facts were stated at configuration time, four were conveyed in the session.
 
 ## `RoleFactsAgent` — the model drafts wording, never the list
 
-`extract(job_title, jd, location) -> list[ClarityFact]`, temperature **0.1**,
+`extract(job_title, jd, location) -> list[RoleFact]`, temperature **0.1**,
 because this is extraction and warmth here produces facts the job description
 does not contain.
 
-`_build` clamps the model's answer onto `CLARITY_FACT_KEYS`:
+`_build` clamps the model's answer onto `ROLE_FACT_KEYS`:
 
 * a key that is not on the list is **discarded** — a hallucinated seventh fact cannot reach the report and quietly change what managers are measured against;
 * a key the model omitted comes back with an empty statement rather than vanishing, so the operator sees what was not answered instead of a silently shortened checklist;

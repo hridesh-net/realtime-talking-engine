@@ -269,7 +269,7 @@ def test_language_reaches_both_prompts(language):
         interviewer_challenge=a.interviewer_challenge,
         session_beats=a.session_beats,
         language=language,
-        candidate_notes="",
+        persona_notes="",
         realism_directives=casting_realism_note(None),
         traits=derive_traits(a, "seed"),
         speech=a.speech,
@@ -311,7 +311,7 @@ def test_operator_notes_cannot_override_the_archetype():
         interviewer_challenge=a.interviewer_challenge,
         session_beats=a.session_beats,
         language="english_indian",
-        candidate_notes=hostile,
+        persona_notes=hostile,
         realism_directives=casting_realism_note(None),
         traits=derive_traits(a, "seed"),
         speech=a.speech,
@@ -366,7 +366,7 @@ def _casting_prompt(**extra):
         interviewer_challenge=a.interviewer_challenge,
         session_beats=a.session_beats,
         language="english_indian",
-        candidate_notes="",
+        persona_notes="",
         realism_directives=casting_realism_note(None),
         traits=derive_traits(a, "seed"),
         speech=a.speech,
@@ -391,7 +391,7 @@ def test_the_whole_job_spec_reaches_the_casting_prompt():
         location="Jaipur",
         department="Retail sales",
         manager_level="Frontline manager",
-        clarity_facts=[
+        role_facts=[
             {"key": "targets", "statement": "80 activations a month."},
             {"key": "shift", "statement": "Rotational, six days a week."},
             # Empty statement: not on this interview's checklist, not rendered.

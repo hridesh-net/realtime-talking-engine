@@ -6,8 +6,10 @@ resource: /README.md
 tags: [runbook, setup, env]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  at: "2026-09-10T12:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T12:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
@@ -29,8 +31,9 @@ cp .env.example .env          # then fill GEMINI_API_KEY (or OPENAI_API_KEY)
 ```
 
 Python **>= 3.11**. Runtime deps: `fastapi`, `uvicorn[standard]`, `pydantic>=2`,
-`python-dotenv`, `google-genai`, `openai`. Dev extras: `pytest`,
-`pytest-asyncio`, `httpx`, `ruff` (plus `mypy`, used by `check.sh`).
+`python-dotenv`, `psycopg[binary]`, `psycopg-pool`, `boto3`, `google-genai`,
+`openai`. Dev extras: `pytest`, `pytest-asyncio`, `httpx`, `ruff` (plus `mypy`,
+used by `check.sh`).
 
 `scripts/check.sh` invokes `.venv/bin/python` directly and fails early if the
 virtualenv is missing — keep it at `.venv/`.
@@ -119,13 +122,51 @@ different per-role provider sends the wrong model id. Prefer the per-role vars.
 
 | Var | Default | Meaning |
 |---|---|---|
-| `CONTROL_PLANE_DB` | `control_plane.db` | SQLite path |
+| `CONTROL_PLANE_DB` | `control_plane.db` | SQLite path — **still what the service runs on** |
+| `DATABASE_URL` | `postgresql:///interview_watcher` | Postgres DSN. Read by `database.open_pool()` and by the migration runner. Nothing in the request path uses it yet |
+| `SPOOL_DIR` | `spool` | Local disk buffer for in-flight session artifacts before upload. Shared with the Go engine, which spools its bundle into the same directory |
 | `CONTROL_PLANE_PORT` | `8081` | Bind port |
+| `CORS_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to call this API cross-origin. **Empty or unset installs no CORS middleware at all** — the console under `ui/` is same-origin and needs none, and a wildcard would let any page on the internet call this service with the caller's cookies. Set it to the portal's origin to serve it, e.g. `http://localhost:3002`. Whitespace around each entry is trimmed |
 | `RECORDINGS_DIR` | `recordings` | Where browser-uploaded voice-session audio lands, one file per session. Local disk on this host only — see [Session recording](/concepts/contracts/session-recording.md) for the consent/retention decisions. Retention is manual; nothing purges it. |
 
 `build_app()` calls `load_dotenv()`, so `.env` is picked up automatically when
 running the service. Scripts and tests that build agents directly rely on the
 environment already being set.
+
+## Postgres — being built beside SQLite
+
+The service still runs on SQLite; the Postgres schema and its migration runner
+landed first so the switch can be a separate, reviewable change. Local setup is
+one command, because the default DSN is a socket connection as the current user:
+
+```bash
+createdb interview_watcher
+.venv/bin/python -m control_plane.migrate            # apply pending migrations
+.venv/bin/python -m control_plane.migrate --check    # 0 current, 1 pending, 2 drift
+```
+
+Schema is **never** applied on startup — that is the habit `init_db` had, and it
+is what made a renamed column invisible on an existing database. See
+[Database schema](/concepts/contracts/database-schema.md) for the type mapping,
+the foreign key that is deliberately absent, and why there are no
+down-migrations.
+
+## Test infrastructure
+
+`TEST_DATABASE_URL`, `TEST_S3_ENDPOINT`, `TEST_S3_ACCESS_KEY`,
+`TEST_S3_SECRET_KEY` — leave them blank and the suite provisions throwaway
+Postgres and MinIO containers with **Apple `container`**; set them and it uses
+what you point at and provisions nothing.
+
+```bash
+container system start        # once per machine; installs a kernel on first run
+container system status       # what tests/infra.py checks before provisioning
+```
+
+Docker is not installed and is not used here. `docker.io/...` in the image names
+is a registry hostname, not a runtime. If the runtime is unavailable and nothing
+is configured, `scripts/check.sh` reports the database gates as **NOT RUN** and
+fails — see [Checks](/concepts/runbooks/checks.md).
 
 ## Secrets hygiene
 

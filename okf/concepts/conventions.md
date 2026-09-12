@@ -12,6 +12,8 @@ verified:
     at: "2026-08-21T19:17:54Z"
   - by: kimi-code/okf-curator
     at: "2026-08-22T21:10:00Z"
+  - by: claude-opus-5/architecture-rules
+    at: "2026-09-10T00:00:00Z"
 status: stable
 sources:
   - resource: /pyproject.toml
@@ -61,8 +63,10 @@ These will fail the build, not a review ([Architecture](/concepts/architecture.m
 
 1. Vendor SDKs only inside `llm/`.
 2. Agents take an injected model; they never read API keys.
-3. Handlers depend on ports, never on `InterviewRepository`.
-4. Agents never import `sqlite3` or `control_plane`, and never persist.
+3. Handlers depend on ports, never on `InterviewRepository` or an object store.
+4. Agents never import a storage driver — `psycopg`, `boto3`, `sqlite3` — or
+   `control_plane`, and never persist. Drivers live only in
+   `control_plane/{database,repository,migrate,object_store}.py`.
 5. Prompt modules do no I/O; schema modules hold no logic.
 6. Ports stay small and non-overlapping.
 7. No package imports one above it; no relative imports anywhere.

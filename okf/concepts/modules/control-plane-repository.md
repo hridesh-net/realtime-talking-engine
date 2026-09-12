@@ -9,6 +9,8 @@ generated:
   at: "2026-08-23T19:30:00Z"
 verified:
   - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
+  - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
@@ -45,7 +47,7 @@ class InterviewRepository:
     def get_candidate(self, candidate_id) -> VirtualCandidate | None
     def get_candidate_by_archetype(self, interview_id, archetype) -> VirtualCandidate | None
     def delete_candidate(self, candidate_id) -> bool
-    def create_session(self, *, interview_id, candidate_id, persona_key,
+    def create_session(self, *, interview_id, candidate_id, archetype,
                        planned_minutes, opening_line, modality="text") -> SessionResponse
     def get_session(self, session_id) -> SessionResponse | None    # now also joins session_recordings
     def append_turn(self, session_id, speaker, text) -> Turn
@@ -65,7 +67,7 @@ a return type of `builtins.list[...]` without shadowing.
 
 ## Writes
 
-* **`create`** — generates the uuid, serializes `skills_required`/`config`/`metadata` to JSON, and for `mode == "training_interviewer"` also generates the [legacy persona](/concepts/subsystems/control-plane.md) and writes an `ai_personas` row in the same transaction. The M1 configuration fields ride along: `location`/`department`/`manager_level` as plain text, `language`/`proctoring` as CHECK-constrained enums, `clarity_facts` and `report_sections` as JSON columns. Then re-reads via `get()` and raises if it vanished.
+* **`create`** — generates the uuid, serializes `skills_required`/`config`/`metadata` to JSON, and for `mode == "training_interviewer"` also generates the [legacy persona](/concepts/subsystems/control-plane.md) and writes an `ai_personas` row in the same transaction. The M1 configuration fields ride along: `location`/`department`/`manager_level` as plain text, `language`/`proctoring` as CHECK-constrained enums, `role_facts` and `report_sections` as JSON columns. Then re-reads via `get()` and raises if it vanished.
 * **`save_expectation`** — `ON CONFLICT(interview_id) DO UPDATE`; regenerating replaces.
 * **`save_candidate`** — `ON CONFLICT(interview_id, archetype) DO UPDATE`, refreshing `candidate_id` and `updated_at` but leaving `created_at` at the first cast.
 
@@ -94,8 +96,8 @@ reconstruction, so they can in principle drift from the document. `get_expectati
 additionally forces `raw_model_output = None` before validating.
 
 `_row_to_response` handles the `"Z"` → `"+00:00"` timestamp fix-up and computes
-`start_url` on the fly. Two M1 details live here: `clarity_facts` is rehydrated
-into `ClarityFact` models from the JSON column, and `report_sections` is read as
+`start_url` on the fly. Two M1 details live here: `role_facts` is rehydrated
+into `RoleFact` models from the JSON column, and `report_sections` is read as
 `{**REPORT_SECTIONS, **stored}` — the code's defaults fill any key the row
 lacks, so a section added to the code later appears (at its default) on
 interviews created before it existed.

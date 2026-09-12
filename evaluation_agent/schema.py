@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 #: comparable — the same reason the trait axes are fixed in `candidate_agent`.
 #: What varies per interview is the *statement* of each fact, not which facts
 #: are on the list.
-CLARITY_FACT_KEYS: tuple[str, ...] = (
+ROLE_FACT_KEYS: tuple[str, ...] = (
     "targets",
     "shifts",
     "location",
@@ -19,7 +19,7 @@ CLARITY_FACT_KEYS: tuple[str, ...] = (
     "next_steps",
 )
 
-CLARITY_FACT_LABELS: dict[str, str] = {
+ROLE_FACT_LABELS: dict[str, str] = {
     "targets": "Targets",
     "shifts": "Shifts",
     "location": "Location",
@@ -29,7 +29,7 @@ CLARITY_FACT_LABELS: dict[str, str] = {
 }
 
 
-class ClarityFact(BaseModel):
+class RoleFact(BaseModel):
     """One fact about the role the manager is expected to convey.
 
     The report counts how many were actually said — the spec's "4 of 5 role
@@ -37,7 +37,7 @@ class ClarityFact(BaseModel):
     interview's checklist and is neither counted nor scored against.
     """
 
-    key: str = Field(..., description=f"One of: {', '.join(CLARITY_FACT_KEYS)}.")
+    key: str = Field(..., description=f"One of: {', '.join(ROLE_FACT_KEYS)}.")
     statement: str = Field(
         "",
         max_length=300,
@@ -47,4 +47,4 @@ class ClarityFact(BaseModel):
     @property
     def label(self) -> str:
         """Human label for the report and the picker."""
-        return CLARITY_FACT_LABELS.get(self.key, self.key.replace("_", " ").title())
+        return ROLE_FACT_LABELS.get(self.key, self.key.replace("_", " ").title())

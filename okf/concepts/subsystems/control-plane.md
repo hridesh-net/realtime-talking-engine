@@ -6,8 +6,10 @@ resource: /control_plane
 tags: [control-plane, fastapi, sqlite, api]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  at: "2026-09-10T12:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
@@ -47,9 +49,36 @@ storage. The only package allowed to import `sqlite3`.
 ## Startup
 
 `build_app()` configures logging, calls `load_dotenv()` so provider keys are
-available, applies the database schema once, registers `/healthz`, and includes
-the router. `main()` runs uvicorn against `control_plane.main:build_app` with
-`factory=True` on `0.0.0.0:${CONTROL_PLANE_PORT:-8081}`.
+available, installs CORS and the error envelope (below), applies the database
+schema once, registers `/healthz`, and includes the router. `main()` runs
+uvicorn against `control_plane.main:build_app` with `factory=True` on
+`0.0.0.0:${CONTROL_PLANE_PORT:-8081}`.
+
+### Cross-origin callers and the error envelope (2026-09-10)
+
+Two additions in `main.py`, both for the SkillBrew organization portal, and both
+written so the same-origin console under `ui/` sees no difference.
+
+`cors_allowed_origins()` reads **`CORS_ALLOWED_ORIGINS`** — comma-separated,
+whitespace trimmed — and `build_app` installs `CORSMiddleware`
+(`allow_credentials=True`, all methods, all headers) only when that list is
+non-empty. Empty or unset means *no middleware at all* rather than a permissive
+default: the portal's browsers carry an organisation cookie, and a wildcard
+would let any page on the internet post a job description and read a transcript
+back with it.
+
+`install_error_envelope(app)` adds `status: false` and a human-readable
+`message` **beside** FastAPI's `detail`, on `HTTPException` and on
+`RequestValidationError`. The status code and the `detail` value are byte-for-
+byte what FastAPI sent before — the console reads `detail` and only `detail`.
+The two new keys exist because the portal's shared axios layer toasts
+`response.data?.message` on 409/422/408 unconditionally (today an empty toast)
+and reads a boolean `status` to tell a failure body from a success body — which
+works because no success body in this service carries a boolean `status`. Three
+details are deliberate: the handler is registered on **starlette's**
+`HTTPException` so Starlette's own unmatched-route 404 is enveloped too; a
+status code that forbids a body (204, 304) still gets none; and any headers the
+exception carried are preserved.
 
 ## Dependency injection
 
@@ -94,7 +123,8 @@ enrolling the identical archetype through `POST .../candidates`. It now reads
 
 For a `voice` session it also owns the recorded audio artifact — chunk
 ordering, finalization, and where the bytes land on disk — uploaded by the
-browser, not generated here. See [Session recording](/concepts/contracts/session-recording.md).
+browser, not generated here, as a raw body or as a `multipart/form-data` part
+named `chunk`. See [Session recording](/concepts/contracts/session-recording.md).
 
 ## Legacy: `persona.py`
 
@@ -113,7 +143,11 @@ table, and `schemas.CandidatePersona`/`PersonaAttribute`.
 
 ## Not implemented
 
-Interviewer assignment (`interview_assignments` is empty), interview status
+Assignment (`interview_assignments` has zero rows, zero readers and zero
+writers — its columns were renamed on 2026-09-10 to say what it is *for*: a
+SkillBrew `user_id` is assigned an interview and a `candidate_id` persona, and
+their performance as the interviewer is what is assessed; see
+[Database schema](/concepts/contracts/database-schema.md)), interview status
 transitions (everything stays `scheduled`), the `start_url` target endpoint,
 auth, and pagination. On the session side: no report endpoint (Phase 4 of the
 pivot plan), no session list, and no timeout sweep — so `status = "abandoned"`

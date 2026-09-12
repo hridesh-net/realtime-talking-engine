@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from candidate_agent.agent import VirtualCandidateAgent
 from candidate_agent.archetypes import Archetype, ScorecardSignal
 from candidate_agent.session import CandidateSessionAgent
 from control_plane import ports
+from control_plane.object_store import FilesystemObjectStore, ObjectStore, S3ObjectStore
 from control_plane.repository import InterviewRepository
 from evaluation_agent.role_facts import RoleFactsAgent
 from evaluation_agent.rubric import DEFAULT_RUBRIC
@@ -69,6 +71,31 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
 #: Vendor SDKs may only be imported inside the llm package.
 VENDOR_MODULES = {"google", "openai", "google.genai"}
 
+#: Storage and object-store drivers, by the top-level module name an import of
+#: them produces. Postgres and S3 are concretions exactly as much as a provider
+#: SDK is, and belong behind the same kind of boundary.
+STORAGE_DRIVERS = {"psycopg", "psycopg_pool", "boto3", "botocore", "sqlite3"}
+
+#: The only modules allowed to import one, as paths relative to the repo root.
+#: `migrate.py` and `object_store.py` do not exist yet — the repo is mid-way
+#: from SQLite to Postgres + S3, and naming the modules the migration lands in
+#: means the rule needs no edit when they arrive.
+STORAGE_ADAPTERS = {
+    "control_plane/database.py",
+    "control_plane/repository.py",
+    "control_plane/migrate.py",
+    "control_plane/object_store.py",
+}
+
+#: Concretions a route handler must never be typed against. Storage reaches a
+#: handler as a port from `control_plane.ports`, whether it is rows or bytes.
+HANDLER_FORBIDDEN_ANNOTATIONS = {
+    "InterviewRepository",
+    "ObjectStore",
+    "S3ObjectStore",
+    "FilesystemObjectStore",
+}
+
 AGENTS = [InterviewExpectationAgent, VirtualCandidateAgent, CandidateSessionAgent, RoleFactsAgent]
 BACKENDS = [GeminiModel, OpenAIModel]
 CHAT_BACKENDS = [GeminiChatModel, OpenAIChatModel]
@@ -112,6 +139,26 @@ def test_dip_vendor_sdks_only_inside_llm(pkg: str, path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(("pkg", "path"), ALL_MODULES, ids=MODULE_IDS)
+def test_dip_storage_drivers_only_inside_the_adapters(pkg: str, path: Path) -> None:
+    """Only the storage adapters may touch a database or object-store driver.
+
+    This replaces an older scan that asserted `sqlite3` was absent from the two
+    agent packages. That guard would have gone inert the day the adapter became
+    psycopg: still green, while nothing stopped an agent importing `psycopg` or
+    `boto3`. Naming the drivers *and* the modules allowed to hold them keeps it
+    biting across the migration, and for every package rather than two.
+    """
+    relative = path.relative_to(ROOT).as_posix()
+    if relative in STORAGE_ADAPTERS:
+        return
+    leaked = _imported_roots(path) & STORAGE_DRIVERS
+    assert not leaked, (
+        f"{relative} imports {sorted(leaked)}; storage drivers belong behind "
+        f"control_plane.ports, in one of {sorted(STORAGE_ADAPTERS)}"
+    )
+
+
 @pytest.mark.parametrize("agent_cls", AGENTS, ids=lambda c: c.__name__)
 def test_dip_agents_accept_an_injected_model(agent_cls: type) -> None:
     """An agent must be constructible with any StructuredModel."""
@@ -130,12 +177,41 @@ def test_dip_agents_do_not_read_provider_credentials(agent_cls: type) -> None:
         )
 
 
-def test_dip_handlers_depend_on_ports_not_the_sqlite_adapter() -> None:
-    """Route handlers are typed against protocols so storage can be swapped."""
-    source = (ROOT / "control_plane" / "api.py").read_text()
-    assert "repo: InterviewRepository" not in source, (
-        "a handler is typed against the SQLite adapter; use a port from control_plane.ports"
+def _parameter_annotations(path: Path) -> list[str]:
+    """The source text of every parameter annotation in a module.
+
+    Return annotations are excluded on purpose: `get_repo() -> InterviewRepository`
+    is the composition root naming the adapter it builds, which is its job. What
+    must not happen is a *handler* taking one as an argument.
+    """
+    tree = ast.parse(path.read_text(), filename=str(path))
+    annotations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        args = node.args
+        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+            if arg is not None and arg.annotation is not None:
+                annotations.append(ast.unparse(arg.annotation))
+    return annotations
+
+
+def test_dip_handlers_depend_on_ports_not_the_adapters() -> None:
+    """Route handlers are typed against protocols so storage can be swapped.
+
+    Both halves of storage count. A handler that takes the object store is as
+    coupled to S3 as one that takes the repository is to Postgres, and swapping
+    either then means editing every route that named the concretion. Matching on
+    the unparsed annotation catches the wrapped forms too — `Annotated[...]`, a
+    dotted `repository.InterviewRepository`, a quoted forward reference.
+    """
+    annotations = _parameter_annotations(ROOT / "control_plane" / "api.py")
+    leaked = sorted(
+        name
+        for name in HANDLER_FORBIDDEN_ANNOTATIONS
+        if any(re.search(rf"\b{name}\b", annotation) for annotation in annotations)
     )
+    assert not leaked, f"a handler is typed against {leaked}; use a port from control_plane.ports"
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +224,8 @@ NARROW_PORTS = [
     ports.CandidateStore,
     ports.SessionStore,
     ports.RecordingStore,
+    ports.AnalysisStore,
+    ports.ReportStore,
 ]
 
 COMPOSITION_PORTS = [
@@ -156,6 +234,8 @@ COMPOSITION_PORTS = [
     ports.SessionWorkflowStore,
     ports.TurnWorkflowStore,
     ports.RecordingWorkflowStore,
+    ports.AnalysisWorkflowStore,
+    ports.ReportWorkflowStore,
 ]
 
 
@@ -182,18 +262,36 @@ def test_isp_ports_do_not_overlap(port: type) -> None:
     [*NARROW_PORTS, *COMPOSITION_PORTS],
     ids=lambda p: p.__name__,
 )
-def test_isp_sqlite_adapter_satisfies_every_port(port: type) -> None:
-    """The adapter implements the ports structurally, without inheriting them."""
-    assert isinstance(InterviewRepository(_memory_conn()), port)
+def test_isp_postgres_adapter_satisfies_every_port(port: type) -> None:
+    """The adapter implements the ports structurally, without inheriting them.
+
+    The instance is built with `__new__` and never `__init__`: conformance is a
+    property of the class, and asking for a live connection here would make an
+    architecture check need a database — and then a container, and then a reason
+    to be skipped on the machine where it matters most.
+    """
+    assert isinstance(InterviewRepository.__new__(InterviewRepository), port)
     assert port not in InterviewRepository.__mro__, (
         f"{port.__name__} should be satisfied structurally, not by inheritance"
     )
 
 
-def _memory_conn():
-    from control_plane.database import init_db
+@pytest.mark.parametrize(
+    "adapter",
+    [FilesystemObjectStore, S3ObjectStore],
+    ids=lambda c: c.__name__,
+)
+def test_isp_object_store_adapters_satisfy_the_port(adapter: type) -> None:
+    """Bytes get the same treatment as rows: structural conformance, no base class.
 
-    return init_db(":memory:")
+    Built with `__new__` for the same reason as the storage ports above —
+    `S3ObjectStore.__init__` builds a boto3 client, and an architecture check
+    that needed AWS configuration to run is one that gets skipped.
+    """
+    assert isinstance(adapter.__new__(adapter), ObjectStore)
+    assert ObjectStore not in adapter.__mro__, (
+        f"{adapter.__name__} should satisfy ObjectStore structurally, not by inheritance"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -422,13 +520,13 @@ def test_ocp_new_provider_needs_no_agent_change() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("pkg", ["candidate_agent", "expectation_agent"], ids=str)
-def test_srp_generation_does_not_persist(pkg: str) -> None:
-    """An agent generates. Storing what it generated is the caller's job."""
-    for path in _modules(pkg):
-        roots = _imported_roots(path)
-        assert "sqlite3" not in roots, f"{path.name} talks to the database"
-        assert "control_plane" not in roots, f"{path.name} imports the control plane"
+# `test_srp_generation_does_not_persist` lived here. An agent still must not
+# persist; both halves of what it asserted moved to a broader check, so nothing
+# was lost by deleting it. `sqlite3` is now one entry in STORAGE_DRIVERS,
+# enforced by `test_dip_storage_drivers_only_inside_the_adapters`, and the ban
+# on importing `control_plane` is ALLOWED_IMPORTS, enforced by
+# `test_layering_respects_the_allowed_direction` — two rules over all seven
+# packages in place of one over two.
 
 
 def test_srp_agents_do_not_generate_each_others_documents() -> None:

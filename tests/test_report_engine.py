@@ -27,7 +27,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "demo_turns.json"
 
 def _bundle(**overrides) -> SessionBundle:
     raw = json.loads(FIXTURE.read_text())
-    archetype = archetypes.get(raw.pop("persona_key"))
+    archetype = archetypes.get(raw.pop("archetype"))
     raw["persona"] = {
         "archetype_key": archetype.key,
         "label": archetype.label,
@@ -362,7 +362,7 @@ def test_the_bundle_reads_a_composed_personas_scorecard_off_the_candidate():
     """A `dyn-` persona has no catalog entry; its ground truth is on the candidate."""
     from control_plane.reporting import persona_block
 
-    session = SimpleNamespace(persona_key="dyn-abc123", candidate_id="vc-1")
+    session = SimpleNamespace(archetype="dyn-abc123", candidate_id="vc-1")
     candidate = SimpleNamespace(
         archetype_label="Composed persona",
         interviewer_scorecard=SimpleNamespace(
@@ -388,7 +388,7 @@ def test_the_bundle_reads_a_composed_personas_scorecard_off_the_candidate():
 def test_an_unknown_persona_yields_an_empty_block_rather_than_raising():
     from control_plane.reporting import persona_block
 
-    session = SimpleNamespace(persona_key="dyn-gone", candidate_id="vc-1")
+    session = SimpleNamespace(archetype="dyn-gone", candidate_id="vc-1")
     block = persona_block(session, None)
     assert block["must_discover"] == []
 
@@ -396,7 +396,7 @@ def test_an_unknown_persona_yields_an_empty_block_rather_than_raising():
 def test_a_catalog_persona_still_comes_from_the_catalog():
     from control_plane.reporting import persona_block
 
-    session = SimpleNamespace(persona_key="inflated_resume", candidate_id="vc-1")
+    session = SimpleNamespace(archetype="inflated_resume", candidate_id="vc-1")
     block = persona_block(session, None)
     assert block["label"] == "The inflated resume"
     assert len(block["must_discover"]) == 4

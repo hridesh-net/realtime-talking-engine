@@ -5,9 +5,15 @@ description: Path → concept routing table; read this to find the right page wi
 resource: /
 tags: [navigation, index]
 generated:
-  by: claude-opus-5/okf-curator
-  at: "2026-08-23T19:30:00Z"
+  by: claude-opus-5
+  at: "2026-09-10T18:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T18:00:00Z"
+  - by: claude-opus-5
+    at: "2026-09-10T12:00:00Z"
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5
@@ -40,7 +46,9 @@ status: stable
 | `control_plane/api.py` | [control_plane/api.py](/concepts/modules/control-plane-api.md), [REST API](/concepts/contracts/rest-api.md) |
 | `control_plane/ports.py` | [Storage ports](/concepts/contracts/storage-ports.md) |
 | `control_plane/repository.py` | [control_plane/repository.py](/concepts/modules/control-plane-repository.md) |
+| `control_plane/object_store.py` | [Storage ports § the object store](/concepts/contracts/storage-ports.md) — the byte port (`ObjectStore`/`ByteSource`), its filesystem and S3 adapters, and the range rules both obey. **Nothing calls it yet** |
 | `control_plane/database.py` | [Database schema](/concepts/contracts/database-schema.md), [Session recording](/concepts/contracts/session-recording.md) — `session_recordings`, `RECORDINGS_DIR` |
+| `control_plane/migrate.py`, `control_plane/migrations/` | [Database schema § Postgres](/concepts/contracts/database-schema.md) — the forward-only migration runner, `schema_migrations`, and the Postgres DDL. **No down-migrations** |
 | `evaluation_agent/rubric.py` | [evaluation_agent/rubric.py](/concepts/modules/evaluation-agent-rubric.md) — the fixed manager rubric |
 | `evaluation_agent/role_facts.py`, `prompts.py`, `schema.py` | [evaluation_agent/role_facts.py](/concepts/modules/evaluation-agent-role-facts.md) — the fixed role-fact checklist and its drafting agent |
 | `control_plane/reporting.py` | [Report engine](/concepts/subsystems/report-engine.md) — the seam that assembles a bundle from stored rows; resolves catalog **and** composed personas |
@@ -70,8 +78,12 @@ status: stable
 | `ui/src/{Shell,InterviewList,Wizard,InterviewDetail}.jsx` | [Test UI](/concepts/subsystems/ui.md) |
 | `ui/src/index.css`, `interview_training_wizard (1).html` | [Test UI](/concepts/subsystems/ui.md) — the mockup is the design source of truth |
 | `ui/` | [Test UI](/concepts/subsystems/ui.md) |
+| `tests/infra.py`, `tests/conftest.py` | [Test suite](/concepts/subsystems/test-suite.md) — throwaway Postgres/MinIO on **Apple `container`** (never Docker), and the lazy session fixtures |
+| `tests/test_object_store.py` | [Test suite](/concepts/subsystems/test-suite.md), [Storage ports](/concepts/contracts/storage-ports.md) — one contract set parametrized over both adapters; the S3 half runs against a **real MinIO**, and errors rather than skips without one |
+| `tests/test_migrations.py` | [Database schema § Postgres](/concepts/contracts/database-schema.md) — the runner, and the two foreign-key decisions SQLite could not enforce |
 | `tests/` | [Test suite](/concepts/subsystems/test-suite.md), [Architecture](/concepts/architecture.md) |
 | `scripts/check.sh` | [Checks](/concepts/runbooks/checks.md) |
+| `scripts/rename_columns_sqlite.py` | [Database schema](/concepts/contracts/database-schema.md) — the one-off that applies the 2026-09-10 column renames to an existing `.db`; there are no migrations |
 | `scripts/export_schemas.py` | [Owner handover](/concepts/subsystems/owner-handover.md) |
 | `owner_handover/` | [Owner handover](/concepts/subsystems/owner-handover.md) |
 | `docs/BRD_AI_Interview_Platform_v2.md` | [BRD](/references/brd.md) — **superseded** by BRD v3 |
@@ -107,8 +119,12 @@ status: stable
 | Anything about how a persona behaves *in conversation* | [session.py](/concepts/modules/candidate-agent-session.md) and [Determinism § session agent](/concepts/determinism.md) — the contract prompt is appended to, never edited |
 | Anything about how a persona **sounds**, or the voice call | [voice.py](/concepts/modules/candidate-agent-voice.md), [Realtime voice](/concepts/contracts/realtime-voice.md) — and note that voice ordering is contract, not cosmetics |
 | The transcript shape, turn timing, or session status | [Session transcript](/concepts/contracts/session-transcript.md) — the evaluation layer and the Go engine both depend on it |
-| Swap SQLite for Postgres | [Storage ports](/concepts/contracts/storage-ports.md), [Database schema](/concepts/contracts/database-schema.md) |
+| Swap SQLite for Postgres | [Database schema § Postgres](/concepts/contracts/database-schema.md) first — the schema, the pool and the migration runner already exist; what is left is `repository.py`. Then [Storage ports](/concepts/contracts/storage-ports.md) |
+| Add a column, or any schema change | [Database schema § Postgres](/concepts/contracts/database-schema.md) — a **new** `NNNN_name.sql`; never edit an applied migration, which `--check` reports as drift (exit 2). `_SCHEMA` still needs the same change while SQLite is what runs |
+| Rename a column | [Database schema](/concepts/contracts/database-schema.md) — `_SCHEMA` is `CREATE TABLE IF NOT EXISTS`, so a rename is invisible to an existing database. `scripts/rename_columns_sqlite.py` is the pattern to follow |
+| Anything named `clarity` | [role_facts.py](/concepts/modules/evaluation-agent-role-facts.md) — the **facts** are `role_facts`; the **competency** "Hiring with Clarity" keeps the name `clarity` everywhere. Do not conflate them |
 | Anything inside `engine/` | [Live-session engine](/concepts/subsystems/engine.md) — then `go test ./internal/arch`, which enforces the layering |
 | A vendor's observed behaviour (Live API, TTS) | [Live-session engine](/concepts/subsystems/engine.md) — the live-verified facts section. Several of them removed planned work; do not re-derive them from docs |
 | Change any Pydantic model in the public surface | [Owner handover](/concepts/subsystems/owner-handover.md) — regenerate, or CI fails |
+| Store or serve a large file — a recording, an engine bundle | [Storage ports § the object store](/concepts/contracts/storage-ports.md) — `put` takes a **path**, `open` returns a stream; neither takes `bytes`. The range rules and the shared `sessions/{id}/` key layout are decided there, not per caller |
 | Anything about the recorded audio artifact, its chunk protocol, or consent/retention | [Session recording](/concepts/contracts/session-recording.md) first — several of its decisions (where bytes land, no auth on the GET, indefinite retention) are meant to be vetoed, not silently changed |

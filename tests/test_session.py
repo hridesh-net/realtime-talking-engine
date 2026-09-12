@@ -230,7 +230,7 @@ def test_session_opens_with_the_personas_opening_line(repo):
     session = repo.create_session(
         interview_id=interview_id,
         candidate_id=candidate_id,
-        persona_key="nervous_fresher",
+        archetype="nervous_fresher",
         planned_minutes=20,
         opening_line="Hi, thanks for the time.",
     )
@@ -247,7 +247,7 @@ def test_turns_are_indexed_and_stamped_in_order(repo):
     session = repo.create_session(
         interview_id=interview_id,
         candidate_id=candidate_id,
-        persona_key="nervous_fresher",
+        archetype="nervous_fresher",
         planned_minutes=20,
         opening_line="Hi.",
     )
@@ -266,7 +266,7 @@ def test_ending_a_session_is_idempotent_and_keeps_the_transcript(repo):
     session = repo.create_session(
         interview_id=interview_id,
         candidate_id=candidate_id,
-        persona_key="nervous_fresher",
+        archetype="nervous_fresher",
         planned_minutes=20,
         opening_line="Hi.",
     )
@@ -356,7 +356,7 @@ def test_sessions_are_listed_for_their_interview(client, repo):
     assert len(rows) == 1
     row = rows[0]
     assert row["id"] == session_id
-    assert row["persona_key"] == "nervous_fresher"
+    assert row["archetype"] == "nervous_fresher"
     assert row["status"] == "live"
     assert row["turn_count"] == 3  # opener + manager + reply
     assert "turns" not in row  # the summary must not carry the evidence

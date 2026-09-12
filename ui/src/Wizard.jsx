@@ -27,7 +27,7 @@ const EMPTY = {
   company_type: 'mnc',
   mode: 'training_interviewer',
   duration_minutes: 20,
-  candidate_notes: '',
+  persona_notes: '',
 }
 
 const START_SKILLS = []
@@ -187,10 +187,10 @@ export default function Wizard({
     manager_level: form.manager_level,
     language: form.language,
     proctoring: form.proctoring,
-    candidate_notes: form.candidate_notes,
+    persona_notes: form.persona_notes,
     // A blank statement means "not on this interview's checklist" and is
     // dropped rather than sent as an unmeetable expectation.
-    clarity_facts: FACT_KEYS.filter(([k]) => facts[k]?.trim()).map(([k]) => ({
+    role_facts: FACT_KEYS.filter(([k]) => facts[k]?.trim()).map(([k]) => ({
       key: k,
       statement: facts[k].trim(),
     })),
@@ -540,8 +540,8 @@ export default function Wizard({
               </label>
               <textarea
                 className="textarea"
-                value={form.candidate_notes}
-                onChange={set('candidate_notes')}
+                value={form.persona_notes}
+                onChange={set('persona_notes')}
                 placeholder="Anything the type above doesn't cover. e.g. Candidate has worked at a competitor store in the same mall and mentions it if asked about local market knowledge."
               />
               <div className="help">

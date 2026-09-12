@@ -240,7 +240,7 @@ export default function App() {
         <View
           session={session}
           personaLabel={
-            catalog.archetypes.find((a) => a.key === session.persona_key)?.label
+            catalog.archetypes.find((a) => a.key === session.archetype)?.label
           }
           onExit={leaveSession}
         />

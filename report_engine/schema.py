@@ -33,7 +33,7 @@ class Turn(BaseModel):
     end_ms: int | None = None
 
 
-class ClarityFact(BaseModel):
+class RoleFact(BaseModel):
     """A role fact the manager is expected to convey. Empty statement = not applicable."""
 
     key: str
@@ -60,12 +60,12 @@ class Persona(BaseModel):
 
 
 class JobCard(BaseModel):
-    """The role. Supplies the clarity checklist and nothing else."""
+    """The role. Supplies the role-fact checklist and nothing else."""
 
     job_title: str
     summary: str = ""
     role_family: str = "sales"
-    clarity_facts: list[ClarityFact] = Field(default_factory=list)
+    role_facts: list[RoleFact] = Field(default_factory=list)
 
 
 class SessionMeta(BaseModel):

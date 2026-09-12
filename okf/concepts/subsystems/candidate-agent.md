@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-21T19:17:54Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
   - by: kimi-code/okf-curator
@@ -178,7 +180,7 @@ The same argument, for the thing this subsystem is *named* after. Until v1.4 no
 job-spec field reached either prompt in full: the compiled `system_prompt` never
 named the role at all, and the casting prompt carried the title, JD and skills
 but not `location`, `department`, `manager_level` or the interview's
-`clarity_facts`. The result was personas that were interchangeable between
+`role_facts`. The result was personas that were interchangeable between
 interviews for completely different jobs — the one failure this package exists to
 avoid. `_role_section` now emits **THE ROLE YOU ARE INTERVIEWING FOR** into the
 runtime prompt (only when a `job_title` was passed), and `build_user_prompt`

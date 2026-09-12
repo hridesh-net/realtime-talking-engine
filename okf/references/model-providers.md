@@ -32,6 +32,18 @@ historically rejects `additionalProperties`. The schemas here do not use it, so
 no stripping is needed — but a new schema that does will fail at the API, not at
 validation.
 
+⚠️ **The flash default rate-limits under load.** On a free-tier / low-quota
+Gemini project, `gemini-3.7-flash` returns `429 RESOURCE_EXHAUSTED` (sometimes
+surfaced as `503 UNAVAILABLE`) once a session generates a few calls in quick
+succession, which the control plane maps to a `502`. A `429` is a key-shaped
+failure, so [failover](/concepts/subsystems/llm-port.md) tries the next key —
+but a second free-tier key on the same overloaded model does not help, and a
+`503` is *not* classified as key-shaped, so it is raised as-is. Two levers, both
+config, no code: pin a steadier model via `LLM_MODEL` (or a per-role
+`<ROLE>_MODEL`), and give the deployment a key with real quota. Model ids are
+config precisely so this is a `.env` change, not a redeploy — see
+[Dev setup](/concepts/runbooks/dev-setup.md).
+
 ## OpenAI — `openai`
 
 `AsyncOpenAI(api_key=...).chat.completions.create(model, messages, temperature,
