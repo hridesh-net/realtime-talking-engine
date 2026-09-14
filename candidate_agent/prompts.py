@@ -8,7 +8,7 @@ so the guardrails here are about *grounding and consistency*, not structure.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from candidate_agent.engine_contract import DEFAULT_LANGUAGE, LANGUAGE_DIRECTIVES
@@ -268,24 +268,37 @@ def build_user_prompt(
     )
 
 
-def expectation_note(expectation: Any) -> str:
-    """Ground the persona in the interview's expectation document when present."""
-    if expectation is None:
-        return (
-            "No expectation document exists yet for this interview. Ground the "
-            "persona in the required skills alone."
-        )
-    skills = ", ".join(s.skill for s in expectation.mandatory_skills) or "n/a"
-    red = "; ".join(expectation.red_flags[:6])
-    green = "; ".join(expectation.green_flags[:6])
+def expectation_note(
+    skills_required: Sequence[str], expectations: Sequence[Mapping[str, Any]] | None = None
+) -> str:
+    """What the interviewer is being scored on, for the casting prompt.
+
+    Rebuilt 2026-09-13 from the interview's own configuration. It used to read
+    the retired expectation agent's document — a per-interview *plan* generated
+    from the JD — and the two inputs it needed are now stored on the interview
+    itself: the required skills, and the enabled expectation items
+    (`evaluation_agent.expectations`).
+
+    The framing is what matters. The persona is not told how it will be scored;
+    it is told what the interviewer is *supposed to do*, so the casting model
+    can write someone who makes those behaviours worth performing — a persona
+    who volunteers nothing until probed is only useful if the interviewer is
+    measured on probing.
+    """
+    skills = ", ".join(s for s in skills_required if s.strip()) or "n/a"
+    lines = [
+        f"- {str(item.get('text', '')).strip()}"
+        for item in (expectations or [])
+        if item.get("enabled", True) and str(item.get("text", "")).strip()
+    ]
+    behaviours = "\n".join(lines) or "- (nothing beyond the standard interviewing rubric)"
     return (
-        f"Interview type: {expectation.interview_type}. "
-        f"Mandatory skills the interviewer must cover: {skills}. "
-        f"Red flags the interviewer is watching for: {red}. "
-        f"Green flags: {green}. "
-        "Make this persona interact meaningfully with those flags — a rejectable "
-        "persona should trip real red flags, a selectable one should show real "
-        "green flags, in ways the interviewer has to work to surface."
+        f"Skills the interviewer must cover with this candidate: {skills}.\n"
+        "Behaviours the interviewer is expected to show in this interview:\n"
+        f"{behaviours}\n"
+        "Make this persona interact meaningfully with those behaviours — give the "
+        "interviewer something real to probe, to clarify and to close on, in ways "
+        "they have to work to surface."
     )
 
 

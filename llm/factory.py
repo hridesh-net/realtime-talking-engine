@@ -122,7 +122,7 @@ DEFAULT_MODEL_IDS: dict[str, str] = {
 #: one workload can be moved to a different provider or model without dragging
 #: the others with it — the session runs hot and often, the judge runs once.
 ROLE_PREFIXES: dict[str, str] = {
-    "expectation": "EXPECTATION",
+    "expectations": "EXPECTATIONS",
     "candidate": "CANDIDATE",
     "session": "SESSION",
     "judge": "JUDGE",

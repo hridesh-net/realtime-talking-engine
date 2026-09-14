@@ -9,6 +9,8 @@ generated:
   at: "2026-08-21T19:17:54Z"
 verified:
   - by: claude-opus-5
+    at: "2026-09-13T00:00:00Z"
+  - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5/okf-curator
     at: "2026-08-22T17:05:00Z"
@@ -18,9 +20,7 @@ sources:
   - resource: /report_engine/validate.py
   - resource: /report_engine/narrate.py
   - resource: /candidate_agent/agent.py
-  - resource: /expectation_agent/agent.py
   - resource: /candidate_agent/archetypes.py
-  - resource: /expectation_agent/rubric.py
   - resource: /candidate_agent/session.py
   - resource: /candidate_agent/voice.py
 ---
@@ -221,19 +221,50 @@ a persona can be argued above its ceiling more easily than in text. That is a
 known Speaker-only limitation, not an oversight — see
 [Realtime voice](/concepts/contracts/realtime-voice.md).
 
-## Expectation agent
+## Evaluation agent — drafts wording onto fixed keys (2026-09-13)
 
-Computed before the call and **overwritten after** it in `agent.generate`:
+Two checklists, one rule, and the rule is the same one `role_facts` established:
+**the model writes the wording; code owns the list.**
 
-* `interview_type` — from `(experience_level, company_type)`.
-* `evaluation_criteria` — the six fixed criteria and weights, verbatim.
-* `red_flags` / `green_flags` — baselines first, model additions appended (deduped).
-* `resume_probing.required` — from `(experience_level, has_resume)`.
-* `interviewer_guidance` — from `(experience_level, company_type)`.
-* `structure` — if the model's phase durations do not sum to the requested total, the whole structure is replaced with the template.
+| Owned by code | Owned by the model |
+|---|---|
+| `ROLE_FACT_KEYS` — which facts are on the checklist | the *statement* of each fact for this job |
+| The four competencies, their weights and their bands (`DEFAULT_RUBRIC`) | nothing |
+| Every **fixed** expectation item, and its id, derived from the rubric's `covers` | nothing — a fixed item may be toggled off, never reworded |
+| That a **drafted** item belongs to one of the four, that there are at most three per competency, and that it does not restate a fixed one | the *text* of a drafted item, grounded in this job description |
+| `enabled` — the manager's toggle, never the model's | |
+| `MAX_CUSTOM_ITEMS`, and every custom item's id (`custom.{n}`, assigned server-side in request order) | **`classify`**: which of the four a manager's own item belongs under, plus one line of reason |
+| `determine_interview_type(experience_level, company_type)` — a four-row table | nothing |
 
-Temperature is **0.1**; the candidate agent runs at **0.35** because personas
-need texture and everything reproducible is computed outside the model anyway.
+The clamps are re-imposed after the call, not requested in the prompt.
+`ExpectationsAgent._build_drafted` drops an unknown `competency_id`, truncates
+past three per competency in model order, caps text at 200 characters, and drops
+anything whose text matches a fixed item's case-insensitively.
+
+**`classify` degrades rather than raises.** An answer outside the four becomes
+`structure` with a **blank reason** — losing the whole add-item interaction over
+a bad label is the worse failure, and keeping the model's reason beside a
+competency it never chose would present a rationale for a decision nobody made.
+It is a *suggestion* in any case: the manager can override it, and that is the
+only thing the model decides about a custom item.
+
+The subject is the thing most easily got wrong, so the prompt says it first: an
+expectation item is a behaviour of the **interviewer**, never of the candidate.
+A test asserts the framing survives an edit.
+
+Temperature is **0.1** for both evaluation agents; the candidate agent runs at
+**0.35** because personas need texture and everything reproducible is computed
+outside the model anyway.
+
+> **What this replaced.** Until 2026-09-13 `expectation_agent/` generated a
+> per-interview *plan* from the JD and then overwrote most of it from code —
+> phase durations, six criteria and weights, baseline flags, resume-probing
+> policy, guidance. That was determinism applied to the wrong artifact: the
+> rubric is fixed configuration now, so a generated one had nothing left to
+> say. The package is deleted; its pages are kept as history at
+> [Expectation agent](/concepts/subsystems/expectation-agent.md). The one table
+> that survived is `determine_interview_type`, which moved into
+> `evaluation_agent/rubric.py` unchanged.
 
 ## The two fingerprints
 
@@ -252,9 +283,13 @@ always yields the same id — which is what makes the storage upsert idempotent.
 ## When you change something here
 
 Bump the version constant that covers it — `CATALOG_VERSION`,
-`PERSONA_VERSION`, `ENGINE_CONTRACT_VERSION`, or `expectation_version` — because
+`PERSONA_VERSION`, `ENGINE_CONTRACT_VERSION`, or `RUBRIC_VERSION` — because
 both fingerprints include the version fields, and the Go engine pins the
-contract version. Changing the compiled prompt text without bumping
+contract version. The rubric has one more obligation attached to it: its
+`covers` strings are the source of every fixed expectation item's **id**, so
+rewording one re-keys the checklist on every stored interview and
+`tests/test_expectations.py` fails until the pinned list is updated
+deliberately. Changing the compiled prompt text without bumping
 `ENGINE_CONTRACT_VERSION` silently invalidates every stored persona's byte
 stability, which `tests/test_candidate_rubric.py::test_system_prompt_is_byte_stable`
 exists to catch.
@@ -288,6 +323,13 @@ prompt framing and the clamp.
 **`role_facts`** — the *keys* are fixed in `evaluation_agent.schema`; only the
 *statements* are drafted, and a drafted key that is not on the list is discarded.
 The checklist a manager is measured against is never something a model chose.
+
+**`expectations`** — the same, one level down. The four competencies are code;
+the manager may toggle any item off, add their own text, and keep or discard
+what the model drafted. What neither of them can do is add a competency or
+change a weight. The *ids* of the fixed items are derived from the rubric's own
+wording, so a rubric edit re-keys every stored interview — which is why
+`tests/test_expectations.py` pins all nineteen of them.
 
 ## The report judge (2026-08-27)
 

@@ -90,7 +90,7 @@ Resolution per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/`LLM_MO
 
 | Role prefix | Workload | Call shape |
 |---|---|---|
-| `EXPECTATION` | the interviewer expectation document | one structured call per interview |
+| `EXPECTATIONS` | drafting the per-interview expectation items and filing a manager's own item under a competency (`evaluation_agent/expectations.py`) | two short structured calls per wizard run; a light model is the right choice. Renamed from `EXPECTATION` 2026-09-13 with the agent it belongs to |
 | `CANDIDATE` | casting a persona | one structured call per persona |
 | `SESSION` | playing the persona in a live interview | one **chat** call per turn |
 | `JUDGE` | writing the report's prose from a finished session (`report_engine/judge.py`) | one structured call per report; **blank** means code-composed sentences, no model |
@@ -100,8 +100,8 @@ Resolution per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/`LLM_MO
 
 | Var | Default |
 |---|---|
-| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` / `ROLE_FACTS_PROVIDER` / `ANALYSIS_PROVIDER` | — (auto-detect) |
-| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` / `ROLE_FACTS_MODEL` / `ANALYSIS_MODEL` | — |
+| `EXPECTATIONS_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` / `ROLE_FACTS_PROVIDER` / `ANALYSIS_PROVIDER` | — (auto-detect) |
+| `EXPECTATIONS_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` / `ROLE_FACTS_MODEL` / `ANALYSIS_MODEL` | — |
 | `TRANSCRIBE_MODEL` | `gpt-4o-transcribe` — the interviewer's own speech-to-text on the **OpenAI voice path only**; Gemini Live transcribes both sides itself and ignores it |
 | `LLM_PROVIDER` / `LLM_MODEL` | — |
 | provider default model | `gemini-3.7-flash` / `gpt-4o-mini` |

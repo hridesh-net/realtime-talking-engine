@@ -74,3 +74,31 @@ run, and remaining risk. Keep durable implementation history in
   Staged, not committed. Remaining risk unchanged: the live runs in
   [Backlog](/backlog.md).
 
+* **2026-09-13 — WP1 of `docs/INTERVIEW_EXPECTATIONS_PLAN.md`** (expectations,
+  links, participants). An interview now stores the checklist the interviewer
+  is measured against (`interviews.expectations`, four fixed competencies in
+  code, granular items toggleable) and a `report_sections` map re-keyed to the
+  eight sections the renderer actually has; `participants` + `interview_links`
+  land, `interview_expectations` and `interview_assignments` are dropped, and
+  `expectation_agent/` is deleted (pivot task 7). New Postgres `0004`; new
+  SQLite one-off `scripts/upgrade_sqlite_expectations.py`. `require_engine_secret`
+  is now `require_shared_secret` and gates the link minter and the participant
+  routes too. 30 gates PASS including `migrations (postgres)` and
+  `object store (minio)` on Apple `container`; `owner_handover/` regenerated.
+  Staged, not committed.
+  **Remaining risk / what is deliberately not done**: WP2 is what makes the
+  report engine score an enabled item and the renderer honour a section toggle
+  — until then both are stored and passed around, not consumed, so a manager
+  toggling `transcript` on sees no change. WP3 (the console screens) and WP4
+  (end-to-end verification against a real link and two participants) are open.
+  While fixing four test fixtures that were writing to the developer's own
+  `control_plane.db`, note that `get_repo()` still opens a connection per
+  request from `CONTROL_PLANE_DB` — unchanged, and still the first thing to fix
+  before real load.
+* **2026-09-13 — WP1 reviewed, bundle compacted, direction recorded.** Gate
+  re-run independently (30 PASS). Two stale rows fixed. New concept page
+  [The interview as a fixture](/concepts/interview-fixture.md) is now the
+  entry point for the 2026-09-13 direction; `log.md` August–September-1
+  history compressed a second time. Everything staged, nothing committed.
+  Next: WP2 (report engine honours items and toggles), then WP3, WP4.
+

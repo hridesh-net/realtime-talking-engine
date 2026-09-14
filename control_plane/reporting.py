@@ -119,8 +119,16 @@ def build_bundle(
         {
             "session": {
                 "session_id": session.id,
-                "manager_id": "",
-                "manager_name": interview.job_title,
+                # Who the report is about. Until participants existed these were
+                # a blank id and the job title standing in for a name, because
+                # a session did not record who sat it. It does now, so the
+                # masthead names the person — and still falls back to the job
+                # title for the sessions that predate them, rather than printing
+                # a report about nobody.
+                "manager_id": (session.participant.id if session.participant else ""),
+                "manager_name": (
+                    session.participant.name if session.participant else interview.job_title
+                ),
                 "modality": session.modality,
                 "planned_minutes": session.planned_minutes,
                 "started_at": session.started_at,
@@ -221,7 +229,6 @@ def build_analysis_context(
     interview: InterviewResponse,
     session: SessionResponse,
     candidate: VirtualCandidate | None = None,
-    expectation: dict[str, Any] | None = None,
 ) -> AnalysisContext:
     """The brief the analysis agent works from.
 
@@ -259,5 +266,9 @@ def build_analysis_context(
             {"id": c.id, "label": c.label, "weight": c.weight, "covers": c.covers}
             for c in DEFAULT_RUBRIC.criteria
         ],
-        interview_expectation=expectation,
+        # The enabled items, as coverage context. This replaced the retired
+        # expectation agent's document (2026-09-13): that document described
+        # assessing the *candidate*, which is the wrong subject, while these are
+        # behaviours of the interviewer — the person actually being assessed.
+        expectations=[item.model_dump() for item in interview.expectations if item.enabled],
     )

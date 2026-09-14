@@ -233,7 +233,10 @@ class AnalysisContext(BaseModel):
     interviewer_failure_modes: list[str] = Field(default_factory=list)
 
     rubric: list[dict[str, Any]] = Field(default_factory=list)
-    #: The generated InterviewExpectation, when one exists. Supplied as "what
-    #: this interview was meant to cover", never as scoring guidance - its own
-    #: criteria describe assessing the candidate, not the manager.
-    interview_expectation: dict[str, Any] | None = None
+    #: The interview's enabled expectation items - the behaviours the
+    #: *interviewer* was expected to show, grouped under the four competencies
+    #: (`evaluation_agent.expectations`). Replaced `interview_expectation`
+    #: on 2026-09-13: that was the retired expectation agent's plan document,
+    #: whose own criteria described assessing the candidate, which is the wrong
+    #: subject for a report about the manager.
+    expectations: list[dict[str, Any]] = Field(default_factory=list)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import json
+import secrets
 import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -21,7 +22,11 @@ from control_plane.schemas import (
     IngestReceipt,
     InterviewConfigInput,
     InterviewCreateRequest,
+    InterviewLinkResponse,
     InterviewResponse,
+    InterviewUpdateRequest,
+    ParticipantResponse,
+    ParticipantSessionRow,
     RecordingMeta,
     ReportMeta,
     RoleFact,
@@ -30,7 +35,7 @@ from control_plane.schemas import (
     SessionSummary,
     Turn,
 )
-from expectation_agent.schema import InterviewExpectation
+from evaluation_agent.expectations import ExpectationItem, fixed_items
 
 
 def _utcnow() -> str:
@@ -41,9 +46,41 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
+#: Bytes of randomness behind an invite token. 32 bytes is what the plan
+#: specifies and what `token_urlsafe` needs to be worth guessing at: the token
+#: is the only credential on the public link route, so its entropy is the whole
+#: of that route's security.
+LINK_TOKEN_BYTES = 32
+
+
+def _new_token() -> str:
+    return secrets.token_urlsafe(LINK_TOKEN_BYTES)
+
+
 def _parse_ts(value: str) -> datetime:
     """Read a stored ISO timestamp back as an aware datetime."""
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _readiness_of(report_json: str | None) -> int | None:
+    """The stored report's readiness index, or None when there is no report."""
+    if not report_json:
+        return None
+    value = json.loads(report_json).get("readiness_index")
+    return int(value) if value is not None else None
+
+
+def _competency_scores_of(report_json: str | None) -> dict[str, float | None] | None:
+    """The stored report's per-competency scores, or None when there is no report.
+
+    Read from the report rather than recomputed: a report is a fixed artifact
+    with its provenance stamped on it, and a history view that re-derived the
+    numbers could disagree with the document a trainer is holding.
+    """
+    if not report_json:
+        return None
+    criteria = json.loads(report_json).get("criteria") or []
+    return {str(c["id"]): c.get("score") for c in criteria if isinstance(c, dict) and c.get("id")}
 
 
 class InterviewRepository:
@@ -81,9 +118,9 @@ class InterviewRepository:
                     id, job_title, jd, skills_required,
                     job_location_type, experience_level, company_type,
                     mode, location, department, manager_level, language, proctoring,
-                    persona_notes, role_facts, report_sections,
+                    persona_notes, role_facts, expectations, report_sections,
                     status, ai_persona, config, scheduled_at, metadata, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           'scheduled', ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -102,6 +139,7 @@ class InterviewRepository:
                     req.proctoring,
                     req.persona_notes,
                     json.dumps([f.model_dump() for f in req.role_facts]),
+                    json.dumps([e.model_dump() for e in req.expectations]),
                     json.dumps(req.report_sections),
                     ai_persona_json,
                     config_json,
@@ -142,6 +180,40 @@ class InterviewRepository:
             return None
         return self._row_to_response(row)
 
+    def update(self, interview_id: str, req: InterviewUpdateRequest) -> InterviewResponse | None:
+        """Apply the fields present on `req`, returning the stored record.
+
+        One statement, for the fields the caller actually sent: a `None` field
+        means "not editing this", so writing it back would turn every partial
+        edit into a full overwrite of both columns. `updated_at` is always in
+        the SET clause — it is what makes the clause non-empty whatever else is
+        present, so there is no branch here for a body that edits nothing
+        (`InterviewUpdateRequest` refuses one).
+
+        The JSON encoding is `create`'s, because the reader is `get`'s.
+        """
+        assignments: builtins.list[str] = []
+        values: builtins.list[Any] = []
+
+        if req.expectations is not None:
+            assignments.append("expectations = ?")
+            values.append(json.dumps([e.model_dump() for e in req.expectations]))
+        if req.report_sections is not None:
+            assignments.append("report_sections = ?")
+            values.append(json.dumps(req.report_sections))
+
+        assignments.append("updated_at = ?")
+        values.append(_utcnow())
+
+        with self.conn:
+            cursor = self.conn.execute(
+                f"UPDATE interviews SET {', '.join(assignments)} WHERE id = ?",
+                (*values, interview_id),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self.get(interview_id)
+
     def list(self, status: str | None = None) -> builtins.list[InterviewResponse]:
         """Return interviews, newest first, optionally filtered by status."""
         if status:
@@ -179,6 +251,14 @@ class InterviewRepository:
             proctoring=row["proctoring"],
             persona_notes=row["persona_notes"],
             role_facts=[RoleFact(**f) for f in json.loads(row["role_facts"])],
+            # An empty list can only be a row written before expectations
+            # existed (2026-09-13): every interview created since carries at
+            # least the fixed items, because `InterviewCreateRequest` restores
+            # any the caller left out. Filling it in here rather than at each
+            # reader keeps "an interview always has the full checklist" true.
+            expectations=(
+                [ExpectationItem(**e) for e in json.loads(row["expectations"])] or fixed_items()
+            ),
             report_sections={**REPORT_SECTIONS, **json.loads(row["report_sections"])},
             status=row["status"],
             config=config,
@@ -189,41 +269,158 @@ class InterviewRepository:
             metadata=json.loads(row["metadata"]),
         )
 
-    def save_expectation(self, expectation: InterviewExpectation, model_used: str) -> None:
-        """Persist an expectation document for an interview."""
+    # ------------------------------------------------------------------
+    # Invite links
+    #
+    # Minting and revoking only. Whether a link may still be redeemed is the
+    # handler's decision, made once, at the moment a session is created -- so
+    # these methods return the row whatever state it is in and never filter on
+    # `expires_at`. A store that hid an expired link would make "unknown token"
+    # and "expired token" the same answer, and the API owes the two of them
+    # different status codes.
+    # ------------------------------------------------------------------
+
+    def create_link(self, interview_id: str, expires_at: datetime) -> InterviewLinkResponse:
+        """Mint a link for an interview. Several per interview are allowed."""
+        token = _new_token()
         now = _utcnow()
         with self.conn:
             self.conn.execute(
                 """
-                INSERT INTO interview_expectations (
-                    id, interview_id, expectation_version, expectation_json,
-                    model_used, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(interview_id) DO UPDATE SET
-                    expectation_json = excluded.expectation_json,
-                    model_used = excluded.model_used,
-                    created_at = excluded.created_at
+                INSERT INTO interview_links (token, interview_id, expires_at, created_at)
+                VALUES (?, ?, ?, ?)
                 """,
-                (
-                    _new_id(),
-                    expectation.interview_id,
-                    expectation.expectation_version,
-                    expectation.model_dump_json(exclude={"raw_model_output"}),
-                    model_used,
-                    now,
-                ),
+                (token, interview_id, expires_at.astimezone(UTC).isoformat(), now),
             )
+        link = self.get_link(token)
+        if link is None:  # pragma: no cover - the insert above just succeeded
+            raise RuntimeError(f"link {token} vanished after insert")
+        return link
 
-    def get_expectation(self, interview_id: str) -> InterviewExpectation | None:
-        """Return the stored expectation, or None when not generated yet."""
+    def get_link(self, token: str) -> InterviewLinkResponse | None:
+        """Return one link whatever its state, or None when the token is unknown."""
         row = self.conn.execute(
-            "SELECT * FROM interview_expectations WHERE interview_id = ?", (interview_id,)
+            "SELECT * FROM interview_links WHERE token = ?", (token,)
         ).fetchone()
         if not row:
             return None
-        data = json.loads(row["expectation_json"])
-        data["raw_model_output"] = None
-        return InterviewExpectation.model_validate(data)
+        return InterviewLinkResponse(
+            token=row["token"],
+            interview_id=row["interview_id"],
+            expires_at=_parse_ts(row["expires_at"]),
+            revoked_at=(_parse_ts(row["revoked_at"]) if row["revoked_at"] else None),
+            created_at=_parse_ts(row["created_at"]),
+        )
+
+    def revoke_link(self, token: str) -> bool:
+        """Mark a link revoked. True when a live link was revoked.
+
+        The first revocation wins: `revoked_at` is the instant the link stopped
+        working, and a second call must not move it forward.
+        """
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE interview_links SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL",
+                (_utcnow(), token),
+            )
+        return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Participants
+    # ------------------------------------------------------------------
+
+    def upsert_participant(
+        self, *, name: str, email: str, user_id: str | None = None
+    ) -> ParticipantResponse:
+        """Create or refresh the row for this email, moving `last_seen_at`.
+
+        `COALESCE(?, user_id)` on the update is the whole of the `user_id`
+        rule: a SkillBrew id attaches the first time one is supplied for an
+        email and is never cleared by a later session opened on a plain link.
+        The name is overwritten, because the most recent form value is the
+        current one and there is nothing else to arbitrate between two spellings.
+        """
+        now = _utcnow()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO participants (id, email, name, user_id, created_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(email) DO UPDATE SET
+                    name = excluded.name,
+                    user_id = COALESCE(excluded.user_id, participants.user_id),
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (_new_id(), email, name, user_id or None, now, now),
+            )
+        row = self.conn.execute("SELECT * FROM participants WHERE email = ?", (email,)).fetchone()
+        if row is None:  # pragma: no cover - the upsert above just succeeded
+            raise RuntimeError(f"participant {email} vanished after upsert")
+        return self._row_to_participant(row)
+
+    def get_participant(self, participant_id: str) -> ParticipantResponse | None:
+        """Return one participant, or None when the id is unknown."""
+        row = self.conn.execute(
+            "SELECT * FROM participants WHERE id = ?", (participant_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return self._row_to_participant(row)
+
+    def list_participant_sessions(
+        self, participant_id: str
+    ) -> builtins.list[ParticipantSessionRow]:
+        """Every session this person has held, across every interview, newest first.
+
+        The report body is parsed here rather than denormalised into columns the
+        way `readiness_index` is: the four competency scores are a list inside
+        the report, this is the one view that wants them, and one person's
+        history is a handful of rows. `session_reports` already denormalises
+        what the *per-interview* list view needs.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT s.id, s.interview_id, s.archetype, s.modality, s.status,
+                   s.started_at, s.ended_at,
+                   i.job_title AS job_title,
+                   p.report_json AS report_json
+            FROM sessions s
+            JOIN interviews i ON i.id = s.interview_id
+            LEFT JOIN session_reports p ON p.session_id = s.id
+            WHERE s.participant_id = ?
+            ORDER BY s.started_at DESC
+            """,
+            (participant_id,),
+        ).fetchall()
+        return [
+            ParticipantSessionRow(
+                session_id=r["id"],
+                interview_id=r["interview_id"],
+                job_title=r["job_title"],
+                archetype=r["archetype"],
+                modality=r["modality"],
+                status=r["status"],
+                started_at=_parse_ts(r["started_at"]),
+                ended_at=(_parse_ts(r["ended_at"]) if r["ended_at"] else None),
+                readiness_index=_readiness_of(r["report_json"]),
+                competency_scores=_competency_scores_of(r["report_json"]),
+            )
+            for r in rows
+        ]
+
+    @staticmethod
+    def _row_to_participant(row: sqlite3.Row) -> ParticipantResponse:
+        return ParticipantResponse(
+            id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            user_id=row["user_id"] or "",
+            created_at=_parse_ts(row["created_at"]),
+            last_seen_at=_parse_ts(row["last_seen_at"]),
+        )
+
+    def _participant_for_session(self, participant_id: str | None) -> ParticipantResponse | None:
+        return self.get_participant(participant_id) if participant_id else None
 
     # ------------------------------------------------------------------
     # Virtual candidates
@@ -326,6 +523,7 @@ class InterviewRepository:
         planned_minutes: int,
         opening_line: str,
         modality: str = "text",
+        participant_id: str | None = None,
     ) -> SessionResponse:
         """Open a session, seeding turn 0 with the persona's opening line.
 
@@ -340,8 +538,8 @@ class InterviewRepository:
                 """
                 INSERT INTO sessions (
                     id, interview_id, candidate_id, archetype, status, modality,
-                    planned_minutes, opening_line, started_at, created_at
-                ) VALUES (?, ?, ?, ?, 'live', ?, ?, ?, ?, ?)
+                    planned_minutes, opening_line, participant_id, started_at, created_at
+                ) VALUES (?, ?, ?, ?, 'live', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -351,6 +549,7 @@ class InterviewRepository:
                     modality,
                     planned_minutes,
                     opening_line,
+                    participant_id,
                     now,
                     now,
                 ),
@@ -412,6 +611,7 @@ class InterviewRepository:
                 for t in turns
             ],
             recording=(self._row_to_recording_meta(recording_row) if recording_row else None),
+            participant=self._participant_for_session(row["participant_id"]),
         )
 
     def list_sessions(self, interview_id: str) -> builtins.list[SessionSummary]:
@@ -452,6 +652,7 @@ class InterviewRepository:
                 has_recording=bool(r["has_recording"]),
                 has_report=bool(r["has_report"]),
                 analysis_status=r["analysis_status"],
+                participant=self._participant_for_session(r["participant_id"]),
             )
             for r in rows
         ]

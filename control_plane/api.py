@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -44,16 +45,17 @@ from control_plane.ports import (
     AnalysisWorkflowStore,
     CandidateStore,
     EnrollmentStore,
-    ExpectationStore,
-    ExpectationWorkflowStore,
     IngestConflictError,
     IngestWorkflowStore,
+    InterviewEditor,
     InterviewStore,
+    LinkSessionStore,
+    LinkStore,
+    ParticipantStore,
     RecordingStore,
     RecordingWorkflowStore,
     ReportWorkflowStore,
     SessionStore,
-    SessionWorkflowStore,
     TurnWorkflowStore,
 )
 from control_plane.repository import InterviewRepository
@@ -61,9 +63,17 @@ from control_plane.schemas import (
     AnalysisMeta,
     CandidateEnrollRequest,
     CustomPersonaSpec,
+    ExpectationsClassifyRequest,
+    ExpectationsDraftRequest,
     IngestReceipt,
     InterviewCreateRequest,
+    InterviewLinkCreateRequest,
+    InterviewLinkResponse,
     InterviewResponse,
+    InterviewUpdateRequest,
+    ParticipantResponse,
+    ParticipantSessionRow,
+    PublicLinkResponse,
     RealtimeCredentialResponse,
     RecordingMeta,
     RoleFact,
@@ -77,9 +87,13 @@ from control_plane.schemas import (
     TurnRequest,
     VoiceCapabilityResponse,
 )
+from evaluation_agent.expectations import (
+    ExpectationClassification,
+    ExpectationItem,
+    ExpectationsAgent,
+)
 from evaluation_agent.role_facts import RoleFactsAgent
-from expectation_agent.agent import InterviewExpectationAgent
-from expectation_agent.schema import InterviewExpectation
+from evaluation_agent.rubric import determine_interview_type
 from llm.base import ModelError, RealtimeBroker
 from llm.factory import (
     build_audio_model,
@@ -97,9 +111,9 @@ def get_repo() -> InterviewRepository:
     return InterviewRepository(init_db())
 
 
-def get_expectation_agent() -> InterviewExpectationAgent:
-    """Build the expectation agent from environment configuration."""
-    return InterviewExpectationAgent()
+def get_expectations_agent() -> ExpectationsAgent:
+    """Build the expectations agent from environment configuration."""
+    return ExpectationsAgent()
 
 
 #: Observation is extraction, not composition. Warmth here invents turns.
@@ -125,6 +139,25 @@ def get_interview(interview_id: str, repo: InterviewStore = Depends(get_repo)) -
     return interview
 
 
+@router.patch("/interviews/{interview_id}", response_model=InterviewResponse)
+def update_interview(
+    interview_id: str,
+    req: InterviewUpdateRequest,
+    repo: InterviewEditor = Depends(get_repo),
+) -> InterviewResponse:
+    """Edit an interview's expectation checklist and report configuration.
+
+    The wizard saves the interview on step 1 and edits it on step 2, so this is
+    the only write after creation. `InterviewEditor` rather than
+    `InterviewStore`: this handler must be able to rewrite an interview, and
+    nothing that merely reads one should acquire that through a shared port.
+    """
+    updated = repo.update(interview_id, req)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+    return updated
+
+
 @router.get("/interviews", response_model=list[InterviewResponse])
 def list_interviews(
     status: str | None = None, repo: InterviewStore = Depends(get_repo)
@@ -133,51 +166,47 @@ def list_interviews(
     return repo.list(status=status)
 
 
-@router.post(
-    "/interviews/{interview_id}/expectation",
-    response_model=InterviewExpectation,
-    status_code=status.HTTP_201_CREATED,
-)
-async def generate_expectation(
-    interview_id: str,
-    repo: ExpectationWorkflowStore = Depends(get_repo),
-    agent: InterviewExpectationAgent = Depends(get_expectation_agent),
-) -> InterviewExpectation:
-    """Generate and persist the interviewer expectation document."""
-    interview = repo.get(interview_id)
-    if not interview:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+@router.post("/expectations/draft", response_model=list[ExpectationItem])
+async def draft_expectations(
+    req: ExpectationsDraftRequest,
+    agent: ExpectationsAgent = Depends(get_expectations_agent),
+) -> list[ExpectationItem]:
+    """Draft job-grounded expectation items; calls the model.
 
+    The same shape of call as ``POST /role-facts``, and for the same reason:
+    the wizard shows the drafts, the operator keeps the ones that fit, and
+    `POST /interviews` stores what survived. Nothing here is persisted, and the
+    four competencies are not returned — they are fixed and the caller already
+    knows them.
+    """
     try:
-        expectation = await agent.generate(
-            interview_id=interview.id,
-            job_title=interview.job_title,
-            jd=interview.jd,
-            skills_required=interview.skills_required,
-            job_location_type=interview.job_location_type,
-            experience_level=interview.experience_level,
-            company_type=interview.company_type,
-            duration_minutes=interview.config.duration_minutes,
-            mode=interview.mode,
-            has_resume=False,  # resume is attached later when candidate is assigned
+        return await agent.draft(
+            job_title=req.job_title,
+            jd=req.jd,
+            skills_required=req.skills_required,
+            location=req.location,
         )
     except ModelError as exc:
-        # A generation failure is the provider's answer, not a bug in this
-        # service — surface it as a gateway error so the UI can say so plainly.
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    repo.save_expectation(expectation, model_used=agent.model)
-    return expectation
 
 
-@router.get("/interviews/{interview_id}/expectation", response_model=InterviewExpectation)
-def get_expectation(
-    interview_id: str, repo: ExpectationStore = Depends(get_repo)
-) -> InterviewExpectation:
-    """Fetch the stored expectation for an interview."""
-    expectation = repo.get_expectation(interview_id)
-    if not expectation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="expectation not found")
-    return expectation
+@router.post("/expectations/classify", response_model=ExpectationClassification)
+async def classify_expectation(
+    req: ExpectationsClassifyRequest,
+    agent: ExpectationsAgent = Depends(get_expectations_agent),
+) -> ExpectationClassification:
+    """Suggest which competency a manager's own item belongs under.
+
+    A suggestion the wizard pre-selects and the manager may override — the only
+    thing the model decides about a custom item. An answer outside the four
+    competencies comes back as the default with a blank reason rather than an
+    error, because losing the whole add-item interaction over a bad label is
+    the worse failure.
+    """
+    try:
+        return await agent.classify(text=req.text)
+    except ModelError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +272,16 @@ def list_trait_dimensions() -> dict[str, object]:
     return trait_dimensions.dimension_catalog()
 
 
+def _enabled_expectations(interview: InterviewResponse) -> list[dict[str, Any]]:
+    """The expectation items a persona should be cast against.
+
+    Enabled only: an item the manager switched off is not something this
+    interview is measured on, so casting a persona to provoke it would put
+    material in the room that no report reads.
+    """
+    return [item.model_dump() for item in interview.expectations if item.enabled]
+
+
 def _compose_custom_persona(spec: CustomPersonaSpec) -> trait_dimensions.CustomPersona:
     """Compose one custom persona, turning a bad spec into a 422.
 
@@ -302,10 +341,6 @@ async def enroll_candidates(
         composed = _compose_custom_persona(spec)
         casts.append((composed.key, composed.archetype, composed.human_traits))
 
-    # The expectation grounds personas in the flags the interviewer is watching
-    # for. Optional — enrollment must not require it.
-    expectation = repo.get_expectation(interview_id)
-
     results: list[VirtualCandidate] = []
     # Independent generations converge on the same names, which makes a training
     # set confusing. Feed each cast the names already taken.
@@ -327,10 +362,12 @@ async def enroll_candidates(
                 company_type=interview.company_type,
                 job_location_type=interview.job_location_type,
                 duration_minutes=interview.config.duration_minutes,
-                interview_type=(expectation.interview_type if expectation else "mixed"),
+                interview_type=determine_interview_type(
+                    interview.experience_level, interview.company_type
+                ),
                 language=interview.language,
                 persona_notes=interview.persona_notes,
-                expectation=expectation,
+                expectations=_enabled_expectations(interview),
                 seed_override=(f"{req.seed_prefix}:{key}" if req.seed_prefix else None),
                 avoid_names=taken,
                 human_traits=human_traits,
@@ -383,33 +420,37 @@ def get_candidate(candidate_id: str, repo: CandidateStore = Depends(get_repo)) -
     return candidate
 
 
-def require_engine_secret(authorization: str | None = Header(default=None)) -> None:
-    """Admit the Go engine, and only it, to the engine-facing routes.
+def require_shared_secret(authorization: str | None = Header(default=None)) -> None:
+    """Admit only a holder of the shared secret to the privileged routes.
+
+    Named ``require_engine_secret`` until 2026-09-13, when the link minter and
+    the participant-history routes went behind it: the engine is no longer the
+    only caller, and a gate named after one of its users invites the next
+    author to decide their route is "not an engine route" and leave it open.
 
     The engine and this service share one secret (``CONTROL_PLANE_SHARED_SECRET``
-    in both env files; the same SSM parameter in production) and the engine
-    sends it as a bearer token. An unset secret refuses rather than admits:
-    the contract is the persona's whole runtime brief and the ingest rewrites a
-    session's transcript, and a deployment that forgot the secret should find
-    out from a 503 in the engine's log, not from an open endpoint.
+    in both env files; the same SSM parameter in production) and send it as a
+    bearer token. An unset secret refuses rather than admits: the contract is
+    the persona's whole runtime brief, the ingest rewrites a session's
+    transcript, and the participant routes expose one named person's history —
+    a deployment that forgot the secret should find out from a 503 in its
+    caller's log, not from an open endpoint.
     """
     expected = os.getenv("CONTROL_PLANE_SHARED_SECRET", "")
     if not expected:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="engine access is not configured: CONTROL_PLANE_SHARED_SECRET is unset",
+            detail="privileged access is not configured: CONTROL_PLANE_SHARED_SECRET is unset",
         )
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not secrets.compare_digest(token.strip(), expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="engine credential rejected"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="credential rejected")
 
 
 @router.get(
     "/candidates/{candidate_id}/engine-contract",
     response_model=EngineContract,
-    dependencies=[Depends(require_engine_secret)],
+    dependencies=[Depends(require_shared_secret)],
 )
 def get_engine_contract(
     candidate_id: str, repo: CandidateStore = Depends(get_repo)
@@ -424,7 +465,7 @@ def get_engine_contract(
 @router.post(
     "/sessions/{session_id}/ingest",
     response_model=IngestReceipt,
-    dependencies=[Depends(require_engine_secret)],
+    dependencies=[Depends(require_shared_secret)],
 )
 def ingest_session(
     session_id: str,
@@ -486,6 +527,120 @@ def delete_candidate(candidate_id: str, repo: CandidateStore = Depends(get_repo)
 
 
 # ---------------------------------------------------------------------------
+# Invite links and participants
+#
+# SkillBrew accounts create interviews; anyone holding a link takes them. The
+# minter and the two history routes sit behind the shared secret until the
+# portal's own auth reaches this service: nothing on the interview routes is
+# authenticated today, and a link minter must not be the first open one.
+# `GET /links/{token}` is the single public route, and answers only what a
+# landing form needs to render.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/interviews/{interview_id}/links",
+    response_model=InterviewLinkResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_shared_secret)],
+)
+def create_link(
+    interview_id: str,
+    req: InterviewLinkCreateRequest,
+    repo: LinkSessionStore = Depends(get_repo),
+) -> InterviewLinkResponse:
+    """Mint a link that opens this interview until it expires.
+
+    Several links per interview are allowed on purpose — a cohort in March and
+    another in June — and one link serves any number of takers.
+    """
+    if not repo.get(interview_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+    return repo.create_link(interview_id, req.expires_at)
+
+
+@router.delete(
+    "/links/{token}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_shared_secret)],
+)
+def revoke_link(token: str, repo: LinkStore = Depends(get_repo)) -> None:
+    """Revoke a link. 404 when the token is unknown or already revoked."""
+    if not repo.revoke_link(token):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="no live link with that token"
+        )
+
+
+@router.get("/links/{token}", response_model=PublicLinkResponse)
+def get_link(token: str, repo: LinkSessionStore = Depends(get_repo)) -> PublicLinkResponse:
+    """What the landing form needs, for anyone holding the token — **public**.
+
+    Four fields, and nothing else: this endpoint answers to whoever has the
+    link, so the job description, the personas and the expectation checklist
+    are all deliberately absent from it.
+
+    404 for an unknown token, 410 for one that has expired or been revoked —
+    the holder of a link that ran out is told it ran out, rather than that it
+    never existed. The final accept is `secrets.compare_digest` so the decision
+    to admit never branches on how much of the token matched; the lookup itself
+    is an index probe on 32 bytes of randomness.
+    """
+    link = repo.get_link(token)
+    if link is None or not secrets.compare_digest(link.token, token):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="link not found")
+    if link.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="this link was revoked")
+    if link.expires_at <= datetime.now(UTC):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="this link has expired")
+
+    interview = repo.get(link.interview_id)
+    if interview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+    return PublicLinkResponse(
+        job_title=interview.job_title,
+        duration_minutes=interview.config.duration_minutes,
+        language=interview.language,
+        expires_at=link.expires_at,
+    )
+
+
+@router.get(
+    "/participants/{participant_id}",
+    response_model=ParticipantResponse,
+    dependencies=[Depends(require_shared_secret)],
+)
+def get_participant(
+    participant_id: str, repo: ParticipantStore = Depends(get_repo)
+) -> ParticipantResponse:
+    """One person who has taken at least one interview here."""
+    participant = repo.get_participant(participant_id)
+    if participant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="participant not found")
+    return participant
+
+
+@router.get(
+    "/participants/{participant_id}/sessions",
+    response_model=list[ParticipantSessionRow],
+    dependencies=[Depends(require_shared_secret)],
+)
+def list_participant_sessions(
+    participant_id: str, repo: ParticipantStore = Depends(get_repo)
+) -> list[ParticipantSessionRow]:
+    """This person's sessions across every interview, newest first.
+
+    404 rather than an empty list for an unknown id: unlike
+    `GET /interviews/{id}/sessions`, "nothing here" and "no such person" are
+    different answers when the id identifies a named individual, and the caller
+    is asking about one.
+    """
+    if repo.get_participant(participant_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="participant not found")
+    return repo.list_participant_sessions(participant_id)
+
+
+# ---------------------------------------------------------------------------
 # Live text sessions
 #
 # The interviewer-training loop: a human manager types, a cast persona answers,
@@ -500,22 +655,68 @@ def get_session_agent() -> CandidateSessionAgent:
     return CandidateSessionAgent()
 
 
+def _interview_id_from_token(repo: LinkStore, req: SessionCreateRequest) -> str:
+    """Resolve the interview a link opens, enforcing the expiry at this moment.
+
+    Expiry is checked here and nowhere else. There is no sweeper and no
+    background job: a link is a row with an `expires_at`, and the only moment
+    that matters is the one where someone tries to start an interview with it.
+    410 rather than 404 for an expired or revoked token, because the holder of
+    a link that has run out should be told that it ran out, not that it never
+    existed.
+    """
+    link = repo.get_link(req.invite_token or "")
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="link not found")
+    if link.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="this link was revoked")
+    if link.expires_at <= datetime.now(UTC):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="this link has expired")
+    if req.interview_id and req.interview_id != link.interview_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="interview_id does not match the link's interview",
+        )
+    return link.interview_id
+
+
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
 async def start_session(
     req: SessionCreateRequest,
-    repo: SessionWorkflowStore = Depends(get_repo),
+    repo: LinkSessionStore = Depends(get_repo),
     agent: VirtualCandidateAgent = Depends(get_candidate_agent),
 ) -> SessionResponse:
-    """Open a session against one persona, casting it first if it is not enrolled."""
-    interview = repo.get(req.interview_id)
+    """Open a session against one persona, casting it first if it is not enrolled.
+
+    Two ways in, one handler. A console or portal caller names the interview; a
+    link holder sends ``invite_token`` and the interview is resolved from the
+    link, with the expiry enforced at that moment. Everything after that — the
+    persona lookup, the on-the-spot cast, the session row — is the same code on
+    both paths, because two entry points that could disagree about how a
+    session is opened eventually will.
+    """
+    interview_id = _interview_id_from_token(repo, req) if req.invite_token else req.interview_id
+    interview = repo.get(interview_id)
     if not interview:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview not found")
+
+    # The participant is upserted before the session is cast, so the row exists
+    # whatever the casting call does next, and a taker whose provider call
+    # failed is still a known person the next time they try.
+    participant = (
+        repo.upsert_participant(
+            name=req.participant.name, email=req.participant.email, user_id=req.user_id
+        )
+        if req.participant
+        else None
+    )
+
     # Look in the database before the catalog. An already-enrolled persona is
     # fully described by its stored record, and a custom-composed one is only
     # ever in the database — its archetype was validated at enrollment and
     # deliberately not registered, so requiring a catalog entry here would make
     # every composed persona unusable the moment the process restarted.
-    candidate = repo.get_candidate_by_archetype(req.interview_id, req.archetype)
+    candidate = repo.get_candidate_by_archetype(interview_id, req.archetype)
     if candidate is None:
         if req.archetype not in archetype_catalog.ARCHETYPES:
             raise HTTPException(
@@ -526,13 +727,12 @@ async def start_session(
                 ),
             )
         # Cast the same way enrollment does. A persona cast here used to be
-        # grounded in nothing but the required skills — no expectation, a
+        # grounded in nothing but the required skills — no expectations, a
         # hardcoded interview type — so the "Create & chat" path produced a
         # measurably weaker persona than enrolling the identical archetype.
-        expectation = repo.get_expectation(req.interview_id)
         try:
             candidate = await agent.generate(
-                interview_id=req.interview_id,
+                interview_id=interview_id,
                 archetype_key=req.archetype,
                 job_title=interview.job_title,
                 jd=interview.jd,
@@ -541,11 +741,13 @@ async def start_session(
                 company_type=interview.company_type,
                 job_location_type=interview.job_location_type,
                 duration_minutes=interview.config.duration_minutes,
-                interview_type=(expectation.interview_type if expectation else "mixed"),
+                interview_type=determine_interview_type(
+                    interview.experience_level, interview.company_type
+                ),
                 language=interview.language,
                 persona_notes=interview.persona_notes,
-                expectation=expectation,
-                avoid_names=[c.name for c in repo.list_candidates(req.interview_id)],
+                expectations=_enabled_expectations(interview),
+                avoid_names=[c.name for c in repo.list_candidates(interview_id)],
                 voices=GEMINI_TTS_VOICES,
                 location=interview.location,
                 department=interview.department,
@@ -560,12 +762,13 @@ async def start_session(
         repo.save_candidate(candidate, model_used=agent.model)
 
     return repo.create_session(
-        interview_id=req.interview_id,
+        interview_id=interview_id,
         candidate_id=candidate.candidate_id,
         archetype=candidate.archetype,
         planned_minutes=req.planned_minutes,
         opening_line=candidate.engine_contract.opening_line,
         modality=req.modality,
+        participant_id=(participant.id if participant else None),
     )
 
 

@@ -58,12 +58,11 @@ def context_block(ctx: AnalysisContext) -> str:
         },
         "rubric_being_assessed": ctx.rubric,
     }
-    if ctx.interview_expectation:
-        # Framed as coverage context, never as scoring guidance: this document's
-        # own criteria describe assessing the candidate, and the subject here is
-        # the manager. Mislabelling it would invite the model to score the wrong
-        # person.
-        payload["what_this_interview_was_meant_to_cover"] = ctx.interview_expectation
+    if ctx.expectations:
+        # Coverage context. These are behaviours of the *interviewer*, which is
+        # the subject of this analysis — so unlike the document they replaced,
+        # naming them plainly cannot point the model at the wrong person.
+        payload["what_this_interview_was_meant_to_cover"] = ctx.expectations
 
     return json.dumps(payload, indent=2, ensure_ascii=False)
 

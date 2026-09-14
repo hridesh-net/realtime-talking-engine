@@ -2,7 +2,7 @@
 
 Found live: composing a custom persona against the real Gemini free-tier quota
 (20 requests/day) produced a raw, unhandled 500 with a stack trace — the three
-endpoints that call an LLM to cast a persona or generate an expectation never
+endpoints that call an LLM to cast a persona or draft an expectation never
 caught `ModelError`, unlike the realtime-voice mint endpoint two hundred lines
 away, which already has this exact pattern ("A mint failure is the vendor's
 answer, not a bug in this service"). These tests lock in the fix.
@@ -14,9 +14,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from candidate_agent.agent import VirtualCandidateAgent
-from control_plane.api import get_candidate_agent, get_expectation_agent
+from control_plane.api import get_candidate_agent, get_expectations_agent
 from control_plane.main import build_app
-from expectation_agent.agent import InterviewExpectationAgent
+from evaluation_agent.expectations import ExpectationsAgent
 from llm.base import ModelError, StructuredModel
 
 JOB = {
@@ -41,13 +41,17 @@ class FailingModel(StructuredModel):
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    # `get_repo()` builds its own connection from CONTROL_PLANE_DB, so the path
+    # handed to `build_app` is not the one the handlers use. Without this the
+    # suite reads and writes the developer's own `control_plane.db`.
+    monkeypatch.setenv("CONTROL_PLANE_DB", str(tmp_path / "test.db"))
     app = build_app(str(tmp_path / "test.db"))
     app.dependency_overrides[get_candidate_agent] = lambda: VirtualCandidateAgent(
         model=FailingModel("fake-1", 0.35)
     )
-    app.dependency_overrides[get_expectation_agent] = lambda: InterviewExpectationAgent(
-        model=FailingModel("fake-1", 0.2)
+    app.dependency_overrides[get_expectations_agent] = lambda: ExpectationsAgent(
+        model=FailingModel("fake-1", 0.1)
     )
     return TestClient(app)
 
@@ -104,9 +108,22 @@ def test_starting_a_session_surfaces_a_provider_failure_as_502(client, interview
     assert "RESOURCE_EXHAUSTED" in res.json()["detail"]
 
 
-def test_generating_the_expectation_document_surfaces_a_provider_failure_as_502(
-    client, interview_id
-):
-    res = client.post(f"/api/v1/interviews/{interview_id}/expectation")
+def test_drafting_expectations_surfaces_a_provider_failure_as_502(client):
+    res = client.post(
+        "/api/v1/expectations/draft",
+        json={
+            "job_title": JOB["job_title"],
+            "jd": JOB["jd"],
+            "skills_required": ["Fiber splicing"],
+        },
+    )
+    assert res.status_code == 502, res.text
+    assert "RESOURCE_EXHAUSTED" in res.json()["detail"]
+
+
+def test_classifying_a_custom_expectation_surfaces_a_provider_failure_as_502(client):
+    res = client.post(
+        "/api/v1/expectations/classify", json={"text": "Asks about a splice that failed."}
+    )
     assert res.status_code == 502, res.text
     assert "RESOURCE_EXHAUSTED" in res.json()["detail"]

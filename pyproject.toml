@@ -39,7 +39,7 @@ control_plane = ["migrations/*.sql"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["control_plane*", "expectation_agent*", "report_engine*", "analysis_agent*"]
+include = ["control_plane*", "report_engine*", "analysis_agent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -99,7 +99,6 @@ plugins = ["pydantic.mypy"]
 python_version = "3.11"
 files = [
     "control_plane",
-    "expectation_agent",
     "candidate_agent",
     "evaluation_agent",
     "analysis_agent",

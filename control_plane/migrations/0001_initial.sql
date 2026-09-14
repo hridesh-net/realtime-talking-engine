@@ -17,6 +17,16 @@
 -- mirror the Pydantic patterns and change with them, and `ALTER TYPE ... ADD
 -- VALUE` cannot run in the same transaction that then reads the new value —
 -- which is exactly what a migration in this runner would try to do.
+--
+-- **Reshaped 2026-09-13**, the same way the 2026-09-10 column renames reshaped
+-- it: this file is the *fresh-database* shape, and no deployment has ever run
+-- this schema in anger, so `interviews.expectations`, `participants`,
+-- `interview_links` and `sessions.participant_id` are written in here directly
+-- and `interview_expectations` / `interview_assignments` are simply gone.
+-- `0004_expectations_participants_links.sql` makes the same changes for a
+-- database that applied the previous version of this file, and every statement
+-- in it is guarded so it is a no-op on a database built from this one. 0002 and
+-- 0003 were applied as written and are never edited.
 
 CREATE TABLE interviews (
     id text PRIMARY KEY,
@@ -40,6 +50,10 @@ CREATE TABLE interviews (
     persona_notes text NOT NULL DEFAULT '',
     role_facts jsonb NOT NULL DEFAULT '[]'::jsonb
         CHECK (jsonb_typeof(role_facts) = 'array'),
+    -- The granular rubric under the four fixed competencies. The competencies
+    -- themselves are code (evaluation_agent/rubric.py) and are never stored.
+    expectations jsonb NOT NULL DEFAULT '[]'::jsonb
+        CHECK (jsonb_typeof(expectations) = 'array'),
     report_sections jsonb NOT NULL DEFAULT '{}'::jsonb
         CHECK (jsonb_typeof(report_sections) = 'object'),
     status text NOT NULL DEFAULT 'scheduled'
@@ -89,15 +103,35 @@ CREATE TABLE virtual_candidates (
 CREATE INDEX idx_candidates_interview ON virtual_candidates(interview_id);
 CREATE INDEX idx_candidates_verdict ON virtual_candidates(verdict);
 
-CREATE TABLE interview_expectations (
+-- An identity join key, NOT a user table: no password, no login, no roles.
+-- Rows are created or updated when a session starts and never by a signup.
+-- `email` is UNIQUE and stored normalised (trimmed, lower-cased) because the
+-- product rule is that the same email is the same person -- that is what makes
+-- one taker's sessions across five interviews readable as one history.
+CREATE TABLE participants (
     id text PRIMARY KEY,
-    interview_id text NOT NULL UNIQUE REFERENCES interviews(id) ON DELETE CASCADE,
-    expectation_version text NOT NULL DEFAULT 'v1.0',
-    expectation_json jsonb NOT NULL
-        CHECK (jsonb_typeof(expectation_json) = 'object'),
-    model_used text,
+    email text NOT NULL UNIQUE,
+    name text NOT NULL,
+    -- A SkillBrew account id when one is ever supplied for that email. Most
+    -- rows never have one, because most takers arrive on a link.
+    user_id text,
+    created_at timestamptz NOT NULL,
+    last_seen_at timestamptz NOT NULL
+);
+
+-- A link with an expiry. Several per interview are allowed (a cohort in March
+-- and one in June) and one link serves any number of takers, so the token is
+-- the primary key and the interview is the foreign key. Expiry is enforced
+-- when a session is created, not by a sweeper.
+CREATE TABLE interview_links (
+    token text PRIMARY KEY,
+    interview_id text NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+    expires_at timestamptz NOT NULL,
+    revoked_at timestamptz,
     created_at timestamptz NOT NULL
 );
+
+CREATE INDEX idx_links_interview ON interview_links(interview_id);
 
 CREATE TABLE sessions (
     id text PRIMARY KEY,
@@ -127,6 +161,12 @@ CREATE TABLE sessions (
     -- transcript, and re-reading it from the persona later would silently
     -- change the stored record if the persona were re-cast.
     opening_line text NOT NULL,
+    -- Who held this session. Nullable only for rows that predate participants
+    -- (2026-09-13) and for the ones the Go engine's ingest creates on its own.
+    -- A REAL foreign key, unlike candidate_id above: a participant row is never
+    -- rewritten in place, and deleting a person is a deliberate manual act that
+    -- should stop at their sessions rather than silently orphan them.
+    participant_id text REFERENCES participants(id),
     started_at timestamptz NOT NULL,
     ended_at timestamptz,
     created_at timestamptz NOT NULL
@@ -134,6 +174,7 @@ CREATE TABLE sessions (
 
 CREATE INDEX idx_sessions_interview ON sessions(interview_id);
 CREATE INDEX idx_sessions_status ON sessions(status);
+CREATE INDEX idx_sessions_participant ON sessions(participant_id);
 
 -- The transcript. (session_id, idx) is the primary key rather than a surrogate
 -- id: turn order is the conversation, and a duplicate index is a bug worth a
@@ -208,32 +249,6 @@ CREATE TABLE session_recordings (
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL
 );
-
--- Designed, not built: nothing reads or writes this table yet. It is the
--- shape an assignment takes when a SkillBrew user is given an interview to
--- conduct against a chosen persona -- the user's performance *as the
--- interviewer* is what gets assessed. Identity belongs to SkillBrew, which
--- owns the email invitation and always hands us an opaque user id; there is
--- no AI assignee, so there is no assignee-type column.
-CREATE TABLE interview_assignments (
-    id text PRIMARY KEY,
-    interview_id text NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
-    user_id text NOT NULL,
-    -- The persona assigned. No FOREIGN KEY, for the same reason
-    -- sessions.candidate_id has none: virtual_candidates.candidate_id is
-    -- derived from the cast seed, so re-casting with a seed_prefix rewrites
-    -- that primary key in place via repository.py's
-    -- `ON CONFLICT ... DO UPDATE SET candidate_id = excluded.candidate_id`.
-    candidate_id text NOT NULL,
-    status text NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'accepted', 'rejected', 'completed')),
-    accepted_at timestamptz,
-    completed_at timestamptz,
-    created_at timestamptz NOT NULL
-);
-
-CREATE INDEX idx_assignments_interview ON interview_assignments(interview_id);
-CREATE INDEX idx_assignments_user ON interview_assignments(user_id);
 
 -- Legacy. Written only at creation when mode = 'training_interviewer', by
 -- control_plane/persona.py. Superseded by virtual_candidates; never read back.

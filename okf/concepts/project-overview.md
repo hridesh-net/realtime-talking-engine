@@ -34,11 +34,11 @@ separate Go/Rust build and lives elsewhere.
 
 Six jobs:
 
-1. **Create interviews from a job spec** — title, JD, required skills, location type, experience level, company type. Candidate and interviewer are assigned later, not at creation.
-2. **Generate a deterministic interviewer expectation** — what must be covered, for how long, and how a good interviewer runs the session.
+1. **Create interviews from a job spec** — title, JD, required skills, location type, experience level, company type — plus the interview's configuration: the [expectation checklist](/concepts/contracts/interview-record.md) the interviewer will be measured against, and the report shape. An interview is a *fixture*, practised against by a cohort.
+2. **Hand it out** — [a link with an expiry](/concepts/contracts/links-and-participants.md). Takers open it, give a name and email, and become a `participant` keyed on that email, so one person's sessions across several interviews read as one history.
 3. **Enroll virtual candidates** — LLM-cast personas stored in the database that a *human* interviewer practises against. Each persona carries a ground-truth answer key used to grade the interviewer afterwards.
 4. **Run the interview** — a live session against one of those personas, **typed or spoken**, stored as a timestamped transcript. The live call is browser-to-vendor (Gemini Live WebSocket or OpenAI WebRTC); that audio never enters this service. A voice session's audio and camera are separately **recorded by the browser** and uploaded here in chunks, out of band from the call — see [Session recording](/concepts/contracts/session-recording.md) — and [Run an interview](/concepts/runbooks/run-an-interview.md). The Go engine in `engine/` is the second way to hold a spoken session; it fetches the persona from here and writes the finished session back — see [Session ingest](/concepts/contracts/session-ingest.md).
-5. **Analyse the recording** — an audio-native pass that listens to the session against the expectation it was held against and stores structured observations. Not a report: observations. See [Audio analysis agent](/concepts/subsystems/analysis-agent.md).
+5. **Analyse the recording** — an audio-native pass that listens to the session against the expectation items it was held against and stores structured observations. Not a report: observations. See [Audio analysis agent](/concepts/subsystems/analysis-agent.md).
 6. **Generate the report** — the manager's development report, composed in code from the transcript and the analysis, with one judged model call for the prose. See [Report engine](/concepts/subsystems/report-engine.md).
 
 Jobs 3 to 6 are the product's real point: this is a **training rig for
@@ -46,18 +46,24 @@ interviewers**, not an interviewing bot. The persona plays the candidate; the
 human plays the interviewer; the transcript is the evidence the report will be
 built from.
 
-⚠️ **Direction of travel.** BRD v3 flips the assessed subject from the candidate
-to the **hiring manager**, replaces the JD-driven rubric with a fixed one, and
-drops the pass/fail verdict entirely. `docs/PIVOT_PLAN_MANAGER_ASSESSMENT.md`
-is the plan; Phase 1 (the live text session) has landed on the *existing*
-domain model, and Phases 2–5 pivot the domain underneath it. Read the BRD before
-changing anything about what is scored or who is scored.
+⚠️ **Direction of travel (2026-09-13).** The interview is a **fixture**: created
+once by a SkillBrew user with the checklist the interviewer is measured on, the
+report shape, and a link with an expiry; taken by many people, each a
+**participant keyed by email** so one person's history across interviews reads
+as one. The four competencies are fixed; the granular items under them are the
+per-interview half. Read [The interview as a fixture](/concepts/interview-fixture.md)
+first, and the BRD before changing anything about what is scored or who is
+scored. Behind it: BRD v3 flipped the assessed subject to the **hiring
+manager** and dropped every hard limit; `docs/PIVOT_PLAN_MANAGER_ASSESSMENT.md`
+Phase 1 landed, task 7 (retire `expectation_agent/`) landed 2026-09-13, and
+Phase 2's role cards have not happened.
 
 ## What makes it unusual
 
 **Almost nothing important is left to the model.** Archetype, verdict, every
-trait score, scorecard weights, knowledge ceilings, phase durations, evaluation
-criteria and weights are all computed in code, seeded from
+trait score, scorecard weights, knowledge ceilings, the four competencies, their
+weights and the ids of every fixed expectation item are all computed in code,
+seeded from
 `SHA256(interview_id + archetype)`. The model writes only what has to be grounded
 in the specific job. See [Determinism split](/concepts/determinism.md) — it is
 the organizing principle of the whole repo.
@@ -74,14 +80,15 @@ it.** The boundary is deliberate: that repo owns the *how* of a live
 conversation, this one owns the *what* of an interview. See
 [the sibling-repo reference](/references/smart-interview-relationship.md).
 
-## Build state (2026-09-13, commit `4280481`)
+## Build state (2026-09-13, commit `4280481` plus WP1 of the expectations plan)
 
-* **Working**: interview creation, expectation generation and storage, **the v2.0 seven-archetype persona library** (each stressing one manager competency, with session beats and a stress profile), enrollment with re-cast and seeding, engine-contract and scorecard endpoints, **the live text session** (start, turn, end, stored transcript, browser chat view), **the live voice session** (Gemini Live over a WebSocket by default since 2026-09-01, OpenAI Realtime over WebRTC as the alternative; deterministic per-persona voice, transcript ingest), **browser-captured session recording** for voice sessions (dual-channel, chunked upload, playback and download in the UI — see [Session recording](/concepts/contracts/session-recording.md)), session listing per interview, the React console aligned to the SkillBrew.AI design mockup, the offline check suite, schema export.
+* **Working (2026-09-13)**: the **interview expectation checklist** and the **link + participant model** — plan `docs/INTERVIEW_EXPECTATIONS_PLAN.md`, WP1. An interview stores `expectations` (the rubric's own behaviours plus drafted and custom ones, each toggleable) and a re-keyed `report_sections`; `POST /expectations/{draft,classify}` are the two model calls behind the wizard; `POST /interviews/{id}/links` mints an expiring token and `POST /sessions` redeems it, upserting a `participant` keyed on email. `expectation_agent/` is deleted. **WP2 is what makes the report engine score an item and the renderer honour a section toggle — until then both are stored, not consumed.**
+* **Working**: interview creation, **the v2.0 seven-archetype persona library** (each stressing one manager competency, with session beats and a stress profile), enrollment with re-cast and seeding, engine-contract and scorecard endpoints, **the live text session** (start, turn, end, stored transcript, browser chat view), **the live voice session** (Gemini Live over a WebSocket by default since 2026-09-01, OpenAI Realtime over WebRTC as the alternative; deterministic per-persona voice, transcript ingest), **browser-captured session recording** for voice sessions (dual-channel, chunked upload, playback and download in the UI — see [Session recording](/concepts/contracts/session-recording.md)), session listing per interview, the React console aligned to the SkillBrew.AI design mockup, the offline check suite, schema export.
 * **Partly built**: the Phase 0 MVP defined by `interview_training_wizard (1).html`. **M1 shipped** — the full interview configuration (location, department, manager level, language, proctoring, operator notes, the fixed role-fact checklist and report-section toggles), plus `evaluation_agent/` holding the rubric and the role-fact checklist. M2 (hiring-manager cohort) and M4 (the report inside the portal) are open; M3 landed as `report_engine/` (next bullet but one). The M1–M4 plan is a machine-local Claude plan file, not tracked in this repo; the tracked specification is `interview_training_wizard (1).html` plus BRD v3.
 * **Partly built**: the persona library v2 — pivot plan Phase 3. The **catalog half shipped**; the behavioural half (`DisruptionSpec`, `candidate_questions`) did not. Session beats reach the live persona through the casting prompt, so they are a tendency, not a scripted event. (`ENGINE_CONTRACT_VERSION` is now **v1.3**, carrying the dual-model runtime fields — precompiled beliefs, stall phrases, pre-gate lexicon, unlock spec and frozen TTS voice.)
 * **Partly built**: the **Go live-session engine**. No longer parked. A live interview runs end to end — media in over a ticketed WebSocket, local speech detection, the Gemini Live Speaker, a pre-synthesized opening line in the contract's frozen voice — but nothing is *recorded on the engine side* yet, so nothing from an engine-run session is graded. (The control plane's browser-captured recording, for its own voice sessions, is a separate producer — see [Session recording](/concepts/contracts/session-recording.md) — and does not change this.) See [Live-session engine](/concepts/subsystems/engine.md) for what it does and does not do.
 * **Working (2026-08-27)**: the **evaluation layer** — pivot plan Phase 4, and no longer on the designed-not-built list. Deterministic signals, the analytical report, and as of 2026-08-27 the **judge pass**: one model call that writes the report's prose while `report_engine/validate.py` vetoes any quote that is not in the transcript verbatim and any sentence that states a number. The report a manager reads is two pages of plain language; the signal tables are behind a `detail` flag. Spec phase 7, the audio-derived English module, is still open. See [Report engine](/concepts/subsystems/report-engine.md).
-* **Designed, not built**: the manager-assessment domain model (role cards replacing job specs) — Phase 2; the manager cohort (roster, CSV upload, invites) — nowhere in the plan yet, though the design mockup shows it; interviewer assignment (`interview_assignments` table exists and is unused). On the engine side: the recorder and grading bundle (the `producer='engine'` half of [Session recording](/concepts/contracts/session-recording.md)), and the WebRTC transport. The independent ASR adapter (`vendors/openaitx`) and the harness context now exist and are wired in `engined`; `degraded:asr` is the unconfigured or post-failure path, not the only one.
+* **Designed, not built**: the manager-assessment domain model (role cards replacing job specs) — Phase 2; the cross-interview **insight report** (trends for one taker across personas) — the data model and the history route landed 2026-09-13, the view is its own work package; the console screens for expectations and links (WP3). `interview_assignments` is no longer on this list: it was designed and never written through two milestones, and was **dropped** on 2026-09-13 in favour of participants plus links. On the engine side: the recorder and grading bundle (the `producer='engine'` half of [Session recording](/concepts/contracts/session-recording.md)), and the WebRTC transport. The independent ASR adapter (`vendors/openaitx`) and the harness context now exist and are wired in `engined`; `degraded:asr` is the unconfigured or post-failure path, not the only one.
 * **Deployed**: `prod` is live at `https://interview.opsintelai.com` on one EC2 instance (see `infra/README.md`; the Terraform is in `infra/terraform/`). The control plane, the UI and the report engine work there; **`engined` has never started successfully on it** — it used to need a checked-in sample contract from a build-machine path that shipped in no artifact. That mode is gone (2026-09-12): `engined` now fetches every persona from the control plane over the shared secret and reports the finished session back, so the deployed stack needs `CONTROL_PLANE_SHARED_SECRET` in both env files (bootstrap writes it) and has not been re-verified since. The analysis agent needs `ffmpeg`/`ffprobe` on PATH, which the instance now installs.
 * **Storage (2026-09-10)**: SQLite is still the zero-config default, but a **PostgreSQL** schema and an **object-store port with two adapters** (filesystem + S3/MinIO) now exist beside it, and `check.sh` exercises both under Apple `container` (`migrations (postgres)`, `object store (minio)`). Postgres is the intended bridge to the runtime engine. See the 2026-09-10 `log.md` entries.
 * **Consumers (2026-09-10)**: two frontends now call this control plane over HTTP — the in-repo `ui/` Vite console, and the **SkillBrew Organization portal** (`skillbrew-organization`, a *separate* repo) as one "Interviewer Practice" sidebar tab. The portal drove a small **compatibility layer** in this repo: opt-in `CORS_ALLOWED_ORIGINS`, an error envelope beside `detail` (`status: false` + `message`), and a multipart door on the recording-chunk endpoint. See [REST API](/concepts/contracts/rest-api.md) and [Session recording](/concepts/contracts/session-recording.md).
@@ -91,9 +98,8 @@ conversation, this one owns the *what* of an interview. See
 
 ```
 llm/                 Provider port + Gemini/OpenAI adapters — the only vendor SDKs
-expectation_agent/   Expectation agent — persona, guardrails, fixed rubric
 candidate_agent/     Virtual candidate agent — archetype catalog, engine contract, text + voice sessions
-evaluation_agent/    Manager assessment — the fixed rubric and the role-fact checklist
+evaluation_agent/    Manager assessment — the fixed rubric, the role-fact checklist, the expectation items
 analysis_agent/      Audio analysis — INSTRUCTIONS.md, windowing harness, observations (not a report)
 report_engine/       Standalone: session bundle in, report out; imports nothing first-party
 control_plane/       FastAPI service, storage ports, SQLite adapter, Postgres migrations, object store

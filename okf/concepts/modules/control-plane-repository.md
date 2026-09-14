@@ -6,8 +6,10 @@ resource: /control_plane/repository.py
 tags: [repository, sqlite, storage, adapter]
 generated:
   by: claude-opus-5
-  at: "2026-09-12T00:00:00Z"
+  at: "2026-09-14T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-14T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
@@ -25,9 +27,10 @@ sources:
 ---
 # control_plane/repository.py
 
-783 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
-`ExpectationStore`, `CandidateStore`, `SessionStore`, `RecordingStore`,
-`AnalysisStore` and `ReportStore` structurally — it imports none of them.
+~1110 lines. One class, `InterviewRepository`, satisfying `InterviewStore`,
+`InterviewEditor`, `LinkStore`, `ParticipantStore`, `CandidateStore`,
+`SessionStore`, `RecordingStore`, `AnalysisStore`, `ReportStore` and
+`IngestStore` structurally — it imports none of them.
 
 # Schema
 
@@ -35,22 +38,31 @@ sources:
 def _utcnow() -> str          # datetime.now(UTC).isoformat()
 def _new_id() -> str          # str(uuid.uuid4())
 def _parse_ts(value: str) -> datetime   # the "Z" -> "+00:00" fix-up, one place
+def _new_token() -> str       # secrets.token_urlsafe(LINK_TOKEN_BYTES), 32 bytes
+def _readiness_of(report_json: str | None) -> int | None
+def _competency_scores_of(report_json: str | None) -> dict[str, float | None] | None
 
 class InterviewRepository:
     def __init__(self, conn: sqlite3.Connection, recordings_dir: str | Path | None = None)
     def create(self, req) -> InterviewResponse          # L36
     def get(self, interview_id) -> InterviewResponse | None
+    def update(self, interview_id, req) -> InterviewResponse | None   # None == unknown id
     def list(self, status=None) -> list[InterviewResponse]
     def _row_to_response(self, row) -> InterviewResponse    # L122
-    def save_expectation(self, expectation, model_used) -> None   # upsert
-    def get_expectation(self, interview_id) -> InterviewExpectation | None
+    def create_link(self, interview_id, expires_at) -> InterviewLinkResponse
+    def get_link(self, token) -> InterviewLinkResponse | None      # whatever its state
+    def revoke_link(self, token) -> bool                           # first revocation wins
+    def upsert_participant(self, *, name, email, user_id=None) -> ParticipantResponse
+    def get_participant(self, participant_id) -> ParticipantResponse | None
+    def list_participant_sessions(self, participant_id) -> list[ParticipantSessionRow]
     def save_candidate(self, candidate, model_used) -> None       # upsert
     def list_candidates(self, interview_id) -> list[VirtualCandidate]
     def get_candidate(self, candidate_id) -> VirtualCandidate | None
     def get_candidate_by_archetype(self, interview_id, archetype) -> VirtualCandidate | None
     def delete_candidate(self, candidate_id) -> bool
     def create_session(self, *, interview_id, candidate_id, archetype,
-                       planned_minutes, opening_line, modality="text") -> SessionResponse
+                       planned_minutes, opening_line, modality="text",
+                       participant_id=None) -> SessionResponse
     def get_session(self, session_id) -> SessionResponse | None    # now also joins session_recordings
     def append_turn(self, session_id, speaker, text) -> Turn
     def end_session(self, session_id, status="completed") -> SessionResponse | None
@@ -81,16 +93,21 @@ a return type of `builtins.list[...]` without shadowing.
 
 ## Writes
 
-* **`create`** — generates the uuid, serializes `skills_required`/`config`/`metadata` to JSON, and for `mode == "training_interviewer"` also generates the [legacy persona](/concepts/subsystems/control-plane.md) and writes an `ai_personas` row in the same transaction. The M1 configuration fields ride along: `location`/`department`/`manager_level` as plain text, `language`/`proctoring` as CHECK-constrained enums, `role_facts` and `report_sections` as JSON columns. Then re-reads via `get()` and raises if it vanished.
-* **`save_expectation`** — `ON CONFLICT(interview_id) DO UPDATE`; regenerating replaces.
-* **`save_candidate`** — `ON CONFLICT(interview_id, archetype) DO UPDATE`, refreshing `candidate_id` and `updated_at` but leaving `created_at` at the first cast.
+* **`create`** — generates the uuid, serializes `skills_required`/`config`/`metadata` to JSON, and for `mode == "training_interviewer"` also generates the [legacy persona](/concepts/subsystems/control-plane.md) and writes an `ai_personas` row in the same transaction. The M1 configuration fields ride along: `location`/`department`/`manager_level` as plain text, `language`/`proctoring` as CHECK-constrained enums, `role_facts`, `expectations` and `report_sections` as JSON columns. Then re-reads via `get()` and raises if it vanished.
+* **`update`** (2026-09-14) — one `UPDATE interviews SET ... WHERE id = ?` built from the fields present on `InterviewUpdateRequest`, using `create`'s JSON encoding because the reader is `get`'s. A `None` field is *not* written: it means "not editing this", and writing it back would turn every partial edit into a full overwrite of both columns. `updated_at = ?` is always appended, which is also what keeps the `SET` clause non-empty whatever else is present — so there is no branch here for a body that edits nothing, and none is needed (`InterviewUpdateRequest` refuses one). `cursor.rowcount == 0` is how a missing row becomes `None`, rather than a second `SELECT`. Then re-reads via `get()`. Note what it does **not** do: there is no merge with the stored checklist, so the validated body is the whole new value of each column it touches.
+* **`save_candidate`** — `ON CONFLICT(interview_id, archetype) DO UPDATE`, refreshing `candidate_id` and `updated_at` but leaving `created_at` at the first cast. Persists `model_dump_json(exclude={"raw_model_output"})`, so the raw draft never reaches disk.
 
-Both upserts persist `model_dump_json(exclude={"raw_model_output"})`, so the raw
-draft never reaches disk.
+## Links and participants (2026-09-13)
+
+* **`create_link`** — a fresh `secrets.token_urlsafe(32)`, then re-read. Nothing prevents several live links on one interview; that is the design.
+* **`get_link`** — returns the row **whatever its state**. Expiry and revocation are the handler's decision, once, at session creation; a store that hid them would collapse "unknown" and "expired" into one answer the API owes two status codes.
+* **`revoke_link`** — `UPDATE ... WHERE token = ? AND revoked_at IS NULL`, so the first revocation is the instant it stopped working and a second call returns `False` (the route answers 404).
+* **`upsert_participant`** — `ON CONFLICT(email) DO UPDATE` with `name = excluded.name` and `user_id = COALESCE(excluded.user_id, participants.user_id)`. The name follows the latest form because there is nothing to arbitrate between two spellings; the `user_id` attaches once and is never cleared by a later session opened on a plain link. `last_seen_at` moves, `created_at` does not.
+* **`list_participant_sessions`** — joins `interviews` for the job title and `session_reports` for the body, then parses the four competency scores out of the report JSON. Parsed rather than denormalised into columns: this is the one view that wants them, and one person's history is a handful of rows. The per-interview list view reads the denormalised columns instead.
 
 ## Sessions
 
-* **`create_session`** — writes the session row, and for `modality == "text"` **also turn 0** (the persona's opening line, `elapsed_ms = 0`) in the same transaction, then re-reads. A text session whose transcript did not open with what the persona said would misreport time-to-first-question. A **voice** session skips that insert: the persona says the line aloud and the browser reports it back, so writing it here too would duplicate turn 0. This branch is the one non-obvious thing in the method — `test_a_voice_session_does_not_prewrite_the_opening_line` pins it.
+* **`create_session`** — writes the session row (with `participant_id` when one was upserted), and for `modality == "text"` **also turn 0** (the persona's opening line, `elapsed_ms = 0`) in the same transaction, then re-reads. A text session whose transcript did not open with what the persona said would misreport time-to-first-question. A **voice** session skips that insert: the persona says the line aloud and the browser reports it back, so writing it here too would duplicate turn 0. This branch is the one non-obvious thing in the method — `test_a_voice_session_does_not_prewrite_the_opening_line` pins it.
 * **`append_turn`** — reads `started_at`, stamps `at = now`, computes `elapsed_ms` (clamped at 0), takes the next index as `COALESCE(MAX(idx) + 1, 0)`, inserts, and returns the built `Turn`. Raises `KeyError` for an unknown session; the handler has already 404'd by then, so this is a guard, not a path.
 * **`end_session`** — `UPDATE ... WHERE id = ? AND status = 'live'`. Re-ending a completed session updates nothing and returns the stored record unchanged, so `ended_at` never moves; an unknown id returns `None`.
 * **`get_session`** — joins the persona's `name` for display, falling back to `"(deleted persona)"` rather than failing, because a transcript outlives the persona that produced it. Also does a second `SELECT` against `session_recordings` and sets `recording=None` when there is no row — a text session, or a voice session where the browser has not yet posted a first chunk. `list_sessions` computes `has_recording` from `EXISTS(SELECT 1 FROM session_recordings ...)` in the same query as the turn count, rather than a second round trip per row.
@@ -115,23 +132,29 @@ repeat, `received_at` moves. SQLite DDL in `database._SCHEMA`; Postgres in
 
 ## Reads
 
-Candidates and expectations are rehydrated from the **JSON column alone** —
+Candidates are rehydrated from the **JSON column alone** —
 `VirtualCandidate.model_validate_json(row["persona_json"])`. The indexed columns
 (`verdict`, `archetype`, fingerprints) exist for querying and inspection, not for
-reconstruction, so they can in principle drift from the document. `get_expectation`
-additionally forces `raw_model_output = None` before validating.
+reconstruction, so they can in principle drift from the document.
 
 `_row_to_response` handles the `"Z"` → `"+00:00"` timestamp fix-up and computes
-`start_url` on the fly. Two M1 details live here: `role_facts` is rehydrated
-into `RoleFact` models from the JSON column, and `report_sections` is read as
+`start_url` on the fly. Three details live here: `role_facts` is rehydrated
+into `RoleFact` models from the JSON column; `report_sections` is read as
 `{**REPORT_SECTIONS, **stored}` — the code's defaults fill any key the row
 lacks, so a section added to the code later appears (at its default) on
-interviews created before it existed.
+interviews created before it existed; and **an empty `expectations` array is
+filled in with `fixed_items()`**, which can only be a row written before the
+column existed, since `InterviewCreateRequest` restores any fixed item a caller
+left out. Filling it in here rather than at each reader keeps "an interview
+always has the full checklist" true.
+
+`get_session` and `list_sessions` resolve `participant_id` through
+`get_participant`, so a session's row carries the person who sat it.
 
 ## Gotchas
 
-* **Foreign keys do not cascade.** `PRAGMA foreign_keys = ON` is never issued, so deleting an interview orphans its personas and expectation. This is a `database.py`-level fix.
+* **Foreign keys do not cascade.** `PRAGMA foreign_keys = ON` is never issued, so deleting an interview orphans its personas and links. This is a `database.py`-level fix; Postgres enforces them for real.
 * `with self.conn:` gives transaction-per-statement-group semantics, not a connection context manager — the connection is never closed here (`main.py` closes the startup one).
 * Every write re-serializes the whole persona document; a large training set is fine at this scale but this is not a partial-update design.
 * `create` writes `status='scheduled'` as a SQL literal; nothing ever transitions it.
-* `tests/test_session.py` exercises the session methods directly against `:memory:`. `tests/test_recording.py` does the same for the recording methods, with `recordings_dir=tmp_path` so no test writes to the real `RECORDINGS_DIR`. The interview, expectation, and candidate methods are still only covered indirectly.
+* `tests/test_session.py` exercises the session methods directly against `:memory:`. `tests/test_recording.py` does the same for the recording methods, with `recordings_dir=tmp_path` so no test writes to the real `RECORDINGS_DIR`. `tests/test_links_participants.py` covers the link and participant methods through the routes. The interview and candidate methods are still only covered indirectly.

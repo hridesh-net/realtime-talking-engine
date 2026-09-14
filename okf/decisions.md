@@ -45,8 +45,28 @@ status: draft
 * Vendor session shapes are verified live before they are believed. An offline
   WebSocket fake accepts whatever the adapter sends; only the vendor can reject
   a setup message, and it did.
+* **Amended 2026-09-13 — this service does own a link and a participant.** The
+  standing decision was that SkillBrew owns identity outright and this repo
+  never builds invites. The split is now: **SkillBrew accounts create
+  interviews; anyone with a link takes them; a SkillBrew user can take one
+  too.** Two things forced it, and neither is about ownership — expiry has to
+  be enforced by whatever creates the session, and cross-interview history has
+  to be joined where the sessions are. What did *not* change: no emails are
+  sent from here, there is no password, no login, no role and no user table;
+  `participants` is an identity join key on email. See
+  [Links and participants](/concepts/contracts/links-and-participants.md).
+* The four competencies are fixed configuration and are never a per-interview
+  setting; what varies is the granular list of behaviours under them. A model
+  may draft an item's wording and suggest which competency a typed one belongs
+  under. It may not add a competency, change a weight, or set `enabled`.
+* A `report_sections` key must name a section the renderer actually has. Seven
+  of the twelve mockup keys named nothing the engine measures and were dropped
+  rather than shipped as toggles that change nothing.
 * Keep runtime facts separate from repository facts. Global Headroom provider
   setup and persistent memory are operational state; tracked files document
   only the boundary and reproducible repository behavior.
 * Never place secrets, raw environment values, recordings, transcripts, or
   identifying user data in OKF. Refer to variable names and sanitized behavior.
+  That now explicitly includes a **participant's name and email**: they are
+  personal data of a named employee and are never copied into this bundle, a
+  log or a fixture.

@@ -21,11 +21,6 @@ export const listInterviews = () => request('/interviews')
 export const createInterview = (payload) =>
   request('/interviews', { method: 'POST', body: JSON.stringify(payload) })
 
-export const generateExpectation = (id) =>
-  request(`/interviews/${id}/expectation`, { method: 'POST' })
-
-export const getExpectation = (id) => request(`/interviews/${id}/expectation`)
-
 export const listArchetypes = () => request('/candidate-archetypes')
 
 export const listTraitDimensions = () => request('/trait-dimensions')

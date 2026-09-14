@@ -6,8 +6,10 @@ resource: /scripts/check.sh
 tags: [runbook, ci, lint, tests]
 generated:
   by: claude-opus-5
-  at: "2026-09-10T18:00:00Z"
+  at: "2026-09-14T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-14T00:00:00Z"
   - by: claude-fable-5-1
     at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
@@ -42,7 +44,7 @@ non-zero if any failed, with a summary list.
 |---|---|
 | `ruff check .` | The explicit rule set in `pyproject.toml` — pyflakes, imports, naming, py311 idioms, bugbear, docstrings, annotations, no relative imports |
 | `ruff format --check .` | One formatting standard. `okf/` and `docs/` are excluded in `pyproject.toml`: ruff reformats fenced Python blocks in markdown, and those are aligned for reading |
-| `mypy` | `disallow_untyped_defs`, no implicit Optional, pydantic plugin, over all four packages |
+| `mypy` | `disallow_untyped_defs`, no implicit Optional, pydantic plugin, over all six first-party packages |
 | `pytest tests/test_architecture.py` | [SOLID and layering](/concepts/architecture.md) |
 | `pytest tests/test_candidate_rubric.py` | Determinism, clamping, scorecard integrity, prompt byte-stability |
 | `pytest tests/test_session.py` | The live text session — contract-verbatim prompt, transcript ordering, session SQL, and the session endpoints under `TestClient`. Offline: a fake `ChatModel`, an in-memory database |
@@ -50,12 +52,14 @@ non-zero if any failed, with a summary list.
 | `pytest tests/test_recording.py` | [Session recording](/concepts/contracts/session-recording.md) — chunk ordering, finalize idempotency, the modality gate, and the recording endpoints, including a `video/webm` recording served `inline` with its own mime, a `Range` request answered 206, and analyse being handed the spool path rather than a scratch copy. Offline: `recordings_dir=tmp_path`, no real audio |
 | `pytest tests/test_engine_ingest.py` | [Session ingest](/concepts/contracts/session-ingest.md) — the bearer gate on both engine routes (401 wrong, 503 unset), first delivery creating a voice session from the engine's turn table, a repeat replacing rather than appending, landing on the session the portal opened, and the 409/404/422 refusals. Offline: `:memory:`, no model |
 | `pytest tests/test_portal_compat.py` | The three additions the SkillBrew portal needs — the [error envelope](/concepts/contracts/rest-api.md) beside an unchanged `detail`, the [multipart chunk door](/concepts/contracts/session-recording.md) against the raw one, and that `CORS_ALLOWED_ORIGINS` decides whether any CORS header exists. Offline: `TestClient`, `:memory:`, no model |
-| `pytest tests/test_migrations.py` | The [Postgres schema and migration runner](/concepts/contracts/database-schema.md) — apply, `--check`'s three exit codes, drift, a failed migration recording nothing, the advisory lock, and the two foreign-key decisions. **Needs a database**; see the block below |
+| `pytest tests/test_migrations.py` | The [Postgres schema and migration runner](/concepts/contracts/database-schema.md) — apply (four versions), `--check`'s three exit codes, drift, a failed migration recording nothing, the advisory lock, the foreign-key decisions (`sessions.candidate_id` absent, `sessions.participant_id` real), and that the two dropped tables are not created anywhere. **Needs a database**; see the block below |
 | `pytest tests/test_object_store.py` | The [object store port](/concepts/contracts/storage-ports.md) — one behavioural set over **both** adapters: round trip, the five range cases, a missing key, the content-type round trip, the prefix in the real key, and a 9 MiB object whose ETag proves the multipart path. **Needs MinIO**; see the block below |
 | `pytest tests/test_key_failover.py` | The [second-key failover](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01) — which errors are key-shaped and which are not, that a rate-limited primary falls over and a malformed request does not, that stickiness survives a rebuild, and that a single key builds no wrapper. Offline: counting fakes, no key |
 | `pytest tests/test_trait_dimensions.py` | Composing a persona from presets is held to a hand-written archetype's guarantees — [Test suite](/concepts/subsystems/test-suite.md) |
 | `pytest tests/test_custom_persona_integration.py` | A composed persona enacts as composed, against an adversarial fake model that violates every constraint |
-| `pytest tests/test_control_plane_candidates_api.py` | The enrollment routes under `TestClient`: trait dimensions, custom personas, idempotent re-submission, 422 on a bad preset |
+| `pytest tests/test_control_plane_candidates_api.py` | The enrollment routes under `TestClient`: trait dimensions, custom personas, idempotent re-submission, 422 on a bad preset, and that both cast paths hand the agent the same job spec and the same enabled expectation items |
+| `pytest tests/test_expectations.py` | [The expectation checklist](/concepts/modules/evaluation-agent-expectations.md) — the agent's four clamps, the classify fallback, **the pinned fixed ids** (a reworded `covers` string fails here), what `POST /interviews` **and `PATCH /interviews/{id}`** accept and reject (including the explicit-`null` case that would otherwise be a 500, and the partial-list pin that says why a client sends the whole checklist), the re-keyed `report_sections`, and that the two retired routes are 404. Offline: a scripted fake model, `:memory:` |
+| `pytest tests/test_links_participants.py` | [Links and participants](/concepts/contracts/links-and-participants.md) — mint/read/revoke, 404 vs 410, the public body carrying neither the JD nor a persona, the constant-time compare, the shared-secret gate (and its 503 when unset), the token path through `POST /sessions`, email normalisation into one row, `user_id` attaching and never clearing, and cross-interview history with and without a stored report. Offline: `:memory:`, a fake casting model |
 | `pytest tests/test_model_error_surfacing.py` | A provider failure on the casting and expectation endpoints is a clean 502, never a raw 500 |
 | `pytest tests/test_report_engine.py` | The [report engine](/concepts/subsystems/report-engine.md) without a judge — signals, scoring, segments, and byte-identical output for the same bundle |
 | `pytest tests/test_full_interview_pipeline_integration.py` | The whole manager-facing flow over HTTP, offline, across a spread of personas: create → cast → scorecard → session → end → re-read |
@@ -130,13 +134,13 @@ Install what the Go gates need with `brew install golangci-lint`.
 ## Live scenarios
 
 ```bash
-.venv/bin/python tests/test_expectation_agent.py   # 5 job-spec scenarios
 .venv/bin/python tests/test_candidate_agent.py     # 6 archetypes + determinism
 .venv/bin/python tests/test_gemini_live_mint.py    # Live-API mint smoke test
 ```
 
-Run the first two after changing a prompt, a guardrail, or a schema the model
-fills. The offline suite cannot catch a model that started dropping skills or
+Run these after changing a prompt, a guardrail, or a schema the model
+fills. (`tests/test_expectation_agent.py` was the third line here until
+2026-09-13; it went with the package.) The offline suite cannot catch a model that started dropping skills or
 drifting outside its band — that is exactly what these assert.
 
 The third is not a scenario: it mints one ephemeral Gemini Live token and checks

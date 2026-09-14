@@ -2,9 +2,11 @@
 
 Interview control plane. Four things, all in Python:
 
-1. Create interviews from a job spec.
-2. Generate a deterministic **interviewer expectation** for each one — what must
-   be covered, for how long, and how a good interviewer should run the session.
+1. Create interviews from a job spec, with the **expectation checklist** the
+   interviewer will be measured against and the **link** takers arrive on.
+2. The four competencies are fixed in code; what varies per interview is the
+   granular list of behaviours under them — the rubric's own, plus job-grounded
+   ones a model drafts and any the manager types.
 3. Enroll **virtual candidates** — LLM-cast personas, stored in the database,
    that a human interviewer practises against. Each persona carries a
    ground-truth answer key used to grade the interviewer afterwards.
@@ -13,7 +15,7 @@ Interview control plane. Four things, all in Python:
    sessions, a stereo recording. Open the UI, pick a persona, hit **Chat** or
    **🎙 Voice**, and conduct it.
 5. **Analyse the recording** — an audio-native pass that listens to the session
-   against the expectation it was held against, and stores structured
+   against the expectations it was held against, and stores structured
    observations. Not a report: observations.
 6. **Generate the report** — the manager's development report, composed in code
    from the transcript and the analysis. Free and instant; the analysis is the
@@ -30,9 +32,8 @@ Go/Rust; this service owns the "what" of an interview.
 
 ```
 llm/                 Provider port + Gemini/OpenAI adapters (the only vendor SDKs)
-expectation_agent/   Expectation agent — persona, guardrails, fixed rubric
 candidate_agent/     Virtual candidate agent — archetype catalog, engine contract, live session
-evaluation_agent/    The manager rubric and the role-fact checklist
+evaluation_agent/    The manager rubric, the role-fact checklist, the expectation items
 analysis_agent/      Audio analysis — INSTRUCTIONS.md, windowing harness, observations
 report_engine/       Standalone: session bundle in, report out. Imports nothing first-party
 control_plane/       FastAPI service, storage ports, SQLite adapter
@@ -73,8 +74,13 @@ The UI proxies `/api` to `127.0.0.1:8081`, so start the API first.
 | POST | `/api/v1/interviews` | Create an interview from a job spec |
 | GET | `/api/v1/interviews` | List interviews (optional `?status=`) |
 | GET | `/api/v1/interviews/{id}` | Fetch one interview |
-| POST | `/api/v1/interviews/{id}/expectation` | Generate + persist the expectation (AI call) |
-| GET | `/api/v1/interviews/{id}/expectation` | Fetch the stored expectation |
+| POST | `/api/v1/expectations/draft` | Draft job-grounded expectation items (AI call, stores nothing) |
+| POST | `/api/v1/expectations/classify` | Suggest the competency a typed item belongs under (AI call) |
+| POST | `/api/v1/interviews/{id}/links` | Mint an expiring invite link — **shared secret** |
+| DELETE | `/api/v1/links/{token}` | Revoke a link — **shared secret** |
+| GET | `/api/v1/links/{token}` | **Public.** What the landing form needs; 410 when expired or revoked |
+| GET | `/api/v1/participants/{id}` | One taker — **shared secret** |
+| GET | `/api/v1/participants/{id}/sessions` | Their sessions across every interview — **shared secret** |
 | GET | `/api/v1/candidate-archetypes` | The fixed persona catalog |
 | POST | `/api/v1/interviews/{id}/candidates` | Cast + persist personas (AI call) |
 | GET | `/api/v1/interviews/{id}/candidates` | List enrolled personas |
@@ -90,9 +96,18 @@ The UI proxies `/api` to `127.0.0.1:8081`, so start the API first.
 | POST | `/api/v1/sessions/{id}/realtime` | Mint the browser's ephemeral credential for a voice call |
 | POST | `/api/v1/sessions/{id}/transcript` | Record a spoken turn (no reply generated) |
 
-Interview creation captures the job spec only — `job_title`, `jd`,
-`skills_required`, `job_location_type`, `experience_level`, `company_type`.
-Candidate and interviewer are assigned later, not at creation.
+Interview creation captures the job spec — `job_title`, `jd`,
+`skills_required`, `job_location_type`, `experience_level`, `company_type` —
+plus the interview's configuration: the `expectations` checklist and the
+`report_sections` shape. Omit `expectations` and the rubric's own items are
+stored, every one enabled; a fixed item may be toggled off but not reworded,
+and at most twelve custom items are accepted. Candidates and takers are not
+assigned at creation.
+
+`POST /sessions` takes either an `interview_id` or an `invite_token` plus a
+`participant` (name and email). The same email is the same person: the
+participant row is keyed on it, so one taker's sessions across several
+interviews read as one history.
 
 `POST /interviews/{id}/candidates` with **no body** enrolls the two defaults:
 one candidate who should be selected and one who should be rejected. Pass
@@ -104,8 +119,8 @@ Contracts live in `owner_handover/`, regenerated from the Pydantic models by
 
 - `interview_create_schema.json` / `interview_create_sample.json`
 - `interview_response_schema.json`
-- `expectation_input_schema.json`
-- `expectation_output_schema.json` / `expectation_output_sample.json`
+- `interview_link_schema.json` / `public_link_schema.json`
+- `participant_session_schema.json`
 - `candidate_enroll_schema.json`
 - `candidate_output_schema.json` / `candidate_output_sample.json`
 - `engine_contract_schema.json` / `engine_contract_sample.json`
@@ -164,12 +179,18 @@ a persona that changed underneath a training set.
 ## Storage
 
 SQLite (`control_plane.db`, path via `CONTROL_PLANE_DB`) — tables `interviews`,
-`ai_personas`, `interview_expectations`, `virtual_candidates`, `sessions`,
-`session_turns`. Personas are
+`ai_personas`, `virtual_candidates`, `participants`, `interview_links`,
+`sessions`, `session_turns`. Personas are
 stored as the full JSON document plus indexed columns (archetype, verdict,
 fingerprints), unique on `(interview_id, archetype)` so a re-cast replaces
 rather than duplicates. The schema ports to PostgreSQL with minimal change;
 Postgres is the intended bridge to the Go/Rust runtime.
+
+SQLite has no migration runner (Postgres does — `control_plane/migrations/`).
+A schema change therefore ships with a one-off for an existing `.db`:
+`scripts/rename_columns_sqlite.py` for the 2026-09-10 renames,
+`scripts/upgrade_sqlite_expectations.py` for the 2026-09-13 expectations,
+participants and links. Both are idempotent and refuse to discard rows.
 
 ## Running an interview
 
@@ -276,12 +297,16 @@ are in [`docs/PRICING_PER_SESSION.md`](docs/PRICING_PER_SESSION.md).
 
 ## Determinism
 
-The expectation agent is deliberately not free-form. Phase durations, the six
-evaluation criteria and weights, interview type, baseline red/green flags,
-resume-probing policy, and interviewer guidance are computed in
-`expectation_agent/rubric.py` and **overwrite** the model output. The model only
-fills in the role-specific text. Temperature is 0.1 and output is constrained by
-`EXPECTATION_JSON_SCHEMA`.
+The evaluation agents are deliberately not free-form. The four competencies,
+their weights and the bands are `evaluation_agent/rubric.py`; the role-fact keys
+and the fixed expectation items are code, and their ids are derived from the
+rubric so a stored interview can always be matched back to it. The model writes
+*wording* onto those keys and nothing else: a drafted item under a competency
+the rubric does not have is discarded, a fourth item under one competency is
+truncated away, and a restatement of a fixed item is dropped. `classify` may
+label a manager's own item, and an answer outside the four becomes the default
+with a blank reason. Temperature is 0.1 and both calls are JSON-schema
+constrained. Full split: `okf/concepts/determinism.md`.
 
 ## Checks
 
@@ -299,6 +324,8 @@ scripts/check.sh --live     # also the model scenario tests (costs money)
 | `tests/test_candidate_rubric.py` | Determinism, clamping, scorecard integrity |
 | `tests/test_session.py` | The text session — contract-verbatim prompt, transcript ordering, session endpoints |
 | `tests/test_voice.py` | The voice session — deterministic voice/speed, the never-leak-the-prompt guarantee, voice endpoints |
+| `tests/test_expectations.py` | The expectation clamps, the pinned fixed ids, what `POST /interviews` will accept |
+| `tests/test_links_participants.py` | Links and their 410s, the participant upsert, cross-interview history |
 | `scripts/export_schemas.py --check` | `owner_handover/` matches the code |
 | gofmt / go vet / go build / `go test -race` / go architecture | The Go engine in `engine/`, run from inside that module |
 
@@ -314,10 +341,10 @@ than a code-review convention:
 - **LSP** — every `StructuredModel`, `ChatModel` and `RealtimeBroker` shares its
   base signature, implements the whole contract, and is constructible through one
   uniform call; every archetype honours the same shape.
-- **ISP** — `InterviewStore` / `ExpectationStore` / `CandidateStore` /
-  `SessionStore` stay small and non-overlapping; handlers depend on the one they
-  need. `StructuredModel`, `ChatModel` and `RealtimeBroker` are three ports, not
-  one.
+- **ISP** — `InterviewStore` / `LinkStore` / `ParticipantStore` /
+  `CandidateStore` / `SessionStore` stay small and non-overlapping; handlers
+  depend on the one they need. `StructuredModel`, `ChatModel` and
+  `RealtimeBroker` are three ports, not one.
 - **DIP** — vendor SDKs appear only inside `llm/`; agents take an injected
   model and never read API keys; handlers are typed against ports, not the
   SQLite adapter.
@@ -328,7 +355,6 @@ relative imports.
 ### Live scenario tests
 
 ```bash
-.venv/bin/python tests/test_expectation_agent.py   # 5 job-spec scenarios
 .venv/bin/python tests/test_candidate_agent.py     # 6 archetypes + determinism
 ```
 
@@ -340,10 +366,11 @@ person.
 ## Config
 
 Resolution order per role: `<ROLE>_PROVIDER` / `<ROLE>_MODEL`, then
-`LLM_PROVIDER` / `LLM_MODEL`, then the provider default. Four roles:
-`EXPECTATION` and `CANDIDATE` (one structured call each, per interview or
-persona), `SESSION` (one chat call **per turn** — the one that dominates cost
-and pace), and `JUDGE` (reserved for the evaluation layer).
+`LLM_PROVIDER` / `LLM_MODEL`, then the provider default. The roles:
+`EXPECTATIONS` and `ROLE_FACTS` (one structured call each, at creation),
+`CANDIDATE` (one per persona), `SESSION` (one chat call **per turn** — the one
+that dominates cost and pace), `ANALYSIS` (one audio pass per recording) and
+`JUDGE` (one call per report, prose only).
 
 `VOICE` is resolved separately and does **not** fall back to `LLM_PROVIDER`:
 realtime speech-to-speech is OpenAI-only today, so a Gemini-configured
@@ -352,8 +379,8 @@ all. `VOICE_MODEL` must name a realtime speech model, never a text one.
 
 | Var | Default | Meaning |
 |---|---|---|
-| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` | — | `gemini` or `openai` |
-| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` | — | Model ID — config, never hardcoded |
+| `EXPECTATIONS_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` | — | `gemini` or `openai` |
+| `EXPECTATIONS_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` | — | Model ID — config, never hardcoded |
 | `VOICE_PROVIDER` / `VOICE_MODEL` | — / `gpt-realtime-2` | Voice mode. Realtime providers only — **no** `LLM_*` fallback |
 | `LLM_PROVIDER` / `LLM_MODEL` | — | Fallback for the text roles |
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` | — | At least one required |

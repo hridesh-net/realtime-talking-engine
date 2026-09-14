@@ -59,6 +59,8 @@ run "engine ingest (offline)"       $PY -m pytest tests/test_engine_ingest.py -q
 run "trait composition (offline)"   $PY -m pytest tests/test_trait_dimensions.py -q
 run "custom personas (offline)"     $PY -m pytest tests/test_custom_persona_integration.py -q
 run "candidates API (offline)"      $PY -m pytest tests/test_control_plane_candidates_api.py -q
+run "expectations (offline)"        $PY -m pytest tests/test_expectations.py -q
+run "links + participants"          $PY -m pytest tests/test_links_participants.py -q
 run "provider errors (offline)"     $PY -m pytest tests/test_model_error_surfacing.py -q
 run "key failover (offline)"        $PY -m pytest tests/test_key_failover.py -q
 run "analysis agent (offline)"     $PY -m pytest tests/test_analysis_agent.py -q
@@ -142,7 +144,6 @@ run "handover schemas match the code" $PY scripts/export_schemas.py --check
 
 # ------------------------------------------------------------------- live ----
 if (( LIVE )); then
-    run "expectation scenarios (live)" $PY tests/test_expectation_agent.py
     run "candidate scenarios (live)"   $PY tests/test_candidate_agent.py
     # Not a scenario — a smoke test that the Live API still accepts the sealed
     # session config on the configured model id. Cheap, and the offline suite

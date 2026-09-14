@@ -21,15 +21,7 @@ from control_plane.api import get_candidate_agent
 from control_plane.database import init_db
 from control_plane.main import build_app
 from control_plane.repository import InterviewRepository
-from expectation_agent.schema import (
-    BehavioralAssessment,
-    EvaluationCriterion,
-    InterviewerGuidance,
-    InterviewExpectation,
-    InterviewPhase,
-    ResumeProbing,
-    SkillExpectation,
-)
+from evaluation_agent.expectations import ExpectationItem, fixed_items
 from llm.base import StructuredModel
 
 JOB = {
@@ -110,7 +102,11 @@ class FakeModel(StructuredModel):
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    # `get_repo()` builds its own connection from CONTROL_PLANE_DB, so the path
+    # handed to `build_app` is not the one the handlers use. Without this the
+    # suite reads and writes the developer's own `control_plane.db`.
+    monkeypatch.setenv("CONTROL_PLANE_DB", str(tmp_path / "test.db"))
     app = build_app(str(tmp_path / "test.db"))
     app.dependency_overrides[get_candidate_agent] = lambda: VirtualCandidateAgent(
         model=FakeModel("fake-1", 0.35)
@@ -220,7 +216,7 @@ def test_no_body_still_enrolls_the_two_defaults(client, interview_id):
     assert keys == set(archetype_catalog.default_keys())
 
 
-def test_a_custom_persona_survives_a_process_restart(tmp_path):
+def test_a_custom_persona_survives_a_process_restart(tmp_path, monkeypatch):
     """Regression: composed personas used to die on the next deploy.
 
     The archetype lived only in the process-wide `ARCHETYPES` dict, and
@@ -229,6 +225,7 @@ def test_a_custom_persona_survives_a_process_restart(tmp_path):
     to start a session against it returned 422 "unknown archetype".
     """
     db = str(tmp_path / "restart.db")
+    monkeypatch.setenv("CONTROL_PLANE_DB", db)
 
     def fresh_client():
         app = build_app(db)
@@ -273,7 +270,7 @@ def test_a_custom_persona_survives_a_process_restart(tmp_path):
 # The cast path inside POST /sessions
 #
 # "Create & chat" casts a persona that was never enrolled. It used to do so
-# with `expectation=None` and a hardcoded interview type, and without the
+# with no expectations and a hardcoded interview type, and without the
 # location, department, reporting line or role facts stored on the interview —
 # so the same archetype produced a measurably weaker, less grounded persona
 # here than through enrollment.
@@ -292,40 +289,7 @@ class CapturingAgent(VirtualCandidateAgent):
         return await super().generate(**kwargs)
 
 
-def _expectation(interview_id: str) -> InterviewExpectation:
-    return InterviewExpectation(
-        interview_id=interview_id,
-        interview_type="behavioral",
-        structure=[
-            InterviewPhase(
-                name="Warm up", duration_minutes=5, mandatory=True, guidance="Set the scene."
-            )
-        ],
-        mandatory_skills=[
-            SkillExpectation(
-                skill="Fiber splicing",
-                priority="high",
-                min_duration_minutes=10,
-                assessment_method="discussion",
-                evidence_to_look_for="a job they spliced themselves",
-            )
-        ],
-        resume_probing=ResumeProbing(
-            required=True, focus_areas=["gaps"], sample_questions=["why?"]
-        ),
-        behavioral_assessment=BehavioralAssessment(
-            required=True, focus_areas=["ownership"], sample_questions=["tell me about a mistake"]
-        ),
-        red_flags=["blames the team"],
-        green_flags=["names the customer"],
-        evaluation_criteria=[
-            EvaluationCriterion(name="Craft", weight=1.0, description="Can they splice?")
-        ],
-        interviewer_guidance=InterviewerGuidance(dos=["probe"], donts=["lead"]),
-    )
-
-
-def test_starting_a_session_casts_with_the_stored_expectation_and_job_spec():
+def test_starting_a_session_casts_with_the_interviews_expectations_and_job_spec():
     repo = InterviewRepository(init_db(":memory:"))
     agent = CapturingAgent()
     app = build_app(":memory:")
@@ -333,6 +297,13 @@ def test_starting_a_session_casts_with_the_stored_expectation_and_job_spec():
     app.dependency_overrides[get_candidate_agent] = lambda: agent
     client = TestClient(app)
 
+    custom = ExpectationItem(
+        id="ignored-server-assigns-this",
+        competency_id="structure",
+        text="Asks about a splice that failed in the field.",
+        source="custom",
+    )
+    disabled = fixed_items()[0].model_copy(update={"enabled": False})
     interview_id = client.post(
         "/api/v1/interviews",
         json={
@@ -341,20 +312,22 @@ def test_starting_a_session_casts_with_the_stored_expectation_and_job_spec():
             "department": "Network",
             "manager_level": "Frontline manager",
             "role_facts": [{"key": "targets", "statement": "Six installs a day."}],
+            "expectations": [disabled.model_dump(), custom.model_dump()],
         },
     ).json()["id"]
-    repo.save_expectation(_expectation(interview_id), model_used="offline-fixture")
 
     created = client.post(
         "/api/v1/sessions", json={"interview_id": interview_id, "archetype": "nervous_fresher"}
     )
     assert created.status_code == 201, created.text
 
-    # The stored expectation grounds the persona, and sets the interview type
-    # instead of the "mixed" that used to be hardcoded here.
-    assert agent.kwargs["expectation"] is not None
-    assert agent.kwargs["expectation"].interview_id == interview_id
-    assert agent.kwargs["interview_type"] == "behavioral"
+    # The interview's own enabled expectations ground the persona: the custom
+    # item is there, the item the manager switched off is not.
+    texts = [item["text"] for item in agent.kwargs["expectations"]]
+    assert custom.text in texts
+    assert disabled.text not in texts
+    # The interview type is derived from the job spec rather than hardcoded.
+    assert agent.kwargs["interview_type"] == "technical_coding"
     # And the half of the job spec that used to stop at the control plane.
     assert agent.kwargs["location"] == "Kochi"
     assert agent.kwargs["department"] == "Network"
@@ -383,3 +356,9 @@ def test_enrollment_casts_with_the_same_job_spec_the_session_path_uses():
     assert agent.kwargs["department"] == "Network"
     assert agent.kwargs["manager_level"] == "Frontline"
     assert agent.kwargs["role_facts"] == []
+    assert agent.kwargs["interview_type"] == "technical_coding"
+    # Enrollment and the session path agree on the checklist: the whole fixed
+    # list, every item enabled, when the creator changed nothing.
+    assert [item["text"] for item in agent.kwargs["expectations"]] == [
+        item.text for item in fixed_items()
+    ]

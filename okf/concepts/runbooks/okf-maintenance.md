@@ -33,7 +33,8 @@ Route from the changed path via the [Repo Map](/concepts/repo-map.md), then:
 | New archetype | [archetypes.py card](/concepts/modules/candidate-agent-archetypes.md) table, [Candidate agent](/concepts/subsystems/candidate-agent.md) table |
 | New provider | [llm/factory.py](/concepts/modules/llm-factory.md), [LLM port](/concepts/subsystems/llm-port.md) |
 | Anything moving between code-owned and model-owned | [Determinism split](/concepts/determinism.md) — **always**, this is the page that must never be wrong |
-| Rubric tables, criteria, weights | [rubric.py card](/concepts/modules/expectation-agent-rubric.md), [InterviewExpectation](/concepts/contracts/interview-expectation.md) |
+| Rubric criteria, weights, bands, or a `covers` string | [evaluation_agent/rubric.py](/concepts/modules/evaluation-agent-rubric.md), [expectations.py](/concepts/modules/evaluation-agent-expectations.md), [Determinism split](/concepts/determinism.md) — **and** the pinned id list in `tests/test_expectations.py`, because `covers` is the source of every fixed item's id |
+| Anything about links, expiry, or who took a session | [Links and participants](/concepts/contracts/links-and-participants.md) |
 | Compiled persona prompt | [engine_contract.py card](/concepts/modules/candidate-agent-engine-contract.md), [EngineContract](/concepts/contracts/engine-contract.md) — and bump `ENGINE_CONTRACT_VERSION` |
 | New env var | [Dev setup](/concepts/runbooks/dev-setup.md) |
 | New endpoint | [REST API](/concepts/contracts/rest-api.md), [api.py card](/concepts/modules/control-plane-api.md) |

@@ -1,9 +1,8 @@
 """Storage ports.
 
-Interface segregation: three narrow protocols instead of one repository
-interface every consumer has to depend on wholesale. A handler that only reads
-candidates depends on :class:`CandidateStore` and is unaffected by changes to
-expectation storage.
+Interface segregation: narrow protocols instead of one repository interface
+every consumer has to depend on wholesale. A handler that only reads candidates
+depends on :class:`CandidateStore` and is unaffected by changes to link storage.
 
 Dependency inversion: handlers are typed against these protocols, so
 ``InterviewRepository`` (SQLite) can be replaced by a Postgres implementation
@@ -15,6 +14,7 @@ does not import or subclass anything here.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -23,7 +23,11 @@ from control_plane.schemas import (
     AnalysisMeta,
     IngestReceipt,
     InterviewCreateRequest,
+    InterviewLinkResponse,
     InterviewResponse,
+    InterviewUpdateRequest,
+    ParticipantResponse,
+    ParticipantSessionRow,
     RecordingMeta,
     ReportMeta,
     SessionIngest,
@@ -31,7 +35,6 @@ from control_plane.schemas import (
     SessionSummary,
     Turn,
 )
-from expectation_agent.schema import InterviewExpectation
 
 
 @runtime_checkable
@@ -52,15 +55,70 @@ class InterviewStore(Protocol):
 
 
 @runtime_checkable
-class ExpectationStore(Protocol):
-    """Persistence for interviewer expectation documents."""
+class InterviewEditor(Protocol):
+    """Partial edit of a stored interview.
 
-    def save_expectation(self, expectation: InterviewExpectation, model_used: str) -> None:
-        """Upsert the expectation for an interview."""
+    Separate from :class:`InterviewStore` rather than a fourth method on it,
+    because the two have different blast radii: everything that reads a job
+    spec depends on `InterviewStore`, and none of it should acquire the ability
+    to rewrite one. The wizard's step 2 is the only caller, and it needs
+    exactly this.
+    """
+
+    def update(self, interview_id: str, req: InterviewUpdateRequest) -> InterviewResponse | None:
+        """Apply the fields present on `req`, or None when the interview is unknown."""
         ...
 
-    def get_expectation(self, interview_id: str) -> InterviewExpectation | None:
-        """Return the stored expectation, or None when not generated yet."""
+
+@runtime_checkable
+class LinkStore(Protocol):
+    """Persistence for the expiring links an interview is taken through.
+
+    Expiry is **not** enforced here. A link's row is returned whatever its
+    `expires_at` says, because the two callers need to tell the three cases
+    apart — unknown (404), expired or revoked (410), live — and a store that
+    silently returned None for the last two would collapse them into the first.
+    """
+
+    def create_link(self, interview_id: str, expires_at: datetime) -> InterviewLinkResponse:
+        """Mint a link for an interview. Several per interview are allowed."""
+        ...
+
+    def get_link(self, token: str) -> InterviewLinkResponse | None:
+        """Return one link whatever its state, or None when the token is unknown."""
+        ...
+
+    def revoke_link(self, token: str) -> bool:
+        """Mark a link revoked. True when a live link was revoked."""
+        ...
+
+
+@runtime_checkable
+class ParticipantStore(Protocol):
+    """Persistence for the people who take interviews, keyed by email.
+
+    An identity join key, not a user table — see the `participants` DDL. The
+    upsert is the only way a row is ever created: there is no signup here.
+    """
+
+    def upsert_participant(
+        self, *, name: str, email: str, user_id: str | None = None
+    ) -> ParticipantResponse:
+        """Create or refresh the row for this email, moving `last_seen_at`.
+
+        The email is the identity, so the caller's `name` overwrites what is
+        stored — the most recent form value is the current one. A `user_id`
+        attaches when supplied and is never cleared by a later call that has
+        none: arriving on a link once does not undo being a SkillBrew user.
+        """
+        ...
+
+    def get_participant(self, participant_id: str) -> ParticipantResponse | None:
+        """Return one participant, or None when the id is unknown."""
+        ...
+
+    def list_participant_sessions(self, participant_id: str) -> list[ParticipantSessionRow]:
+        """Every session this person has held, across every interview, newest first."""
         ...
 
 
@@ -109,6 +167,7 @@ class SessionStore(Protocol):
         planned_minutes: int,
         opening_line: str,
         modality: str = "text",
+        participant_id: str | None = None,
     ) -> SessionResponse:
         """Open a session, seeding turn 0 with the persona's opening line."""
         ...
@@ -169,7 +228,6 @@ class RecordingStore(Protocol):
         ...
 
 
-@runtime_checkable
 @runtime_checkable
 class AnalysisStore(Protocol):
     """Persistence for one session's audio analysis."""
@@ -243,13 +301,9 @@ class IngestStore(Protocol):
         ...
 
 
-class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol):
-    """Composition for handlers that read an interview and write its expectation."""
-
-
 @runtime_checkable
-class EnrollmentStore(InterviewStore, ExpectationStore, CandidateStore, Protocol):
-    """Composition for enrollment, which reads the interview and its expectation.
+class EnrollmentStore(InterviewStore, CandidateStore, Protocol):
+    """Composition for enrollment: read the interview, write the personas.
 
     Composed from the narrow ports rather than widened into one interface, so
     each port stays independently implementable.
@@ -257,16 +311,17 @@ class EnrollmentStore(InterviewStore, ExpectationStore, CandidateStore, Protocol
 
 
 @runtime_checkable
-class SessionWorkflowStore(
-    InterviewStore, ExpectationStore, CandidateStore, SessionStore, Protocol
+class LinkSessionStore(
+    InterviewStore, CandidateStore, SessionStore, LinkStore, ParticipantStore, Protocol
 ):
-    """Composition for opening a session.
+    """Everything `POST /sessions` needs, once a link may open one.
 
-    Reads the interview, casts or reuses the persona, then opens the session
-    against it. Carries :class:`ExpectationStore` for the same reason
-    :class:`EnrollmentStore` does: a persona cast here is grounded in the
-    interview's expectation document, so this handler casts the same persona
-    enrollment would rather than a weaker one.
+    Opening a session reads the interview, casts or reuses the persona and
+    writes the session — and, on the token path, resolves the interview from
+    the link while enforcing the expiry at that moment, then upserts the
+    participant by email before the session row is written. It is one handler
+    and therefore one port: splitting the two entry paths into two routes would
+    let them drift on everything else they share.
     """
 
 
@@ -298,7 +353,7 @@ class RecordingWorkflowStore(SessionStore, RecordingStore, Protocol):
 class AnalysisWorkflowStore(
     InterviewStore, CandidateStore, SessionStore, AnalysisStore, RecordingStore, Protocol
 ):
-    """What running an analysis needs: the expectation, the session, the audio.
+    """What running an analysis needs: the brief, the session, the audio.
 
     It reads the interview and the cast candidate to build the brief, the
     session for the persona faced, the recording for the audio itself, and

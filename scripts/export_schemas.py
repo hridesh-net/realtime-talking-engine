@@ -29,7 +29,11 @@ from candidate_agent.schema import ENGINE_CONTRACT_VERSION, EngineContract, Virt
 from control_plane.schemas import (
     CandidateEnrollRequest,
     IngestReceipt,
+    InterviewLinkResponse,
     InterviewResponse,
+    InterviewUpdateRequest,
+    ParticipantSessionRow,
+    PublicLinkResponse,
     RealtimeCredentialResponse,
     RecordingMeta,
     SessionCreateRequest,
@@ -38,7 +42,6 @@ from control_plane.schemas import (
     SessionSummary,
     TranscriptAppendRequest,
 )
-from expectation_agent.schema import InterviewExpectation
 
 OUT = Path(__file__).resolve().parent.parent / "owner_handover"
 
@@ -66,6 +69,15 @@ EXPORTS = [
         "interview_response_schema.json",
         InterviewResponse,
         "Interview record returned by the interview endpoints.",
+    ),
+    (
+        "interview_update_schema.json",
+        InterviewUpdateRequest,
+        "Body for PATCH /api/v1/interviews/{interview_id}. Edits the expectation "
+        "checklist and the report section map, and nothing else. Either field may "
+        "be sent alone; a body with neither is a 422. Both are replaced wholesale, "
+        "not merged onto what is stored, so send the whole expectation list and all "
+        "eight section keys.",
     ),
     (
         "session_create_schema.json",
@@ -110,9 +122,26 @@ EXPORTS = [
         "server-internal and deliberately not part of this shape.",
     ),
     (
-        "expectation_output_schema.json",
-        InterviewExpectation,
-        "Interviewer expectation document for one interview.",
+        "interview_link_schema.json",
+        InterviewLinkResponse,
+        "A minted invite link. Returned by POST /api/v1/interviews/{interview_id}/links. "
+        "The token is the credential the taker arrives with; revoke it with "
+        "DELETE /api/v1/links/{token}.",
+    ),
+    (
+        "public_link_schema.json",
+        PublicLinkResponse,
+        "Returned by the one public link route, GET /api/v1/links/{token}: exactly what "
+        "a landing form needs to render. 404 for an unknown token, 410 for one that has "
+        "expired or been revoked. The job description and the personas are deliberately "
+        "not part of this shape.",
+    ),
+    (
+        "participant_session_schema.json",
+        ParticipantSessionRow,
+        "One row of GET /api/v1/participants/{participant_id}/sessions: a person's "
+        "sessions across every interview, with the stored report's competency scores "
+        "when a report exists.",
     ),
     (
         "session_ingest_schema.json",

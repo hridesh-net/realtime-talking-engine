@@ -1,4 +1,6 @@
-"""The fixed manager rubric: criteria, weights and bands.
+"""The fixed manager rubric: criteria, weights and bands, and the interview type.
+
+Everything here is a deterministic table. Nothing in this module calls a model.
 
 **Org-owned configuration, not generated content.** The rubric must be identical
 across every session or manager scores stop being comparable, which is the whole
@@ -120,6 +122,33 @@ DEFAULT_RUBRIC = Rubric(
         Band(label="Competent", floor=65),
     ],
 )
+
+
+#: The shape of interview an experience level and company type imply, as the
+#: casting prompt names it. Moved here verbatim from the retired
+#: `expectation_agent/rubric.py` (2026-09-13) because it is the only thing that
+#: package computed which anything still reads: `POST /sessions` and enrollment
+#: both tell the casting model what kind of conversation the persona is walking
+#: into, and the alternative to this table is a hardcoded "mixed" on both paths.
+_INTERVIEW_TYPE_RULES: tuple[tuple[str, str, str], ...] = (
+    ("junior", "", "technical_coding"),
+    ("mid", "startup", "technical_coding"),
+    ("mid", "", "mixed"),
+    ("senior", "startup", "technical_discussion"),
+)
+
+DEFAULT_INTERVIEW_TYPE = "mixed"
+
+
+def determine_interview_type(experience_level: str, company_type: str) -> str:
+    """Deterministic interview type from experience level and company type.
+
+    First matching rule wins; an empty ``company_type`` in the table means "any".
+    """
+    for level, company, interview_type in _INTERVIEW_TYPE_RULES:
+        if level == experience_level and company in ("", company_type):
+            return interview_type
+    return DEFAULT_INTERVIEW_TYPE
 
 
 def load_rubric(path: str | Path | None = None) -> Rubric:

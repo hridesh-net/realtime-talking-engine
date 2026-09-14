@@ -24,9 +24,9 @@ from candidate_agent.session import CandidateSessionAgent
 from control_plane import ports
 from control_plane.object_store import FilesystemObjectStore, ObjectStore, S3ObjectStore
 from control_plane.repository import InterviewRepository
+from evaluation_agent.expectations import ExpectationsAgent
 from evaluation_agent.role_facts import RoleFactsAgent
 from evaluation_agent.rubric import DEFAULT_RUBRIC
-from expectation_agent.agent import InterviewExpectationAgent
 from llm import factory
 from llm.base import ChatModel, RealtimeBroker, StructuredModel
 from llm.gemini import GeminiChatModel, GeminiModel
@@ -38,7 +38,6 @@ ROOT = Path(__file__).resolve().parent.parent
 #: Every first-party package, in dependency order.
 PACKAGES = [
     "llm",
-    "expectation_agent",
     "candidate_agent",
     "evaluation_agent",
     "analysis_agent",
@@ -50,7 +49,6 @@ PACKAGES = [
 #: Enforces one direction: adapters depend on domain, never the reverse.
 ALLOWED_IMPORTS: dict[str, set[str]] = {
     "llm": set(),
-    "expectation_agent": {"llm"},
     "candidate_agent": {"llm"},
     "evaluation_agent": {"llm"},
     "analysis_agent": {"llm"},
@@ -60,7 +58,6 @@ ALLOWED_IMPORTS: dict[str, set[str]] = {
     "report_engine": set(),
     "control_plane": {
         "llm",
-        "expectation_agent",
         "candidate_agent",
         "evaluation_agent",
         "analysis_agent",
@@ -96,7 +93,7 @@ HANDLER_FORBIDDEN_ANNOTATIONS = {
     "FilesystemObjectStore",
 }
 
-AGENTS = [InterviewExpectationAgent, VirtualCandidateAgent, CandidateSessionAgent, RoleFactsAgent]
+AGENTS = [VirtualCandidateAgent, CandidateSessionAgent, RoleFactsAgent, ExpectationsAgent]
 BACKENDS = [GeminiModel, OpenAIModel]
 CHAT_BACKENDS = [GeminiChatModel, OpenAIChatModel]
 REALTIME_BACKENDS = [OpenAIRealtimeBroker]
@@ -220,7 +217,9 @@ def test_dip_handlers_depend_on_ports_not_the_adapters() -> None:
 
 NARROW_PORTS = [
     ports.InterviewStore,
-    ports.ExpectationStore,
+    ports.InterviewEditor,
+    ports.LinkStore,
+    ports.ParticipantStore,
     ports.CandidateStore,
     ports.SessionStore,
     ports.RecordingStore,
@@ -230,9 +229,8 @@ NARROW_PORTS = [
 ]
 
 COMPOSITION_PORTS = [
-    ports.ExpectationWorkflowStore,
     ports.EnrollmentStore,
-    ports.SessionWorkflowStore,
+    ports.LinkSessionStore,
     ports.TurnWorkflowStore,
     ports.RecordingWorkflowStore,
     ports.AnalysisWorkflowStore,
@@ -509,7 +507,7 @@ def test_ocp_new_provider_needs_no_agent_change() -> None:
     assert len({frozenset(t) for t in tables}) == 1, (
         "provider tables are out of sync; adding a provider means adding one row to each"
     )
-    for module in (*_modules("candidate_agent"), *_modules("expectation_agent")):
+    for module in (*_modules("candidate_agent"), *_modules("evaluation_agent")):
         source = module.read_text()
         for provider in factory.PROVIDERS:
             assert f'== "{provider}"' not in source, (
@@ -527,18 +525,24 @@ def test_ocp_new_provider_needs_no_agent_change() -> None:
 # was lost by deleting it. `sqlite3` is now one entry in STORAGE_DRIVERS,
 # enforced by `test_dip_storage_drivers_only_inside_the_adapters`, and the ban
 # on importing `control_plane` is ALLOWED_IMPORTS, enforced by
-# `test_layering_respects_the_allowed_direction` — two rules over all seven
+# `test_layering_respects_the_allowed_direction` — two rules over all six
 # packages in place of one over two.
 
 
 def test_srp_agents_do_not_generate_each_others_documents() -> None:
-    """Persona casting and expectation design stay separate services."""
+    """Persona casting and the manager's checklist stay separate services.
+
+    Sibling agent packages are peers, not a stack. The candidate agent is told
+    what the interviewer is expected to do — as plain dicts assembled by the
+    control plane — and must not reach into the package that owns that
+    checklist to find out; the evaluation agent must not reach into casting at
+    all. The pair of them importing each other is how two agents become one.
+    """
     for path in _modules("candidate_agent"):
-        assert "expectation_agent" not in _imported_roots(path) or path.name in {
-            "agent.py",
-            "prompts.py",
-        }, f"{path.name} reaches into the expectation agent"
-    for path in _modules("expectation_agent"):
+        assert "evaluation_agent" not in _imported_roots(path), (
+            f"{path.name} reaches into the evaluation agent"
+        )
+    for path in _modules("evaluation_agent"):
         assert "candidate_agent" not in _imported_roots(path), (
             f"{path.name} reaches into the candidate agent"
         )
@@ -546,7 +550,7 @@ def test_srp_agents_do_not_generate_each_others_documents() -> None:
 
 def test_srp_prompt_modules_do_not_call_models() -> None:
     """Prompt modules build strings; they never perform I/O."""
-    for pkg in ("candidate_agent", "expectation_agent"):
+    for pkg in ("candidate_agent", "evaluation_agent"):
         source = (ROOT / pkg / "prompts.py").read_text()
         for forbidden in ("generate_json", "httpx", "requests", "await "):
             assert forbidden not in source, f"{pkg}/prompts.py performs I/O ({forbidden})"
@@ -554,7 +558,7 @@ def test_srp_prompt_modules_do_not_call_models() -> None:
 
 def test_srp_schema_modules_hold_no_logic() -> None:
     """Schema modules declare shape only — rules live in the rubric or catalog."""
-    for pkg in ("candidate_agent", "expectation_agent"):
+    for pkg in ("candidate_agent", "evaluation_agent"):
         tree = ast.parse((ROOT / pkg / "schema.py").read_text())
         functions = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
         assert not functions, f"{pkg}/schema.py defines logic: {functions}"

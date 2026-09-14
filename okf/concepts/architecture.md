@@ -30,7 +30,7 @@ Ports and adapters, four packages, dependencies pointing one way.
         └───┬──────────────┬───────────────────┬─────────────────┘
             │ imports      │ imports           │ imports
         ┌───▼──────────┐ ┌─▼────────────────┐ ┌▼─────────────────┐
-        │ expectation_ │ │ candidate_agent/ │ │ evaluation_agent/│
+        │ candidate_   │ │ evaluation_agent/│ │ analysis_agent/  │
         │ agent/       │ │                  │ │                  │
         └───┬──────────┘ └─┬────────────────┘ └┬─────────────────┘
             │ imports      │ imports           │ imports
@@ -44,13 +44,15 @@ Ports and adapters, four packages, dependencies pointing one way.
 
 ```python
 {"llm": set(),
- "expectation_agent": {"llm"},
  "candidate_agent": {"llm"},
  "evaluation_agent": {"llm"},
- "control_plane": {"llm", "expectation_agent", "candidate_agent", "evaluation_agent"}}
+ "analysis_agent": {"llm"},
+ "report_engine": set(),          # standalone by rule; the rubric travels in its bundle
+ "control_plane": {"llm", "candidate_agent", "evaluation_agent",
+                   "analysis_agent", "report_engine"}}
 ```
 
-The three agents are **siblings, not peers in a chain** — none imports another.
+The agents are **siblings, not peers in a chain** — none imports another.
 `control_plane` composes them. This is why `candidate_agent.RUBRIC_CRITERIA`
 re-declares the rubric criterion ids instead of importing them from
 `evaluation_agent`: the archetypes need the vocabulary, and a sibling import to
@@ -70,7 +72,7 @@ the machine where everything else is unavailable.
 | **DIP** | Agents accept an injected model and never read provider credentials | Signature inspection + source scan for `os.getenv`/`API_KEY` |
 | **DIP** | Storage drivers (`psycopg`, `psycopg_pool`, `boto3`, `botocore`, `sqlite3`) only inside `control_plane/{database,repository,migrate,object_store}.py` | AST import scan over every module in every package, against a named adapter allowlist |
 | **DIP** | Handlers type against ports, never `InterviewRepository` **or** an object store | Parameter annotations in `control_plane/api.py`, unparsed and matched against the banned concretions |
-| **ISP** | Every narrow port — Interview, Expectation, Candidate, Session, Recording, Analysis, Report — stays small (≤ 5 methods) and non-overlapping | Method-count and set-intersection checks per protocol |
+| **ISP** | Every narrow port — Interview, Link, Participant, Candidate, Session, Recording, Analysis, Report, Ingest — stays small (≤ 5 methods) and non-overlapping | Method-count and set-intersection checks per protocol |
 | **ISP** | `StructuredModel`, `ChatModel` and `RealtimeBroker` stay separate ports | None subclasses another; none exposes another's method |
 | **ISP** | The repository adapter satisfies every port, narrow and composed | `runtime_checkable` isinstance against an uninitialised instance — conformance is a property of the class, so no connection is opened |
 | **LSP** | Every `StructuredModel`, `ChatModel` and `RealtimeBroker` shares its base signature, implements the whole contract, and constructs identically | Signature comparison across all five adapters |
@@ -88,14 +90,15 @@ The OCP test is the one worth reading — it does not assert that extension is
 ## Storage ports
 
 `control_plane/ports.py` defines `typing.Protocol` classes — structural, so
-`InterviewRepository` neither imports nor subclasses them. Four narrow ports
-plus two compositions:
+`InterviewRepository` neither imports nor subclasses them. Nine narrow ports
+and six compositions; a sample:
 
 * `InterviewStore` — `create`, `get`, `list`
-* `ExpectationStore` — `save_expectation`, `get_expectation`
+* `LinkStore` — `create_link`, `get_link`, `revoke_link`
+* `ParticipantStore` — `upsert_participant`, `get_participant`, `list_participant_sessions`
 * `CandidateStore` — `save_candidate`, `list_candidates`, `get_candidate`, `get_candidate_by_archetype`, `delete_candidate`
-* `ExpectationWorkflowStore` = Interview + Expectation
-* `EnrollmentStore` = Interview + Expectation + Candidate
+* `EnrollmentStore` = Interview + Candidate
+* `LinkSessionStore` = Interview + Candidate + Session + Link + Participant
 
 Compositions are built **from** the narrow ports rather than widening any of
 them, so each stays independently implementable. Each route depends on the

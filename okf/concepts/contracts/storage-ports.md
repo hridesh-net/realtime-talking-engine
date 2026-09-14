@@ -1,13 +1,17 @@
 ---
 type: Contract
 title: Storage ports
-description: Seven narrow row-storage protocols and their compositions, plus the object-store port for bytes — depended on instead of the adapters.
+description: Nine narrow row-storage protocols and their compositions, plus the object-store port for bytes — depended on instead of the adapters.
 resource: /control_plane/ports.py
 tags: [contract, ports, isp, dip, protocol, object-store, s3]
 generated:
   by: claude-opus-5
-  at: "2026-09-12T00:00:00Z"
+  at: "2026-09-14T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-14T00:00:00Z"
+  - by: claude-opus-5
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
@@ -27,17 +31,21 @@ sources:
 ---
 # Storage ports
 
-> **Eight narrow row ports** (verified against `control_plane/ports.py`,
-> 2026-09-13): `InterviewStore`, `ExpectationStore`, `CandidateStore`,
-> `SessionStore`, `RecordingStore`, `AnalysisStore`, `ReportStore` and
-> `IngestStore`. They arrived in that order — `ReportStore` with the session
-> report, `AnalysisStore` with the audio analysis, `IngestStore` with the Go
-> engine's write-back (2026-09-12) — and each addition is a new protocol, never
-> a method on an old one. Five composites (`ExpectationWorkflowStore`,
-> `EnrollmentStore`, `IngestWorkflowStore`, `TurnWorkflowStore`,
-> `RecordingWorkflowStore`) name a handler's exact need. `AnalysisWorkflowStore`
-> deliberately does **not** compose the report store, because a handler that
-> can both analyse and report will eventually do both by accident.
+> **Ten narrow row ports** (verified against `control_plane/ports.py`,
+> 2026-09-14): `InterviewStore`, `InterviewEditor`, `LinkStore`,
+> `ParticipantStore`, `CandidateStore`, `SessionStore`, `RecordingStore`,
+> `AnalysisStore`, `ReportStore` and `IngestStore`. They arrived roughly in that
+> order — `ReportStore` with the session report, `AnalysisStore` with the audio
+> analysis, `IngestStore` with the Go engine's write-back (2026-09-12),
+> `LinkStore` and `ParticipantStore` with invite links (2026-09-13),
+> `InterviewEditor` with the wizard's update route (2026-09-14) — and each
+> addition is a new protocol, never a method on an old one. `ExpectationStore`
+> was **removed** on 2026-09-13 with the agent whose document it held. Six
+> composites (`EnrollmentStore`, `LinkSessionStore`, `IngestWorkflowStore`,
+> `TurnWorkflowStore`, `RecordingWorkflowStore`, plus the analysis and report
+> ones) name a handler's exact need. `AnalysisWorkflowStore` deliberately does
+> **not** compose the report store, because a handler that can both analyse and
+> report will eventually do both by accident.
 >
 > **The object store (2026-09-10)** is *not* one of these — it holds bytes, not
 > rows, and lives in `control_plane/object_store.py`. It is documented at the
@@ -56,9 +64,20 @@ class InterviewStore(Protocol):
     def get(self, interview_id: str) -> InterviewResponse | None
     def list(self, status: str | None = None) -> list[InterviewResponse]
 
-class ExpectationStore(Protocol):
-    def save_expectation(self, expectation: InterviewExpectation, model_used: str) -> None
-    def get_expectation(self, interview_id: str) -> InterviewExpectation | None
+class InterviewEditor(Protocol):
+    def update(self, interview_id: str,
+               req: InterviewUpdateRequest) -> InterviewResponse | None   # None == unknown id
+
+class LinkStore(Protocol):
+    def create_link(self, interview_id: str, expires_at: datetime) -> InterviewLinkResponse
+    def get_link(self, token: str) -> InterviewLinkResponse | None     # whatever its state
+    def revoke_link(self, token: str) -> bool                          # True == a live link was revoked
+
+class ParticipantStore(Protocol):
+    def upsert_participant(self, *, name: str, email: str,
+                           user_id: str | None = None) -> ParticipantResponse
+    def get_participant(self, participant_id: str) -> ParticipantResponse | None
+    def list_participant_sessions(self, participant_id: str) -> list[ParticipantSessionRow]
 
 class CandidateStore(Protocol):
     def save_candidate(self, candidate: VirtualCandidate, model_used: str) -> None
@@ -70,7 +89,8 @@ class CandidateStore(Protocol):
 class SessionStore(Protocol):
     def create_session(self, *, interview_id: str, candidate_id: str, archetype: str,
                        planned_minutes: int, opening_line: str,
-                       modality: str = "text") -> SessionResponse
+                       modality: str = "text",
+                       participant_id: str | None = None) -> SessionResponse
     def get_session(self, session_id: str) -> SessionResponse | None
     def append_turn(self, session_id: str, speaker: str, text: str) -> Turn
     def end_session(self, session_id: str, status: str = "completed") -> SessionResponse | None
@@ -83,10 +103,9 @@ class RecordingStore(Protocol):
     def get_recording_meta(self, session_id: str) -> RecordingMeta | None
     def open_recording(self, session_id: str) -> tuple[RecordingMeta, Path] | None
 
-class ExpectationWorkflowStore(InterviewStore, ExpectationStore, Protocol): ...
-class EnrollmentStore(InterviewStore, ExpectationStore, CandidateStore, Protocol): ...
-class SessionWorkflowStore(InterviewStore, ExpectationStore, CandidateStore,
-                           SessionStore, Protocol): ...
+class EnrollmentStore(InterviewStore, CandidateStore, Protocol): ...
+class LinkSessionStore(InterviewStore, CandidateStore, SessionStore,
+                       LinkStore, ParticipantStore, Protocol): ...
 class TurnWorkflowStore(CandidateStore, SessionStore, Protocol): ...
 class RecordingWorkflowStore(SessionStore, RecordingStore, Protocol): ...
 ```
@@ -142,6 +161,36 @@ This is the one port method that will change shape again when recordings move to
 answer moves to the store (a presigned or ranged GET). Named here so the next
 change is a planned step and not a surprise.
 
+## `LinkStore` does not enforce expiry, and that is the point
+
+`get_link` returns the row whatever `expires_at` says. Three cases have to stay
+distinguishable — unknown (404), expired or revoked (410), live — and a store
+that returned `None` for the last two would collapse them into the first, so a
+taker whose link ran out would be told it never existed. Expiry is decided once,
+in the handler, at the moment a session is created. There is no sweeper.
+
+`revoke_link` returns `False` on an already-revoked link: the first revocation
+is the instant it stopped working and nothing moves it forward, which is why the
+route answers 404 the second time rather than 204.
+
+## `ParticipantStore` — an identity join key, not a user table
+
+`upsert_participant` is the only way a row is created; there is no signup here,
+no password and no role. The email is the identity, normalised (trimmed,
+lower-cased, shape-checked) by `ParticipantInput` before it arrives, so the same
+person in a different case is one row. Two rules live in the SQL:
+
+* `name = excluded.name` — the most recent form value is the current one; there
+  is nothing else to arbitrate between two spellings.
+* `user_id = COALESCE(excluded.user_id, participants.user_id)` — a SkillBrew id
+  attaches the first time one is supplied and is **never cleared** by a later
+  session opened on a plain link.
+
+`list_participant_sessions` parses the stored report body for the four
+competency scores rather than reading a denormalised column, because this is the
+one view that wants them and one person's history is a handful of rows. The
+per-interview list view reads `session_reports`' denormalised columns instead.
+
 ## `IngestStore` — the one port that writes a transcript whole
 
 `store_ingest(ingest, *, archetype, opening_line, planned_minutes)` is one
@@ -160,11 +209,13 @@ A repeat with the same `session_id` replaces everything and reports
 | Route | Port | Why |
 |---|---|---|
 | create / get / list interviews | `InterviewStore` | reads or writes interviews only |
-| `GET .../expectation` | `ExpectationStore` | read only |
-| `POST .../expectation` | `ExpectationWorkflowStore` | reads the interview, writes the expectation |
-| `POST .../candidates` | `EnrollmentStore` | reads interview + expectation, reads and writes candidates |
+| `PATCH /interviews/{id}` | `InterviewEditor` | the one route that rewrites a stored interview |
+| `POST .../candidates` | `EnrollmentStore` | reads the interview, reads and writes candidates |
 | candidate reads / delete | `CandidateStore` | |
-| `POST /sessions` | `SessionWorkflowStore` | reads the interview and its expectation, reads-or-writes the persona, opens the session |
+| `POST /interviews/{id}/links`, `GET /links/{token}` | `LinkSessionStore` | both read the interview as well as the link |
+| `DELETE /links/{token}` | `LinkStore` | the token alone |
+| `GET /participants/{id}`, `.../sessions` | `ParticipantStore` | one person's record |
+| `POST /sessions` | `LinkSessionStore` | resolves the interview (directly or through a link), upserts the participant, reads-or-writes the persona, opens the session |
 | `POST /sessions/{id}/turns` | `TurnWorkflowStore` | reads the persona's contract, writes turns |
 | `POST /sessions/{id}/end`, `GET /sessions/{id}` | `SessionStore` | sessions only |
 | `POST /sessions/{id}/realtime` | `TurnWorkflowStore` | reads the persona's contract to compile the voice session |
@@ -177,7 +228,21 @@ A repeat with the same `session_id` replaces everything and reports
 Depending on the narrowest port is the ISP discipline, and it is tested: ports
 must stay small and **non-overlapping** (no shared method names), and the SQLite
 adapter must satisfy every one of them via `isinstance` against an in-memory
-connection.
+connection. The lists those tests iterate are hardcoded in
+`tests/test_architecture.py` (`NARROW_PORTS`, `COMPOSITION_PORTS`) — **a port
+that is not listed is not checked**, so adding one to `ports.py` without adding
+it there buys no guarantee at all.
+
+## Why `InterviewEditor` is a port of its own (2026-09-14)
+
+`update` could have been a fourth method on `InterviewStore`, and that is
+exactly the widening this page warns against. Every route that reads a job spec
+takes `InterviewStore`; a fourth method would hand all of them the ability to
+rewrite one. `PATCH /interviews/{id}` is the sole caller and the sole writer
+after creation, so it gets the sole one-method port. The 409-on-an-existing-
+session rule the wizard plan first proposed was dropped before it was built, so
+there is no composition with `SessionStore` here either — the handler needs one
+port and takes one.
 
 # The object store — the same discipline, for bytes
 
@@ -271,4 +336,4 @@ skipped when MinIO is missing (the fixture raises, the suite goes red).
 * **Compose, never widen.** If a handler needs two ports, add a composition like `EnrollmentStore` — do not add candidate methods to `InterviewStore`. The overlap test will fail, and correctly.
 * Return `None` for "not found"; only `delete_candidate` returns a bool. Handlers translate that into a 404.
 * Keep methods synchronous. The adapter is `sqlite3`; async routes call it directly, which is fine at this scale but is the thing to revisit alongside the per-request connection.
-* Ports import from `candidate_agent`, `expectation_agent`, and `control_plane.schemas` for type annotations — allowed, since `control_plane` sits above both agents.
+* Ports import from `candidate_agent` and `control_plane.schemas` for type annotations — allowed, since `control_plane` sits above the agents.

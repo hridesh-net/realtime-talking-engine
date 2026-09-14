@@ -6,8 +6,12 @@ resource: /control_plane/api.py
 tags: [contract, api, fastapi, rest]
 generated:
   by: claude-opus-5
-  at: "2026-09-12T00:00:00Z"
+  at: "2026-09-14T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-14T00:00:00Z"
+  - by: claude-opus-5
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-12T00:00:00Z"
   - by: claude-opus-5
@@ -68,18 +72,58 @@ FastAPI, router prefix `/api/v1`, tag `interviews`. Served by
 |---|---|---|---|---|
 | `POST` | `/api/v1/interviews` | `InterviewStore` | **201** | Body: [`InterviewCreateRequest`](/concepts/contracts/interview-record.md). Sync, no model call. |
 | `GET` | `/api/v1/interviews/{id}` | `InterviewStore` | 200 / 404 | |
+| `PATCH` | `/api/v1/interviews/{id}` | `InterviewEditor` | 200 / 404 / 422 | Body: [`InterviewUpdateRequest`](/concepts/contracts/interview-record.md). `expectations` and `report_sections` only; a body with neither is a 422. Sync, no model call. |
 | `GET` | `/api/v1/interviews?status=` | `InterviewStore` | 200 | Newest first. |
 
-## Expectation
+**`PATCH` is the only write after creation, and it replaces rather than merges.**
+Added 2026-09-14 for the portal wizard, which saves the interview on step 1 and
+draws the expectation toggles on step 2 — before that there was no update route
+at all and step 2 had nothing to write to. It reuses the *create* validators
+(`validate_expectations` / `validate_report_sections` in
+`control_plane/schemas.py`), so the trap is inherited whole: a short
+`expectations` list comes back with every omitted fixed item **re-enabled** and
+every omitted drafted or custom item gone, and a short `report_sections` map
+resets the keys it omits to the code defaults. A client editing a checklist
+sends the entire list and all eight section keys. An explicit `null` on either
+field means "not editing this one"; a body where both are null or absent edits
+nothing and is a 422 rather than a no-op that still moves `updated_at`.
+Everything else on the record — the job spec, the mode, the language — belongs
+to creation and is not reachable here.
+
+## Expectations
 
 | Method | Path | Port used | Status | Notes |
 |---|---|---|---|---|
-| `POST` | `/api/v1/interviews/{id}/expectation` | `ExpectationWorkflowStore` | **201** / 404 | **Calls the model.** No body. Generates and upserts. |
-| `GET` | `/api/v1/interviews/{id}/expectation` | `ExpectationStore` | 200 / 404 | 404 until generated. |
+| `POST` | `/api/v1/expectations/draft` | — | 200 / **502** | `{job_title, jd, skills_required, location}` → `list[ExpectationItem]`. **Calls the model.** Stores nothing. |
+| `POST` | `/api/v1/expectations/classify` | — | 200 / **502** | `{text}` → `{competency_id, reason}`. **Calls the model.** Stores nothing. |
 
-`POST` passes `has_resume=False` unconditionally — the resume is attached later
-when a candidate is assigned, so `resume_probing.required` is currently always
-`False`. That is a known simplification, marked in the source.
+Both mirror `POST /role-facts` exactly: draft, show the operator, let them
+correct it, and store what survived through `POST /interviews`. Creation stays a
+fast, model-free call. The four competencies are never returned by either route
+— they are fixed configuration and the caller already has them from
+`GET /candidate-archetypes`' `rubric_criteria`.
+
+`classify` cannot fail on a bad label: an answer outside the four comes back as
+the default (`structure`) with a **blank reason**, which is the signal that
+nothing was actually decided. See
+[evaluation_agent/expectations.py](/concepts/modules/evaluation-agent-expectations.md).
+
+**Retired 2026-09-13**: `POST` and `GET /api/v1/interviews/{id}/expectation`,
+which generated and stored the old per-interview plan document. Both are 404 now;
+`tests/test_expectations.py` asserts it.
+
+## Links and participants
+
+| Method | Path | Port used | Status | Notes |
+|---|---|---|---|---|
+| `POST` | `/api/v1/interviews/{id}/links` | `LinkSessionStore` | **201** / 401 / 404 / 503 | `{expires_at}` → the token. **Shared secret.** Several links per interview are allowed. |
+| `DELETE` | `/api/v1/links/{token}` | `LinkStore` | **204** / 401 / 404 / 503 | Revoke. 404 the second time — the first revocation is the instant it stopped working. |
+| `GET` | `/api/v1/links/{token}` | `LinkSessionStore` | 200 / 404 / **410** | **Public.** Job title, duration, language, expiry — and nothing else. 410 when expired or revoked. |
+| `GET` | `/api/v1/participants/{id}` | `ParticipantStore` | 200 / 401 / 404 / 503 | **Shared secret.** One taker. |
+| `GET` | `/api/v1/participants/{id}/sessions` | `ParticipantStore` | 200 / 401 / 404 / 503 | **Shared secret.** Their sessions across every interview, with the stored report's competency scores. |
+
+See [Links and participants](/concepts/contracts/links-and-participants.md) for
+the token path, the normalisation rules and the retention decision.
 
 ## Candidates
 
@@ -91,7 +135,7 @@ when a candidate is assigned, so `resume_probing.required` is currently always
 | `POST` | `/api/v1/interviews/{id}/candidates` | `EnrollmentStore` | **201** / 404 / 422 | **Calls the model, once per archetype or custom persona.** Body optional. |
 | `GET` | `/api/v1/interviews/{id}/candidates` | `CandidateStore` | 200 | |
 | `GET` | `/api/v1/candidates/{cid}` | `CandidateStore` | 200 / 404 | Full [persona](/concepts/contracts/virtual-candidate.md). |
-| `GET` | `/api/v1/candidates/{cid}/engine-contract` | `CandidateStore` | 200 / 401 / 404 / 503 | [Runtime slice](/concepts/contracts/engine-contract.md). **Engine-only**: `Authorization: Bearer <CONTROL_PLANE_SHARED_SECRET>`; 401 on a wrong token, 503 when the service has no secret configured. |
+| `GET` | `/api/v1/candidates/{cid}/engine-contract` | `CandidateStore` | 200 / 401 / 404 / 503 | [Runtime slice](/concepts/contracts/engine-contract.md). **Shared secret**: `Authorization: Bearer <CONTROL_PLANE_SHARED_SECRET>`; 401 on a wrong token, 503 when the service has no secret configured. |
 | `POST` | `/api/v1/sessions/{id}/ingest` | `IngestWorkflowStore` | **201** / 200 / 401 / 404 / 409 / 422 / 503 | [Session ingest](/concepts/contracts/session-ingest.md) — the Go engine's write-back. Same bearer gate. 201 first delivery, 200 on a repeat (idempotent on `session_id`, record replaced), 409 when the session belongs to another interview or persona. |
 | `GET` | `/api/v1/candidates/{cid}/scorecard` | `CandidateStore` | 200 / 404 | Ground-truth key. **Never give this to the persona's model.** |
 | `DELETE` | `/api/v1/candidates/{cid}` | `CandidateStore` | **204** / 404 | |
@@ -127,7 +171,7 @@ the taxonomy layer `CustomPersonaSpec` composes into — its fields mirror
 Behavior worth knowing:
 
 * An archetype already enrolled is **returned as-is** unless `regenerate: true`. A `custom_persona` spec is composed into a content-addressed archetype key (`dyn-<hash of the spec>`) first, so re-submitting an identical spec is likewise idempotent.
-* The interview's expectation is fetched and passed to the agent when present — it grounds personas in the flags the interviewer is watching for. **Optional by design**: enrollment must not require an expectation.
+* The interview's **enabled** expectation items are passed to the agent, so the persona is written to make those behaviours worth performing — an item the manager switched off is not something this interview is measured on, and casting against it would put material in the room no report reads. `interview_type` comes from `evaluation_agent.rubric.determine_interview_type(experience_level, company_type)`, a deterministic table.
 * Names already used in the interview are passed as `avoid_names`, because independent casts converge on the same names and a training set full of "Alex Chen" is confusing.
 * Personas are generated **sequentially**, one model call each, and saved as they land. Enrolling six archetypes is six serial calls.
 * A malformed `custom_persona` (unknown preset, out-of-vocabulary value, or `volunteers_protected_info` without `protected_info_type`) is rejected by `_register_custom_persona` **before** any model call — see [control_plane/api.py](/concepts/modules/control-plane-api.md).
@@ -139,7 +183,7 @@ The live text interview. See
 
 | Method | Path | Port used | Status | Notes |
 |---|---|---|---|---|
-| `POST` | `/api/v1/sessions` | `SessionWorkflowStore` | **201** / 404 / 422 | Body `{interview_id, archetype, planned_minutes, modality}`. **Calls the model only when that archetype is not yet enrolled** — then it casts one and saves it. |
+| `POST` | `/api/v1/sessions` | `LinkSessionStore` | **201** / 404 / **410** / 422 | Body `{interview_id \| invite_token, archetype, planned_minutes, modality, participant, user_id}`. **Calls the model only when that archetype is not yet enrolled** — then it casts one and saves it. With a token: 404 unknown, 410 expired or revoked, 422 when `interview_id` disagrees or `participant` is missing. See [Links and participants](/concepts/contracts/links-and-participants.md). |
 | `POST` | `/api/v1/sessions/{id}/turns` | `TurnWorkflowStore` | **201** / 404 / 409 / 410 | Body `{text}` — what the manager said. **Calls the model every time.** Returns the persona's `Turn`. |
 | `POST` | `/api/v1/sessions/{id}/end` | `SessionStore` | 200 / 404 | No body. Idempotent. |
 | `GET` | `/api/v1/sessions/{id}` | `SessionStore` | 200 / 404 | Session plus full transcript. |
@@ -231,7 +275,7 @@ say — see [Evaluation agent](/concepts/subsystems/evaluation-agent.md).
 * **CORS is off unless configured.** `CORS_ALLOWED_ORIGINS` (comma-separated) installs `CORSMiddleware` with `allow_credentials=True` and all methods/headers; empty or unset installs nothing at all, so the same-origin console is unaffected and no wildcard origin is ever offered. See [Dev setup](/concepts/runbooks/dev-setup.md).
 * No authentication, rate limiting, or pagination anywhere.
 * `get_repo()` opens a **new SQLite connection per request** via `init_db()`. The source notes this should be a pooled dependency in production.
-* Dependency injection is `Depends(get_repo)` / `Depends(get_expectation_agent)` / `Depends(get_candidate_agent)` / `Depends(get_session_agent)` / `Depends(get_role_facts_agent)` / `Depends(get_realtime_broker)` — override these in tests rather than patching modules. `tests/test_session.py` does exactly that.
+* Dependency injection is `Depends(get_repo)` / `Depends(get_expectations_agent)` / `Depends(get_candidate_agent)` / `Depends(get_session_agent)` / `Depends(get_role_facts_agent)` / `Depends(get_analysis_agent)` / `Depends(get_realtime_broker)` — override these in tests rather than patching modules. `tests/test_session.py` does exactly that.
 
 ## Related
 

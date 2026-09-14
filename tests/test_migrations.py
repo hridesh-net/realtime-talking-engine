@@ -70,23 +70,28 @@ def _tables(dsn: str) -> set[str]:
 def test_apply_builds_the_schema_on_a_fresh_database(fresh_dsn: str) -> None:
     applied = migrate.apply(fresh_dsn, REAL_MIGRATIONS)
 
-    assert applied == [1, 2, 3]
+    assert applied == [1, 2, 3, 4]
     tables = _tables(fresh_dsn)
     assert "schema_migrations" in tables
     for expected in (
         "interviews",
         "virtual_candidates",
-        "interview_expectations",
         "sessions",
         "session_turns",
         "session_analyses",
         "session_reports",
         "session_recordings",
         "session_ingests",
-        "interview_assignments",
+        "participants",
+        "interview_links",
         "ai_personas",
     ):
         assert expected in tables, f"{expected} was not created"
+    # Retired 2026-09-13: the expectation agent's per-interview document, and an
+    # assignment table that was designed and never written. 0004 drops both, so
+    # a database built from 0001 alone must not have them either.
+    for retired in ("interview_expectations", "interview_assignments"):
+        assert retired not in tables, f"{retired} is still created somewhere"
 
 
 def test_the_ledger_records_the_files_checksum(fresh_dsn: str) -> None:
@@ -100,6 +105,7 @@ def test_the_ledger_records_the_files_checksum(fresh_dsn: str) -> None:
         (1, "initial"),
         (2, "session_ingests"),
         (3, "end_reason_drop_cost_cap"),
+        (4, "expectations_participants_links"),
     ]
     assert [c for _, _, c in rows] == [m.checksum for m in discovered]
 
@@ -122,18 +128,18 @@ def test_re_applying_is_a_no_op(fresh_dsn: str) -> None:
     migrate.apply(fresh_dsn, REAL_MIGRATIONS)
 
     assert migrate.apply(fresh_dsn, REAL_MIGRATIONS) == []
-    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 3
+    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 4
 
 
 def test_an_unapplied_extra_file_is_pending_not_drift(
     fresh_dsn: str, migrations_copy: Path
 ) -> None:
     migrate.apply(fresh_dsn, migrations_copy)
-    (migrations_copy / "0004_later.sql").write_text("CREATE TABLE later (id text PRIMARY KEY);\n")
+    (migrations_copy / "0005_later.sql").write_text("CREATE TABLE later (id text PRIMARY KEY);\n")
 
     with psycopg.connect(fresh_dsn, autocommit=True) as conn:
         state = migrate.status(conn, migrations_copy)
-    assert [m.filename for m in state.pending] == ["0004_later.sql"]
+    assert [m.filename for m in state.pending] == ["0005_later.sql"]
     assert state.drift == []
 
     code = migrate.main(["--check", "--dsn", fresh_dsn, "--migrations-dir", str(migrations_copy)])
@@ -168,7 +174,7 @@ def test_a_migration_that_fails_midway_records_nothing_for_itself(
     fresh_dsn: str, migrations_copy: Path
 ) -> None:
     """The whole file is one transaction, so a half-run file leaves no trace."""
-    (migrations_copy / "0004_broken.sql").write_text(
+    (migrations_copy / "0005_broken.sql").write_text(
         "CREATE TABLE half_built (id text PRIMARY KEY);\n"
         "CREATE TABLE half_built (id text PRIMARY KEY);\n"  # same name: raises
     )
@@ -176,11 +182,12 @@ def test_a_migration_that_fails_midway_records_nothing_for_itself(
     with pytest.raises(psycopg.Error):
         migrate.apply(fresh_dsn, migrations_copy)
 
-    # 0001-0003 ran before 0004 and stay applied; 0004 recorded nothing at all.
+    # 0001-0004 ran before 0005 and stay applied; 0005 recorded nothing at all.
     assert [row[0] for row in _rows(fresh_dsn, "SELECT version FROM schema_migrations")] == [
         1,
         2,
         3,
+        4,
     ]
     assert "half_built" not in _tables(fresh_dsn)
     assert "interviews" in _tables(fresh_dsn)
@@ -205,7 +212,7 @@ def test_the_advisory_lock_serialises_two_runners(fresh_dsn: str, migrations_cop
     would die on a duplicate relation or a duplicate ledger key. With it, the
     loser waits, re-reads under the lock, and finds the work already done.
     """
-    (migrations_copy / "0004_slow.sql").write_text(
+    (migrations_copy / "0005_slow.sql").write_text(
         "SELECT pg_sleep(0.75);\nCREATE TABLE lock_probe (id text PRIMARY KEY);\n"
     )
     migrate.apply(fresh_dsn, REAL_MIGRATIONS)  # get 0001 out of the way
@@ -229,9 +236,9 @@ def test_the_advisory_lock_serialises_two_runners(fresh_dsn: str, migrations_cop
 
     assert not errors, f"a runner raised: {errors}"
     every = sorted(v for result in results for v in result)
-    assert every == [4], "version 4 was applied more than once"
+    assert every == [5], "version 5 was applied more than once"
     assert "lock_probe" in _tables(fresh_dsn)
-    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 4
+    assert len(_rows(fresh_dsn, "SELECT version FROM schema_migrations")) == 5
 
 
 # ---------------------------------------- the two foreign-key decisions ----
@@ -268,11 +275,17 @@ def test_sessions_candidate_id_has_no_foreign_key(conn: psycopg.Connection) -> N
     assert "interview_id" in columns, "the interview FK is meant to be real"
 
 
-def test_assignments_candidate_id_has_no_foreign_key(conn: psycopg.Connection) -> None:
-    columns = _fk_columns(conn, "interview_assignments")
+def test_sessions_participant_id_has_a_real_foreign_key(conn: psycopg.Connection) -> None:
+    """The other reference on `sessions`, and the opposite decision.
 
-    assert "candidate_id" not in columns
-    assert "interview_id" in columns
+    A participant row is never rewritten in place the way a re-cast rewrites
+    `virtual_candidates.candidate_id`, and deleting a person is a deliberate
+    manual act (see the retention decision on session recordings) that should
+    stop at their sessions rather than silently orphan them.
+    """
+    columns = _fk_columns(conn, "sessions")
+
+    assert "participant_id" in columns
 
 
 def _seed_interview_with_a_session(conn: psycopg.Connection) -> None:
@@ -324,6 +337,10 @@ def test_deleting_an_interview_cascades_to_its_sessions(conn: psycopg.Connection
     personas, sessions and turns behind. Postgres enforces them.
     """
     _seed_interview_with_a_session(conn)
+    conn.execute(
+        "INSERT INTO interview_links (token, interview_id, expires_at, created_at) "
+        "VALUES ('tok-1', 'iv-1', now() + interval '1 day', now())"
+    )
     assert _count(conn, "sessions") == 1
 
     conn.execute("DELETE FROM interviews WHERE id = 'iv-1'")
@@ -331,6 +348,9 @@ def test_deleting_an_interview_cascades_to_its_sessions(conn: psycopg.Connection
     assert _count(conn, "sessions") == 0
     assert _count(conn, "session_turns") == 0
     assert _count(conn, "virtual_candidates") == 0
+    # A link outliving the interview it opens would be a token that resolves to
+    # nothing -- a 500 on the one public route rather than an honest 404.
+    assert _count(conn, "interview_links") == 0
 
 
 def test_deleting_a_persona_leaves_the_session_and_its_transcript(
@@ -373,11 +393,11 @@ def test_json_columns_are_jsonb_and_timestamps_are_timestamptz(
     for table, column in (
         ("interviews", "skills_required"),
         ("interviews", "role_facts"),
+        ("interviews", "expectations"),
         ("interviews", "config"),
         ("interviews", "metadata"),
         ("interviews", "ai_persona"),
         ("virtual_candidates", "persona_json"),
-        ("interview_expectations", "expectation_json"),
         ("session_analyses", "analysis_json"),
         ("session_reports", "report_json"),
         ("ai_personas", "attributes"),
@@ -389,6 +409,8 @@ def test_json_columns_are_jsonb_and_timestamps_are_timestamptz(
         ("sessions", "started_at"),
         ("session_turns", "at"),
         ("session_recordings", "updated_at"),
+        ("interview_links", "expires_at"),
+        ("participants", "last_seen_at"),
         ("schema_migrations", "applied_at"),
     ):
         assert types[(table, column)] == "timestamp with time zone", f"{table}.{column}"

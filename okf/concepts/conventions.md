@@ -42,8 +42,8 @@ Line length **100**, target **py311**, `ui/` excluded.
 
 ## Types
 
-mypy over `control_plane`, `expectation_agent`, `candidate_agent`,
-`evaluation_agent`, `llm` with
+mypy over `control_plane`, `candidate_agent`, `evaluation_agent`,
+`analysis_agent`, `report_engine`, `llm` with
 `disallow_untyped_defs`, `disallow_incomplete_defs`, `check_untyped_defs`,
 `no_implicit_optional`, `warn_unreachable`, `warn_unused_ignores`, plus the
 pydantic plugin. Only `google.*`, `openai.*`, `dotenv.*` are allowed missing
@@ -80,6 +80,9 @@ after the model call rather than trusting the prompt.
 
 ## Contract hygiene
 
-Any change to `VirtualCandidate`, `EngineContract`, `InterviewExpectation`,
-`InterviewResponse`, or `CandidateEnrollRequest` requires regenerating
-`owner_handover/` (`scripts/export_schemas.py`). `check.sh` fails otherwise.
+Any change to `VirtualCandidate`, `EngineContract`, `InterviewResponse`,
+`CandidateEnrollRequest`, `SessionCreateRequest`, `SessionResponse`,
+`SessionSummary`, `InterviewLinkResponse`, `PublicLinkResponse` or
+`ParticipantSessionRow` requires regenerating `owner_handover/`
+(`scripts/export_schemas.py`). `check.sh` fails otherwise. `InterviewResponse`
+now nests `ExpectationItem`, so a change there moves the interview schema too.

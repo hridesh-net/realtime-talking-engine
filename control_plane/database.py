@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS interviews (
         CHECK (proctoring IN ('off', 'identity', 'full')),
     persona_notes TEXT NOT NULL DEFAULT '',
     role_facts TEXT NOT NULL DEFAULT '[]',
+    -- The granular rubric under the four fixed competencies: one JSON array of
+    -- {id, competency_id, text, source, enabled}. The competencies themselves
+    -- are never stored -- they are code (evaluation_agent/rubric.py) and must be
+    -- identical on every interview or the scores stop being comparable.
+    expectations TEXT NOT NULL DEFAULT '[]',
     report_sections TEXT NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'scheduled'
         CHECK (status IN ('scheduled', 'in_progress', 'completed', 'failed', 'cancelled')),
@@ -91,28 +96,36 @@ CREATE TABLE IF NOT EXISTS session_reports (
     updated_at TEXT NOT NULL
 );
 
--- Designed, not built: nothing reads or writes this table yet. It is the
--- shape an assignment takes when a SkillBrew user is given an interview to
--- conduct against a chosen persona -- the user's performance *as the
--- interviewer* is what gets assessed. Identity belongs to SkillBrew, which
--- owns the email invitation and always hands us an opaque user id; there is
--- no AI assignee, so there is no assignee-type column.
-CREATE TABLE IF NOT EXISTS interview_assignments (
+-- An identity join key, NOT a user table: no password, no login, no roles.
+-- Rows are created or updated when a session starts and never by a signup.
+-- `email` is UNIQUE and stored normalised (trimmed, lower-cased) because the
+-- product rule is that the same email is the same person -- that is what makes
+-- one taker's sessions across five interviews readable as one history.
+-- `user_id` is a SkillBrew account id when one is ever supplied for that email;
+-- most rows never have one, because most takers arrive on a link.
+CREATE TABLE IF NOT EXISTS participants (
     id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    user_id TEXT,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL
+);
+
+-- A link with an expiry. Several per interview are allowed (a cohort in March
+-- and one in June) and one link serves any number of takers, so the token is
+-- the primary key and the interview is the foreign key -- not the other way
+-- round. Expiry is enforced when a session is created, not by a sweeper: a
+-- row that is past `expires_at` is simply never redeemable again.
+CREATE TABLE IF NOT EXISTS interview_links (
+    token TEXT PRIMARY KEY,
     interview_id TEXT NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL,
-    -- The persona assigned. No FOREIGN KEY, for the same reason
-    -- sessions.candidate_id has none: virtual_candidates.candidate_id is
-    -- derived from the cast seed, so re-casting with a seed_prefix rewrites
-    -- that primary key in place via repository.py's
-    -- `ON CONFLICT ... DO UPDATE SET candidate_id = excluded.candidate_id`.
-    candidate_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'accepted', 'rejected', 'completed')),
-    accepted_at TEXT,
-    completed_at TEXT,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_links_interview ON interview_links(interview_id);
 
 CREATE TABLE IF NOT EXISTS ai_personas (
     candidate_id TEXT PRIMARY KEY,
@@ -126,8 +139,6 @@ CREATE TABLE IF NOT EXISTS ai_personas (
 
 CREATE INDEX IF NOT EXISTS idx_interviews_status ON interviews(status);
 CREATE INDEX IF NOT EXISTS idx_interviews_experience_level ON interviews(experience_level);
-CREATE INDEX IF NOT EXISTS idx_assignments_interview ON interview_assignments(interview_id);
-CREATE INDEX IF NOT EXISTS idx_assignments_user ON interview_assignments(user_id);
 
 CREATE TABLE IF NOT EXISTS virtual_candidates (
     candidate_id TEXT PRIMARY KEY,
@@ -162,6 +173,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     modality TEXT NOT NULL DEFAULT 'text' CHECK (modality IN ('text', 'voice')),
     planned_minutes INTEGER NOT NULL,
     opening_line TEXT NOT NULL,
+    -- Who held this session. Nullable only for rows that predate participants
+    -- (2026-09-13) and for the ones the Go engine's ingest creates on its own;
+    -- every session opened through POST /sessions with a participant has one.
+    participant_id TEXT REFERENCES participants(id),
     started_at TEXT NOT NULL,
     ended_at TEXT,
     created_at TEXT NOT NULL
@@ -182,15 +197,7 @@ CREATE TABLE IF NOT EXISTS session_turns (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_interview ON sessions(interview_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-
-CREATE TABLE IF NOT EXISTS interview_expectations (
-    id TEXT PRIMARY KEY,
-    interview_id TEXT NOT NULL UNIQUE REFERENCES interviews(id) ON DELETE CASCADE,
-    expectation_version TEXT NOT NULL DEFAULT 'v1.0',
-    expectation_json TEXT NOT NULL,
-    model_used TEXT,
-    created_at TEXT NOT NULL
-);
+CREATE INDEX IF NOT EXISTS idx_sessions_participant ON sessions(participant_id);
 
 -- One recording per session; the artifact's identity IS the session, whoever
 -- produced it. Bytes live outside SQLite (RECORDINGS_DIR today; S3 when the

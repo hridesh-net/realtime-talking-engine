@@ -33,7 +33,7 @@ contain.
 | §6 API specification | Partly here; the training-batch and session endpoints differ from what was built |
 | §8 Go implementation guidelines | The Go runtime — not here. `.golangci.yml` records the lint standard |
 | §8.5 Persona prompt template | Superseded by [`engine_contract.py`](/concepts/modules/candidate-agent-engine-contract.md), which compiles a far richer prompt |
-| §9 Fixed evaluation criteria | [`expectation_agent/rubric.py`](/concepts/modules/expectation-agent-rubric.md) — the six criteria and weights, verbatim |
+| §9 Fixed evaluation criteria | Superseded twice: BRD v2's six criteria lived in the retired `expectation_agent/rubric.py` ([superseded card](/concepts/modules/expectation-agent-rubric.md)); the manager's four now live in [`evaluation_agent/rubric.py`](/concepts/modules/evaluation-agent-rubric.md) |
 | §10 Implementation phases | Phases 1–2 are done; training mode and reporting are partial |
 | §11 Risk & mitigation, §12 Glossary | Background |
 

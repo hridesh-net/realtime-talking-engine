@@ -37,7 +37,6 @@ sources:
   - resource: /tests/test_portal_compat.py
   - resource: /tests/test_engine_ingest.py
   - resource: /tests/test_candidate_agent.py
-  - resource: /tests/test_expectation_agent.py
 ---
 # Test suite
 
@@ -152,7 +151,7 @@ engine that will execute it in production.
 * **The runner** — a fresh database gets the whole schema; the ledger records the file's sha256; `--check` is clean afterwards; re-applying returns `[]` and adds no row; an extra file is **pending** (exit 1) while an edited or deleted applied file is **drift** (exit 2); `assert_current` names the pending file.
 * **A migration that fails midway records nothing for itself.** The file is one transaction, so a `0004` (a fixture written beside the three real files) whose second statement raises leaves `0001`–`0003` applied, `0004` unrecorded, and the table its first statement created absent.
 * **The advisory lock serialises two runners.** The migration sleeps, so the second thread is guaranteed to arrive mid-transaction. Without `pg_advisory_xact_lock` it would read an empty ledger and run the same `CREATE TABLE` — the test would then see a duplicate-relation error or two ledger rows. This is a test that can fail, not a description of a mechanism.
-* **The two foreign-key decisions.** `sessions.candidate_id` and `interview_assignments.candidate_id` have **no** FK constraint, `sessions.interview_id` does; deleting an interview cascades to sessions, turns and personas; deleting a *persona* leaves the session and its transcript standing; and the candidate primary key can be rewritten out from under a session. SQLite ignored all of this, so nothing else in the suite can notice a tidy-minded edit that adds the constraint back.
+* **The foreign-key decisions.** `sessions.candidate_id` has **no** FK constraint while `sessions.interview_id` and `sessions.participant_id` do; deleting an interview cascades to sessions, turns, personas and links; deleting a *persona* leaves the session and its transcript standing; and the candidate primary key can be rewritten out from under a session. SQLite ignored all of this, so nothing else in the suite can notice a tidy-minded edit that adds the constraint back — or removes the one that is meant to be real.
 * **The type mapping** — the JSON columns really are `jsonb`, the timestamps really are `timestamptz`, `language_gate` is `boolean`, `byte_size` is `bigint`, and a `skills_required` written as an object is rejected by its `jsonb_typeof` CHECK.
 
 ### `tests/infra.py` and `tests/conftest.py` — where the server comes from
@@ -293,29 +292,63 @@ multi-turn practice session → end it → re-read the transcript and the
 scorecard, repeated across a spread of persona compositions (every bias trap
 and none). It is the closest thing to a system test that costs nothing.
 
-### `tests/test_model_error_surfacing.py` (4 tests)
+### `tests/test_model_error_surfacing.py` (5 tests)
 
 A provider failure (rate limit, quota, outage) must surface as a clean **502**,
 never a raw 500 with a stack trace. Found live against the Gemini free-tier
-quota: the three endpoints that call a model to cast a persona or generate an
+quota: the endpoints that call a model to cast a persona or draft an
 expectation never caught `ModelError`, unlike the realtime-voice mint two
-hundred lines away. These four lock in that fix.
+hundred lines away. These lock in that fix.
+
+### `tests/test_expectations.py` (42 tests, added 2026-09-13)
+
+Three groups. **The fixed items**: that `COMPETENCY_IDS` is derived from the
+rubric rather than restated, that every item carries the rubric's wording
+verbatim, and a **pinned list of all nineteen ids** — the test that makes
+rewording a `covers` string a deliberate act, because an id is how a stored
+interview's item is matched back to the rubric. **The agent's clamps**: an
+unknown competency dropped, a fourth item under one competency truncated in
+model order, text capped at 200, a restatement of a fixed item dropped, and a
+classify answer outside the four degraded to the default *with a blank reason*.
+**Creation**: what `POST /interviews` accepts and rejects, custom ids assigned
+server-side in request order, missing fixed items restored, and the re-keyed
+`report_sections`.
+
+Confirmed against a deliberately broken implementation: with `_build_drafted`
+passing the model's answer through and `_valid_expectations` returning its
+input, fourteen of the thirty fail.
+
+### `tests/test_links_participants.py` (31 tests, added 2026-09-13)
+
+The link lifecycle (mint → public read → revoke), the 404/410 split, that the
+public body carries neither the JD nor a persona name, that
+`secrets.compare_digest` is what decides (asserted by observing the call, not by
+timing — a timing assertion in a suite is a flake generator), and the
+shared-secret gate including its 503 when the secret is unset. Then the token
+path through `POST /sessions`: expiry and revocation enforced at that moment,
+`participant` required with a token, an `interview_id` that disagrees rejected.
+Then identity: the same email in a different case and with whitespace is one
+row, the name follows the latest form, `last_seen_at` moves while `created_at`
+does not, a `user_id` supplied later attaches and is never cleared. Finally
+cross-interview history, with a stored report on one session and none on the
+other, and the two bundle mastheads (named participant, and the job-title
+fallback for a session that has none).
+
+Its docstring lists the four sabotages used to prove each half can fail.
 
 ## Live — `scripts/check.sh --live`
 
 Run as scripts, not through pytest:
 
 ```bash
-.venv/bin/python tests/test_expectation_agent.py   # 5 job-spec scenarios
 .venv/bin/python tests/test_candidate_agent.py     # 6 archetypes + determinism
 ```
 
 The candidate suite asserts verdicts and traits come from the catalog, knowledge
 stays under the ceiling, every required skill is covered, names are unique within
-a training set, and the same seed reproduces the same person. The expectation
-suite validates each generated document against the guardrails — including the
-two (skill coverage, `min_duration_minutes` ceiling) that code does *not*
-re-impose.
+a training set, and the same seed reproduces the same person. (The expectation
+scenario suite was the second script here until 2026-09-13; it went with the
+package it exercised.)
 
 ## The Go engine's suite
 
@@ -355,11 +388,10 @@ stayed green.
 
 ## Gaps
 
-* **The expectation routes are still thinly tested.** Enrollment is covered by `test_control_plane_candidates_api.py` and the interview and session routes by `test_full_interview_pipeline_integration.py`; the skip-unless-regenerate branch of `POST .../expectation` and the expectation SQL remain uncovered. The pattern to copy is already in `test_session.py`.
+* **The interview routes themselves are still thinly tested.** Enrollment is covered by `test_control_plane_candidates_api.py`, creation validation by `test_expectations.py`, and the interview and session routes by `test_full_interview_pipeline_integration.py`; `GET /interviews?status=` and the list SQL remain uncovered. The pattern to copy is already in `test_session.py`.
 * No live scenario exercises a session end to end against a real provider. The pivot plan's Phase 5 task 30 adds one scripted session per persona under `--live`.
 * **Nothing automated exercises real audio.** The WebRTC handshake and the data-channel event names were verified by hand against the live API on 2026-08-22, and the Gemini Live SDK surface against the pinned packages on 2026-09-01 (both recorded in [Realtime voice](/concepts/contracts/realtime-voice.md)); a vendor rename would pass every test here and fail in the browser. The event-name mapping in `VoiceSessionView.jsx`, the PCM framing in `geminiLive.js`, and the resumption/`goAway` handling are the fragile surfaces. `tests/test_gemini_live_mint.py` covers the mint half of that and nothing more.
-* Nothing checks that `EXPECTATION_JSON_SCHEMA` matches `InterviewExpectation` — two hand-maintained representations of one shape.
-* `expectation_agent/agent.py` has no offline test of its overwrite logic, which is where its determinism guarantee actually lives.
+* **Nothing yet reads `interviews.expectations` at scoring time.** WP2 of `docs/INTERVIEW_EXPECTATIONS_PLAN.md` is what makes the report engine turn an enabled item into a signal and the renderer honour `report_sections`; until then the checklist is stored, cast against and analysed against, and the eight section toggles change nothing on a rendered page.
 * No JS tests for `ui/`.
 
 ## Guards added with the Phase 0 MVP (2026-08-22)

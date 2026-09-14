@@ -111,7 +111,11 @@ class FakeChatModel(ChatModel):
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
+    # `get_repo()` builds its own connection from CONTROL_PLANE_DB, so the path
+    # handed to `build_app` is not the one the handlers use. Without this the
+    # suite reads and writes the developer's own `control_plane.db`.
+    monkeypatch.setenv("CONTROL_PLANE_DB", str(tmp_path / "test.db"))
     app = build_app(str(tmp_path / "test.db"))
     app.dependency_overrides[get_candidate_agent] = lambda: VirtualCandidateAgent(
         model=FakeCastingModel("fake-1", 0.35)

@@ -10,13 +10,32 @@ generated:
 verified:
   - by: claude-opus-5/okf-curator
     at: "2026-08-21T19:17:54Z"
-status: stable
+status: superseded
 sources:
   - resource: /expectation_agent/schema.py
   - resource: /expectation_agent/rubric.py
   - resource: /expectation_agent/agent.py
 ---
 # InterviewExpectation
+
+> **SUPERSEDED 2026-09-13.** `expectation_agent/` was deleted from the tree,
+> together with its two endpoints, its `interview_expectations` table, the
+> `ExpectationStore` / `ExpectationWorkflowStore` ports and
+> `tests/test_expectation_agent.py`. It existed to generate a *per-interview
+> rubric from a JD*, which is exactly what BRD v3 forbids: the rubric is fixed
+> configuration, not generated content (pivot plan Phase 2, task 7).
+>
+> This page is kept, not deleted, because the design decisions in it are the
+> ones the replacement was argued against. **Read it as history.** What is live
+> now: [evaluation_agent/rubric.py](/concepts/modules/evaluation-agent-rubric.md)
+> for the four fixed competencies,
+> [evaluation_agent/expectations.py](/concepts/modules/evaluation-agent-expectations.md)
+> for the per-interview items and the agent that drafts them, and
+> [Interview record](/concepts/contracts/interview-record.md) for where they are
+> stored. `determine_interview_type` moved into `evaluation_agent/rubric.py`
+> unchanged — it was the only thing this package computed that anything still
+> read.
+
 
 One per interview, `expectation_version = "v1.0"`, stored one-to-one and
 regenerable (the save is an upsert on `interview_id`).

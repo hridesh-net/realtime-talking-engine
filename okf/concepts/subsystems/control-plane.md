@@ -6,8 +6,10 @@ resource: /control_plane
 tags: [control-plane, fastapi, sqlite, api]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-09-10T12:00:00Z"
+  at: "2026-09-14T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-14T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5
@@ -28,22 +30,28 @@ sources:
 ---
 # Control plane
 
-> **Six narrow ports now.** `ReportStore` and the `ReportWorkflowStore`
-> composition landed with session reports; `control_plane/reporting.py` is the
-> seam that assembles a `report_engine` bundle from stored rows.
+> **Ten narrow ports now** (counted against `control_plane/ports.py`,
+> 2026-09-14), and seven compositions. The newest is `InterviewEditor`, one
+> method, added with `PATCH /interviews/{id}` for the portal wizard: the route
+> that rewrites an interview does not go through `InterviewStore`, so nothing
+> that merely reads a job spec gained the ability to edit one.
+> `control_plane/reporting.py` is the seam that assembles a `report_engine`
+> bundle from stored rows.
 
-`control_plane/` — the top layer. Composes the three agent packages
-(`expectation_agent`, `candidate_agent`, `evaluation_agent`) and owns all
-storage. The only package allowed to import `sqlite3`.
+`control_plane/` — the top layer. Composes the agent packages
+(`candidate_agent`, `evaluation_agent`, `analysis_agent`) and the standalone
+`report_engine`, and owns all storage. The only package allowed to import
+`sqlite3`. (`expectation_agent` was deleted on 2026-09-13; the checklist lives
+in `evaluation_agent/expectations.py` now.)
 
 | Module | Role |
 |---|---|
 | `main.py` | `build_app(db_path=None)` factory + `main()` uvicorn runner; `GET /healthz` |
 | `api.py` | [Routes and DI](/concepts/modules/control-plane-api.md) — the `/api/v1` router |
-| `ports.py` | [Five storage protocols + five compositions](/concepts/contracts/storage-ports.md) |
+| `ports.py` | [Ten storage protocols + seven compositions](/concepts/contracts/storage-ports.md) |
 | `repository.py` | [`InterviewRepository`](/concepts/modules/control-plane-repository.md) — the SQLite adapter |
 | `database.py` | [Schema and connection](/concepts/contracts/database-schema.md) |
-| `schemas.py` | [Interview record](/concepts/contracts/interview-record.md) + [session transcript](/concepts/contracts/session-transcript.md) models |
+| `schemas.py` | [Interview record](/concepts/contracts/interview-record.md) (create **and** update bodies, and the shared `validate_expectations` / `validate_report_sections`) + [session transcript](/concepts/contracts/session-transcript.md) models |
 | `persona.py` | Legacy seeded persona (below) |
 
 ## Startup
@@ -82,9 +90,10 @@ exception carried are preserved.
 
 ## Dependency injection
 
-Five provider functions — `get_repo()`, `get_expectation_agent()`,
-`get_candidate_agent()`, `get_session_agent()`, `get_role_facts_agent()` — wired
-with `Depends(...)`, plus `get_realtime_broker()` for the voice path.
+Six provider functions — `get_repo()`, `get_expectations_agent()`,
+`get_candidate_agent()`, `get_session_agent()`, `get_role_facts_agent()`,
+`get_analysis_agent()` — wired with `Depends(...)`, plus `get_realtime_broker()`
+for the voice path.
 
 `mint_realtime_credential` compiles the session document through
 `build_voice_session(..., provider=broker.provider, voices=broker.voices,
@@ -112,14 +121,21 @@ and [Run an interview](/concepts/runbooks/run-an-interview.md).
 
 **Casting inside `POST /sessions` is the same cast enrollment does
 (2026-09-01).** When the requested archetype is not yet enrolled the handler
-casts it on the spot — and it used to do so with `expectation=None` and a
-hardcoded `interview_type="mixed"`, ignoring the interview's stored expectation
-document as well as its location, department, reporting line and role facts. The
-"Create & chat" path therefore produced a weaker, less grounded persona than
-enrolling the identical archetype through `POST .../candidates`. It now reads
-`repo.get_expectation(...)` and passes the whole job spec, which is why
-`SessionWorkflowStore` gained `ExpectationStore`
-([storage ports](/concepts/contracts/storage-ports.md)).
+casts it on the spot — and it used to do so with no grounding document and a
+hardcoded `interview_type="mixed"`, ignoring the interview's location,
+department, reporting line and role facts too. The "Create & chat" path
+therefore produced a weaker, less grounded persona than enrolling the identical
+archetype through `POST .../candidates`. Both paths now pass the whole job spec,
+the interview's **enabled expectation items**, and an `interview_type` derived
+deterministically from `(experience_level, company_type)` — see
+[evaluation_agent/expectations.py](/concepts/modules/evaluation-agent-expectations.md).
+
+**Two ways into `POST /sessions` (2026-09-13).** A caller either names the
+`interview_id` or sends an `invite_token`, and everything after the interview is
+resolved is the same code. The link path enforces expiry at that moment and
+upserts a `participant` keyed on email before the cast, which is why the
+handler's port is `LinkSessionStore` — see
+[Links and participants](/concepts/contracts/links-and-participants.md).
 
 For a `voice` session it also owns the recorded audio artifact — chunk
 ordering, finalization, and where the bytes land on disk — uploaded by the
@@ -143,12 +159,19 @@ table, and `schemas.CandidatePersona`/`PersonaAttribute`.
 
 ## Not implemented
 
-Assignment (`interview_assignments` has zero rows, zero readers and zero
-writers — its columns were renamed on 2026-09-10 to say what it is *for*: a
-SkillBrew `user_id` is assigned an interview and a `candidate_id` persona, and
-their performance as the interviewer is what is assessed; see
-[Database schema](/concepts/contracts/database-schema.md)), interview status
-transitions (everything stays `scheduled`), the `start_url` target endpoint,
-auth, and pagination. On the session side: no report endpoint (Phase 4 of the
-pivot plan), no session list, and no timeout sweep — so `status = "abandoned"`
-is in the schema but never set.
+Interview status transitions (everything stays `scheduled`), the `start_url`
+target endpoint, general auth, and pagination. No timeout sweep — so
+`status = "abandoned"` is in the schema but is only ever set by the engine's
+ingest.
+
+**Auth is still per-route, not global.** `require_shared_secret` gates the
+engine contract, the ingest, the link minter, the revoke and the two participant
+routes; everything else — including interview creation and every session route —
+is open. That is a deliberate carry-over, not an oversight: the portal
+integration has to decide what authentication reaches this service, and the
+2026-09-13 change put a gate only where a route would otherwise hand out a
+credential or a named person's record.
+
+Assignment is **gone**, not pending: `interview_assignments` was designed and
+never written, and was dropped on 2026-09-13 in favour of
+[links and participants](/concepts/contracts/links-and-participants.md).

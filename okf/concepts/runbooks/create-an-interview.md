@@ -6,8 +6,10 @@ resource: /control_plane/api.py
 tags: [runbook, e2e, api, curl]
 generated:
   by: claude-opus-5/okf-curator
-  at: "2026-08-21T19:17:54Z"
+  at: "2026-09-14T00:00:00Z"
 verified:
+  - by: claude-opus-5
+    at: "2026-09-14T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: claude-opus-5/okf-curator
@@ -45,24 +47,62 @@ Optional M1 fields ride on the same body: `location`, `department`,
 `manager_level`, `language` (`english_indian`|`hinglish`|`hindi` — the persona
 opens in it), `proctoring` (recorded, never enforced), `persona_notes`
 (colour layered on the archetype; cannot override it), `role_facts` (the
-role-fact checklist — draft them first with `POST /role-facts`) and
+role-fact checklist — draft them first with `POST /role-facts`),
+`expectations` (the behaviours the interviewer is measured on — omit it and the
+rubric's nineteen fixed items are stored, every one enabled) and
 `report_sections` (which report panels the manager sees; unknown keys are a
 422). All default sensibly, so the minimal body above still works.
 
-## 2. Generate the expectation
+## 2. Draft the extra expectation items, then edit the checklist
+
+**Retired 2026-09-13**: `POST /interviews/{id}/expectation`, which generated a
+per-interview plan document. It is a 404 now. The checklist is
+[expectation items](/concepts/contracts/interview-record.md) on the interview
+record instead, and the model only writes *wording* onto competencies code owns.
 
 ```bash
-curl -s -X POST http://localhost:8081/api/v1/interviews/<id>/expectation
+# job-grounded extras, on top of the nineteen fixed items. Calls the model
+# (temperature 0.1), stores nothing, 502 if the provider is down. An empty
+# list is a legal answer.
+curl -s -X POST http://localhost:8081/api/v1/expectations/draft \
+  -H 'Content-Type: application/json' -d '{
+    "job_title": "Senior Backend Engineer",
+    "jd": "Go, distributed systems, Redis, microservices.",
+    "skills_required": ["Go", "distributed systems"]
+  }'
+# -> [{"id": "drafted.structure.1", "competency_id": "structure", "text": "...",
+#      "source": "drafted", "enabled": true}, ...]
+
+# which of the four competencies a manager's own sentence belongs under.
+# A suggestion only — the manager may override it.
+curl -s -X POST http://localhost:8081/api/v1/expectations/classify \
+  -H 'Content-Type: application/json' -d '{"text": "Probes the Redis claim with a concrete incident."}'
+# -> {"competency_id": "structure", "reason": "..."}
 ```
 
-Calls the model (temperature 0.1). Returns the full
-[expectation document](/concepts/contracts/interview-expectation.md): phase
-structure, mandatory/optional skills with assessment methods, resume and
-behavioural probing, red/green flags, the six fixed criteria, and interviewer
-dos/don'ts. Upserts — safe to re-run.
+Then write the edited checklist back (2026-09-14). This is the only write after
+creation, and it is what the portal wizard's step 2 calls:
 
-For this input, `determine_interview_type("senior", "startup")` fixes
-`interview_type` to `technical_discussion` before the model ever sees it.
+```bash
+curl -s -X PATCH http://localhost:8081/api/v1/interviews/<id> \
+  -H 'Content-Type: application/json' -d '{
+    "expectations": [ ...every item, fixed ones included, with its enabled flag... ],
+    "report_sections": {"scorecard": true, "qna": true, "bei": true,
+                        "strengths_gaps": true, "areas": true,
+                        "percentage_score": true, "transcript": true,
+                        "summary": false}
+  }'
+```
+
+**Send the whole list and all eight section keys.** There is no merge with the
+stored row: an omitted fixed item comes back *enabled*, an omitted drafted or
+custom item is gone, and an omitted section key resets to its code default. A
+body with neither field — or with both explicitly `null` — is a **422**, not a
+silent no-op; an unknown id is a **404**.
+
+`determine_interview_type("senior", "startup")` still fixes `interview_type` to
+`technical_discussion`, in `evaluation_agent/rubric.py`, from a four-row table
+with no model involved.
 
 ## 3. Enroll virtual candidates
 
@@ -82,8 +122,10 @@ One model call **per archetype**, sequential — expect it to be slow. Already-
 enrolled archetypes are returned untouched unless you pass `"regenerate": true`.
 Pass `"seed_prefix"` to reproduce a specific set of people.
 
-If the expectation exists, it is fed to the agent to ground the personas in the
-flags the interviewer will be watching for. It is optional.
+The interview's **enabled** expectation items are fed to the casting agent to
+ground the personas in what the interviewer will be watching for. Items switched
+off are not sent — an item this interview is not measured on is not something a
+persona should be shaped around.
 
 ## 4. Hand off to the engine
 

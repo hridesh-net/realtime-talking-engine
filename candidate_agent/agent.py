@@ -1,7 +1,7 @@
 """Virtual Candidate Agent.
 
 Generates one persona per (interview, archetype). The split of responsibility is
-deliberate and mirrors ``expectation_agent``:
+deliberate and mirrors ``evaluation_agent``:
 
 * **Code owns** the archetype, the verdict, every trait score (seeded from
   SHA256 so the same interview reproduces the same person), the scorecard
@@ -130,7 +130,7 @@ class VirtualCandidateAgent:
         interview_type: str = "mixed",
         language: str = DEFAULT_LANGUAGE,
         persona_notes: str = "",
-        expectation: Any | None = None,
+        expectations: list[dict[str, Any]] | None = None,
         seed_override: str | None = None,
         avoid_names: list[str] | None = None,
         human_traits: HumanTraitProfile | None = None,
@@ -153,10 +153,14 @@ class VirtualCandidateAgent:
             company_type: startup or mnc.
             job_location_type: remote, onsite, or hybrid.
             duration_minutes: Interview length.
-            interview_type: Type from the expectation document.
+            interview_type: The shape of conversation this is
+                (`evaluation_agent.rubric.determine_interview_type`).
             language: The language the persona speaks. Code owns this list.
             persona_notes: Extra colour layered on the archetype; never overrides it.
-            expectation: Expectation document to ground the persona in, if any.
+            expectations: The interview's enabled expectation items
+                (`evaluation_agent.expectations.ExpectationItem` dumps) — what
+                the *interviewer* is expected to do. The persona is written to
+                make those behaviours worth performing.
             seed_override: Replaces the default seed for reproducible casts.
             avoid_names: Names already used in this training set.
             human_traits: Optional realism/compliance layer (see
@@ -222,7 +226,7 @@ class VirtualCandidateAgent:
                 must_discover=[
                     {"id": s.id, "generic_signal": s.signal} for s in archetype.must_discover
                 ],
-                expectation_note=expectation_note(expectation),
+                expectation_note=expectation_note(skills_required, expectations),
                 avoid_names=avoid_names,
                 location=location,
                 department=department,

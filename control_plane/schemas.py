@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Any
+from typing import Any, overload
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from evaluation_agent.expectations import (
+    COMPETENCY_IDS,
+    MAX_CUSTOM_ITEMS,
+    ExpectationClassification,
+    ExpectationItem,
+    fixed_items,
+    fixed_text_by_id,
+)
 from evaluation_agent.schema import ROLE_FACT_KEYS, RoleFact
 
 #: Longest interview, and therefore longest session, this service will accept.
@@ -28,25 +37,38 @@ class InterviewConfigInput(BaseModel):
 
 LANGUAGES = ("english_indian", "hinglish", "hindi")
 
-__all__ = ["ROLE_FACT_KEYS", "RoleFact"]  # re-exported for handlers and the schema export
+#: Re-exported for handlers and the schema export. The expectation models are
+#: owned by `evaluation_agent` — the same arrangement as `RoleFact` — because
+#: the checklist is the evaluation layer's, not the transport's.
+__all__ = [
+    "COMPETENCY_IDS",
+    "MAX_CUSTOM_ITEMS",
+    "ROLE_FACT_KEYS",
+    "ExpectationClassification",
+    "ExpectationItem",
+    "RoleFact",
+]
 
 #: The report sections a manager may be shown, and whether they are on by
-#: default. Order is the order they render in. The two `False` entries are the
-#: spec's own defaults: pace and fillers are advisory, and English proficiency
-#: is off because it is not a competency this product assesses.
+#: default. Order is the order they render in.
+#:
+#: Re-keyed 2026-09-13 to the sections `report_engine/render.py` actually has.
+#: The twelve keys copied from the wizard mockup named seven sections the engine
+#: does not measure, and a toggle that changes nothing is the inert guard this
+#: repo forbids. The rule behind the defaults: everything the current report
+#: shows stays on; a number is on by default only when code computes it
+#: deterministically (the readiness index is); prose no number stands behind is
+#: off (the summary); and the transcript is raw evidence rather than a
+#: computation, so it is off until asked for.
 REPORT_SECTIONS: dict[str, bool] = {
-    "readiness_index": True,
-    "welcome_greeting": True,
-    "role_explanation": True,
-    "category_scorecard": True,
+    "scorecard": True,
+    "qna": True,
+    "bei": True,
     "strengths_gaps": True,
-    "key_moments": True,
-    "question_analysis": True,
-    "bias_check": True,
-    "transcript": True,
-    "next_practice": True,
-    "advisory_pace_fillers": False,
-    "manager_english": False,
+    "areas": True,
+    "percentage_score": True,
+    "transcript": False,
+    "summary": False,
 }
 
 
@@ -62,6 +84,127 @@ class RoleFactsRequest(BaseModel):
     job_title: str = Field(..., min_length=1)
     jd: str = Field(..., min_length=1)
     location: str = ""
+
+
+class ExpectationsDraftRequest(BaseModel):
+    """POST /api/v1/expectations/draft body.
+
+    The expectation counterpart of :class:`RoleFactsRequest`, and deliberately
+    the same shape of call: it drafts, it stores nothing, and the operator
+    edits what comes back before `POST /interviews` records it.
+    """
+
+    job_title: str = Field(..., min_length=1)
+    jd: str = Field(..., min_length=1)
+    skills_required: list[str] = Field(default_factory=list)
+    location: str = ""
+
+
+class ExpectationsClassifyRequest(BaseModel):
+    """POST /api/v1/expectations/classify body — one item the manager typed."""
+
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+# ---------------------------------------------------------------------------
+# The checklist validators
+#
+# Module functions rather than methods because two request models need exactly
+# the same rules: `InterviewCreateRequest` writes the checklist, and
+# `InterviewUpdateRequest` rewrites it. A second copy of them would be a second
+# instrument, and the two would drift on the first rubric change.
+#
+# Both are **None-safe**, and that is a 500 this repo would otherwise ship:
+# `InterviewUpdateRequest`'s fields are optional, so an explicit `"expectations":
+# null` reaches the field validator as `None`. Pydantic maps only `ValueError`
+# and `AssertionError` to a 422 — a `TypeError` from iterating `None` escapes as
+# an unhandled exception. Returning `None` unchanged keeps "an explicit null is
+# the same as absent" a decision made here, not a stack trace.
+# ---------------------------------------------------------------------------
+
+
+@overload
+def validate_report_sections(v: dict[str, bool]) -> dict[str, bool]: ...
+
+
+@overload
+def validate_report_sections(v: None) -> None: ...
+
+
+def validate_report_sections(v: dict[str, bool] | None) -> dict[str, bool] | None:
+    """Reject unknown section keys and merge the rest onto the code defaults.
+
+    The merge is onto :data:`REPORT_SECTIONS`, **not** onto whatever is stored:
+    a partial map means "these keys, defaults for the rest", so a caller that
+    sends one key resets the other seven. That is why the wizard sends all
+    eight.
+    """
+    if v is None:
+        return None
+    unknown = sorted(set(v) - set(REPORT_SECTIONS))
+    if unknown:
+        raise ValueError(f"unknown report sections: {', '.join(unknown)}")
+    return {**REPORT_SECTIONS, **v}
+
+
+@overload
+def validate_expectations(v: list[ExpectationItem]) -> list[ExpectationItem]: ...
+
+
+@overload
+def validate_expectations(v: None) -> None: ...
+
+
+def validate_expectations(v: list[ExpectationItem] | None) -> list[ExpectationItem] | None:
+    """Clamp the supplied list onto the instrument code owns.
+
+    The four competencies, the wording of every fixed item and the custom
+    ceiling are all code's. What the caller decides is which items are
+    enabled, what the custom ones say, and which drafted ones survived.
+    Missing fixed items are restored rather than refused: an interview that
+    silently lost part of the instrument would stop being comparable to the
+    ones beside it, and that is not a mistake worth failing a creation over.
+
+    Restoring them is also why a partial list is destructive on **update**: the
+    omitted fixed items come back *enabled* and the omitted drafted and custom
+    ones are simply gone. A caller editing a checklist sends the whole list.
+    """
+    if v is None:
+        return None
+    rubric_text = fixed_text_by_id()
+    kept: list[ExpectationItem] = []
+    custom = 0
+    for item in v:
+        if item.competency_id not in COMPETENCY_IDS:
+            raise ValueError(
+                f"unknown competency: {item.competency_id}. One of: {', '.join(COMPETENCY_IDS)}"
+            )
+        if not item.text.strip():
+            raise ValueError(f"expectation {item.id} has no text")
+        if item.id in rubric_text:
+            if item.text != rubric_text[item.id]:
+                raise ValueError(f"fixed expectation {item.id} may be toggled off but not reworded")
+            kept.append(item.model_copy(update={"source": "fixed"}))
+            continue
+        if item.source == "fixed":
+            raise ValueError(f"{item.id} is not a fixed expectation id")
+        if item.source == "custom":
+            custom += 1
+            kept.append(item.model_copy(update={"id": f"custom.{custom}"}))
+            continue
+        kept.append(item)
+
+    if custom > MAX_CUSTOM_ITEMS:
+        raise ValueError(f"at most {MAX_CUSTOM_ITEMS} custom expectations, got {custom}")
+
+    ids = [item.id for item in kept]
+    duplicated = sorted({i for i in ids if ids.count(i) > 1})
+    if duplicated:
+        raise ValueError(f"duplicate expectation ids: {', '.join(duplicated)}")
+
+    present = set(ids)
+    kept.extend(item for item in fixed_items() if item.id not in present)
+    return kept
 
 
 class InterviewCreateRequest(BaseModel):
@@ -103,6 +246,14 @@ class InterviewCreateRequest(BaseModel):
         default_factory=list,
         description="Left empty, these are extracted from the job description at creation.",
     )
+    expectations: list[ExpectationItem] = Field(
+        default_factory=fixed_items,
+        description=(
+            "The behaviours the interviewer is expected to show, grouped under the four "
+            "fixed competencies. Omit to take the rubric's own list with every item "
+            "enabled; a fixed item may be toggled off but not reworded."
+        ),
+    )
     report_sections: dict[str, bool] = Field(
         default_factory=lambda: dict(REPORT_SECTIONS),
         description="Which report sections the manager sees. Unknown keys are rejected.",
@@ -114,10 +265,55 @@ class InterviewCreateRequest(BaseModel):
     @field_validator("report_sections")
     @classmethod
     def _known_sections_only(cls, v: dict[str, bool]) -> dict[str, bool]:
-        unknown = sorted(set(v) - set(REPORT_SECTIONS))
-        if unknown:
-            raise ValueError(f"unknown report sections: {', '.join(unknown)}")
-        return {**REPORT_SECTIONS, **v}
+        return validate_report_sections(v)
+
+    @field_validator("expectations")
+    @classmethod
+    def _valid_expectations(cls, v: list[ExpectationItem]) -> list[ExpectationItem]:
+        return validate_expectations(v)
+
+
+class InterviewUpdateRequest(BaseModel):
+    """PATCH /api/v1/interviews/{interview_id} body.
+
+    The wizard's step 1 creates the interview and step 2 edits it, so exactly
+    two fields are editable: the checklist the interviewer is measured against
+    and which report sections the manager sees. Everything else on the record —
+    the job spec, the mode, the language — is step 1's and is not reachable
+    here.
+
+    Both fields are optional so either can be sent alone, and a body with
+    neither is a 422 rather than a silent no-op that still moved
+    ``updated_at``. An explicit ``null`` counts as absent for that rule, which
+    makes ``{"expectations": null}`` on its own a 422 too: null means "I am not
+    editing this field", and a request editing no field is the empty body.
+
+    There is no partial-list merge. The validators here are the create
+    validators, so a short ``expectations`` list re-enables every fixed item it
+    omits and drops every drafted and custom item it omits, and a short
+    ``report_sections`` map resets the keys it omits to their defaults. The
+    client sends the whole list and all eight keys.
+    """
+
+    expectations: list[ExpectationItem] | None = None
+    report_sections: dict[str, bool] | None = None
+
+    @field_validator("report_sections")
+    @classmethod
+    def _known_sections_only(cls, v: dict[str, bool] | None) -> dict[str, bool] | None:
+        return validate_report_sections(v)
+
+    @field_validator("expectations")
+    @classmethod
+    def _valid_expectations(cls, v: list[ExpectationItem] | None) -> list[ExpectationItem] | None:
+        return validate_expectations(v)
+
+    @model_validator(mode="after")
+    def _edits_something(self) -> InterviewUpdateRequest:
+        """An update that changes nothing is a mistake, not an identity."""
+        if self.expectations is None and self.report_sections is None:
+            raise ValueError("send expectations, report_sections, or both")
+        return self
 
 
 class PersonaAttribute(BaseModel):
@@ -156,6 +352,7 @@ class InterviewResponse(BaseModel):
     proctoring: str = "off"
     persona_notes: str = ""
     role_facts: list[RoleFact] = Field(default_factory=list)
+    expectations: list[ExpectationItem] = Field(default_factory=fixed_items)
     report_sections: dict[str, bool] = Field(default_factory=lambda: dict(REPORT_SECTIONS))
     status: str
     config: InterviewConfigInput
@@ -257,6 +454,128 @@ class CandidateSummary(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Links and participants
+#
+# SkillBrew accounts create interviews; anyone holding a link takes them. What
+# this service owns is therefore a *token* — because expiry has to be enforced
+# by whatever creates the session — and a *participant keyed by email* — because
+# cross-interview history has to be joined where the sessions are. Neither is a
+# user table: there is no password, no login and no role here, and no email is
+# ever sent from this service.
+# ---------------------------------------------------------------------------
+
+#: Deliberately not `EmailStr`: this is an identity **join key**, not an address
+#: anything delivers to, and pulling in a deliverability validator would imply a
+#: guarantee this service does not make. Shape only — one `@`, a dot in the
+#: domain, no whitespace.
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class InterviewLinkCreateRequest(BaseModel):
+    """POST /api/v1/interviews/{id}/links body.
+
+    Several links per interview are allowed on purpose — a cohort in March and
+    another in June — and one link serves any number of takers.
+    """
+
+    expires_at: datetime
+
+
+class InterviewLinkResponse(BaseModel):
+    """A minted link. The token is the credential; treat it as one."""
+
+    token: str
+    interview_id: str
+    expires_at: datetime
+    revoked_at: datetime | None = None
+    created_at: datetime
+
+
+class PublicLinkResponse(BaseModel):
+    """GET /api/v1/links/{token} — the only unauthenticated link route.
+
+    Exactly what the landing form needs to render, and nothing else. The job
+    description, the personas and the expectation checklist are all deliberately
+    absent: this endpoint answers to anyone holding a token, so everything on it
+    is public by construction.
+    """
+
+    job_title: str
+    duration_minutes: int
+    language: str
+    expires_at: datetime
+
+
+class ParticipantInput(BaseModel):
+    """Who is taking the interview, from the landing form or the portal.
+
+    The email is the identity: the same address in a different case or with
+    stray whitespace is the same person, so it is trimmed and lower-cased here
+    rather than at each call site.
+    """
+
+    name: str = Field(..., min_length=1, max_length=200)
+    email: str = Field(..., min_length=3, max_length=320)
+
+    @field_validator("email")
+    @classmethod
+    def _normalised_email(cls, v: str) -> str:
+        email = v.strip().lower()
+        if not EMAIL_PATTERN.match(email):
+            raise ValueError("email must look like name@example.com")
+        return email
+
+    @field_validator("name")
+    @classmethod
+    def _trimmed_name(cls, v: str) -> str:
+        name = v.strip()
+        if not name:
+            raise ValueError("name must not be blank")
+        return name
+
+
+class ParticipantResponse(BaseModel):
+    """One person who has taken at least one interview here."""
+
+    id: str
+    name: str
+    email: str
+    user_id: str = Field(
+        "", description="The SkillBrew user id, when one has ever been supplied for this email."
+    )
+    created_at: datetime
+    last_seen_at: datetime
+
+
+class ParticipantSessionRow(BaseModel):
+    """One row of GET /api/v1/participants/{id}/sessions.
+
+    Every session this person has held, across every interview — which is what
+    makes the same email meaning the same person worth storing. The four
+    competency scores and the readiness index are read from the **stored**
+    report, so a session that has not been reported on carries nulls rather
+    than numbers computed on the fly for a list view.
+    """
+
+    session_id: str
+    interview_id: str
+    job_title: str
+    archetype: str
+    modality: str = Field("text", pattern="^(text|voice)$")
+    status: str = Field(..., pattern="^(live|completed|abandoned)$")
+    started_at: datetime
+    ended_at: datetime | None = None
+    readiness_index: int | None = None
+    competency_scores: dict[str, float | None] | None = Field(
+        None,
+        description=(
+            "The four competency scores from the stored report, keyed by competency id. "
+            "None when this session has no report."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Live text session
 #
 # Phase 1 of the manager-assessment pivot runs the conversation on the existing
@@ -288,9 +607,17 @@ class SessionCreateRequest(BaseModel):
     Opens a live interview against one persona. If that archetype is not yet
     enrolled for the interview it is cast on the spot, so starting a
     conversation never needs a separate enrollment step.
+
+    Two ways in. A console or portal caller names the ``interview_id``
+    directly. A link holder sends ``invite_token`` instead, and the service
+    resolves the interview from the link and enforces the expiry **at that
+    moment** — an interview a cohort was invited to in March is not reopened in
+    June because a tab was left open.
     """
 
-    interview_id: str
+    interview_id: str = Field(
+        "", description="Required unless `invite_token` is sent; must match the link's when both."
+    )
     archetype: str = Field(..., description="Archetype key from GET /api/v1/candidate-archetypes.")
     planned_minutes: int = Field(20, ge=5, le=MAX_INTERVIEW_MINUTES)
     modality: str = Field(
@@ -299,6 +626,33 @@ class SessionCreateRequest(BaseModel):
         description="A voice session still opens here; the browser then redeems a "
         "credential from POST /sessions/{id}/realtime and talks to the vendor directly.",
     )
+    invite_token: str | None = Field(
+        None, description="The token from GET /api/v1/links/{token}. Requires `participant`."
+    )
+    participant: ParticipantInput | None = Field(
+        None,
+        description=(
+            "Who is taking the interview. Required with an `invite_token`; a logged-in "
+            "portal caller sends its own user's name and email here too."
+        ),
+    )
+    user_id: str | None = Field(
+        None,
+        description=(
+            "The SkillBrew user id, when the caller is authenticated. Attaches to the "
+            "participant row for this email and is never required."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _one_way_in(self) -> SessionCreateRequest:
+        """A link needs a participant; no link needs an interview id."""
+        if self.invite_token:
+            if not self.participant:
+                raise ValueError("participant (name and email) is required with an invite_token")
+        elif not self.interview_id:
+            raise ValueError("interview_id is required without an invite_token")
+        return self
 
 
 class TurnRequest(BaseModel):
@@ -341,6 +695,13 @@ class SessionResponse(BaseModel):
     opening_line: str
     turns: list[Turn] = Field(default_factory=list)
     recording: RecordingMeta | None = None
+    participant: ParticipantResponse | None = Field(
+        None,
+        description=(
+            "Who took this session. Null only for sessions that predate participants "
+            "(2026-09-13) and for the engine's own ingest-created rows."
+        ),
+    )
 
 
 class AnalysisMeta(BaseModel):
@@ -402,6 +763,9 @@ class SessionSummary(BaseModel):
     has_recording: bool = False
     has_report: bool = False
     analysis_status: str = ""
+    participant: ParticipantResponse | None = Field(
+        None, description="Who took this session, when one was recorded."
+    )
 
 
 # ---------------------------------------------------------------------------
