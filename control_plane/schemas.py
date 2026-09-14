@@ -466,9 +466,7 @@ class SessionIngest(BaseModel):
     engine_version: str = ""
     started_at: datetime
     ended_at: datetime
-    end_reason: str = Field(
-        ..., pattern="^(interviewer_ended|abandoned|duration_cap|cost_cap|error)$"
-    )
+    end_reason: str = Field(..., pattern="^(interviewer_ended|abandoned|duration_cap|error)$")
     s3: IngestObjectKeys = Field(default_factory=IngestObjectKeys)
     turns: list[IngestTurn] = Field(default_factory=list)
     ceiling_flags: list[IngestCeilingFlag] = Field(default_factory=list)

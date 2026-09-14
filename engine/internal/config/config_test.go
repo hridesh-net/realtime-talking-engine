@@ -75,9 +75,6 @@ func TestLoad_AllRequiredPresent_AppliesDefaults(t *testing.T) {
 			t.Errorf("%s = %v, want default %v", name, d.got, d.want)
 		}
 	}
-	if cfg.SessionCostCapUSD != defaultSessionCostCapUSD {
-		t.Errorf("SessionCostCapUSD = %v, want default %v", cfg.SessionCostCapUSD, defaultSessionCostCapUSD)
-	}
 }
 
 func TestLoad_Overrides_TakePrecedenceOverDefaults(t *testing.T) {
@@ -85,7 +82,6 @@ func TestLoad_Overrides_TakePrecedenceOverDefaults(t *testing.T) {
 
 	kv := allRequired()
 	kv["S3_PREFIX"] = "sessions/"
-	kv["SESSION_COST_CAP_USD"] = "12.5"
 	kv["PREGATE_DEADLINE_MS"] = "300"
 	kv["ABANDON_AFTER_S"] = "120"
 
@@ -96,9 +92,6 @@ func TestLoad_Overrides_TakePrecedenceOverDefaults(t *testing.T) {
 
 	if cfg.S3Prefix != "sessions/" {
 		t.Errorf("S3Prefix = %q, want sessions/", cfg.S3Prefix)
-	}
-	if cfg.SessionCostCapUSD != 12.5 {
-		t.Errorf("SessionCostCapUSD = %v, want 12.5", cfg.SessionCostCapUSD)
 	}
 	if cfg.PreGateDeadline != 300*time.Millisecond {
 		t.Errorf("PreGateDeadline = %v, want 300ms", cfg.PreGateDeadline)
@@ -174,21 +167,6 @@ func TestLoad_InvalidDuration_ReportsIssueAndKeepsDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "THINKER_DEADLINE_MS") {
 		t.Errorf("error does not name THINKER_DEADLINE_MS: %v", err)
-	}
-}
-
-func TestLoad_InvalidCostCap_ReportsIssue(t *testing.T) {
-	t.Parallel()
-
-	kv := allRequired()
-	kv["SESSION_COST_CAP_USD"] = "five-dollars"
-
-	_, err := Load(fakeEnv(kv))
-	if err == nil {
-		t.Fatal("Load returned nil error for an unparseable cost cap")
-	}
-	if !errors.Is(err, ErrInvalid) {
-		t.Errorf("errors.Is(err, ErrInvalid) = false, want true: %v", err)
 	}
 }
 
@@ -309,7 +287,6 @@ func TestBindFlags_OverridesNonSecretFields(t *testing.T) {
 	cfg.BindFlags(fs)
 	if err := fs.Parse([]string{
 		"-speaker-model-id=gemini-3.1-flash-live",
-		"-session-cost-cap-usd=9.99",
 		"-thinker-deadline=500ms",
 	}); err != nil {
 		t.Fatalf("fs.Parse returned unexpected error: %v", err)
@@ -317,9 +294,6 @@ func TestBindFlags_OverridesNonSecretFields(t *testing.T) {
 
 	if cfg.SpeakerModelID != "gemini-3.1-flash-live" {
 		t.Errorf("SpeakerModelID = %q, want gemini-3.1-flash-live", cfg.SpeakerModelID)
-	}
-	if cfg.SessionCostCapUSD != 9.99 {
-		t.Errorf("SessionCostCapUSD = %v, want 9.99", cfg.SessionCostCapUSD)
 	}
 	if cfg.ThinkerDeadline != 500*time.Millisecond {
 		t.Errorf("ThinkerDeadline = %v, want 500ms", cfg.ThinkerDeadline)
@@ -524,7 +498,6 @@ func TestEnvExampleListsEveryEngineVariable(t *testing.T) {
 		"SPEAKER_MODEL_ID", "THINKER_MODEL_ID", "JUDGE_MODEL_ID", "TTS_MODEL_ID", "ASR_MODEL_ID",
 		"S3_BUCKET", "S3_REGION", "S3_PREFIX",
 		"CONTROL_PLANE_BASE_URL", "CONTROL_PLANE_SHARED_SECRET",
-		"SESSION_COST_CAP_USD",
 		"PREGATE_DEADLINE_MS", "STALL_DEADLINE_MS", "THINKER_DEADLINE_MS",
 		"PAUSE_BEFORE_ANSWER_DEFAULT_MS", "ABANDON_AFTER_S", "SESSION_DURATION_CAP_S",
 		"SPEAKER_VENDOR",

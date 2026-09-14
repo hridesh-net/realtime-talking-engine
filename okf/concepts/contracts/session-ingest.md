@@ -7,6 +7,9 @@ tags: [contract, engine, ingest, session, auth]
 generated:
   by: claude-fable-5-1
   at: "2026-09-12T23:00:00Z"
+verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
 status: stable
 sources:
   - resource: /control_plane/schemas.py
@@ -37,7 +40,7 @@ entire runtime brief and the ingest rewrites a session's transcript.
 `session_id` (`[A-Za-z0-9_-]{1,120}`), `candidate_id`, `interview_id`,
 `contract_fingerprint` (SHA-256 of the contract bytes the session ran on),
 `engine_version`, `started_at`, `ended_at`, `end_reason` ∈
-`interviewer_ended | abandoned | duration_cap | cost_cap | error`, `s3` object
+`interviewer_ended | abandoned | duration_cap | error`, `s3` object
 keys (empty until the engine uploads bundles), `turns`, `ceiling_flags`,
 `unlock_flip` or null, `suppressed_answers`, `metrics`, `degradations`.
 
@@ -64,7 +67,7 @@ One transaction:
    version, the fingerprint, the end reason, `first_received_at` and
    `received_at`.
 
-`status` becomes `completed` for `interviewer_ended | duration_cap | cost_cap`
+`status` becomes `completed` for `interviewer_ended | duration_cap`
 and `abandoned` for `abandoned | error`.
 
 Response: `IngestReceipt {session_id, status, turns_stored, duplicate,

@@ -7,6 +7,9 @@ tags: [runbook, okf, maintenance, process]
 generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-21T19:17:54Z"
+verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
 status: stable
 sources:
   - resource: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
@@ -67,6 +70,37 @@ done
 `index.md` files carry **no** frontmatter except `okf_version` in the bundle root.
 Full spec summary: [OKF v0.2](/references/okf-spec.md).
 
+## Periodic audit — run before a new requirement lands
+
+The conformance check above catches shape, not drift. Once per milestone (last
+run 2026-09-13), run these from the repo root and fix every hit or record it in
+[Backlog](/backlog.md):
+
+```bash
+# 1. Every bundle-relative link resolves inside okf/ (repo paths go in backticks, not links)
+python3 - <<'EOF'
+import re,os,glob
+for f in glob.glob('okf/**/*.md',recursive=True):
+    for m in re.finditer(r'\]\((/[^)#]+)(#[^)]*)?\)',open(f).read()):
+        p=os.path.join('okf',m.group(1).lstrip('/'))
+        if not os.path.exists(p): print(f, m.group(1))
+EOF
+# 2. Every path in the Repo Map exists (brace-globbed rows are expected hits)
+grep -oE '^\| `[^`]+`' okf/concepts/repo-map.md | sed 's/^| `//; s/`$//' | while read p; do [ -e "$p" ] || echo "MISSING: $p"; done
+# 3. Every route, table, env var, check gate, test file and UI file is named somewhere in the bundle
+#    (routes: control_plane/api.py decorators; tables: CREATE TABLE in database.py; env: .env.example;
+#     gates: run "..." in scripts/check.sh; files: tests/*.py, ui/src/**)
+# 4. Nothing in the tree that the log calls "uncommitted" is still described that way once committed
+grep -rn "uncommitted" okf --include='*.md' | grep -v log.md
+```
+
+Step 3 is a script an agent writes in a minute; its value is the list of names
+it prints, not the script. What the 2026-09-13 run found is in the log entry of
+that date — the recurring shapes were a page written before a package landed
+(the evaluation agent describing the report as unbuilt), a count that moved
+(the storage ports), and a table added with a migration but not a schema
+section (`session_ingests`).
+
 ## `.gitignore` — `owner_handover/` untracked 2026-09-12
 
 `owner_handover/` is ignored and untracked by decision: it is regenerated from
@@ -75,4 +109,6 @@ local build product. (It had been tracked since 2026-08-22, when an earlier
 ignore rule was removed.) Run the exporter after a fresh checkout before
 `scripts/check.sh`, whose `--check` step compares the code against those files.
 `docs/` and `okf/` are deliberately **not** ignored: the plans and this bundle
-travel with the repo.
+travel with the repo. **2026-09-13**: `graphify-out/` (a `/graphify` build
+product, 236 files) and `.serena/` (editor/MCP state) joined the ignore list
+for the same reason; `graphify-out/` was `git rm --cached`.

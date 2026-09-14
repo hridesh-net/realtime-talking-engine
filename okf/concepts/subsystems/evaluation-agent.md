@@ -1,18 +1,20 @@
 ---
 type: Subsystem
 title: Evaluation agent
-description: The manager-assessment package — today the fixed role-fact checklist and its drafting agent; the rubric, signals and report land here next.
+description: The manager-assessment configuration — the fixed rubric and the fixed role-fact checklist with its drafting agent. The scoring that consumes them lives in report_engine/.
 resource: /evaluation_agent
 tags: [evaluation, manager-assessment, rubric, clarity-facts]
 generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-22T20:10:00Z"
 verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T00:00:00Z"
   - by: kimi-code/okf-curator
     at: "2026-08-22T21:10:00Z"
-status: draft
+status: stable
 sources:
   - resource: /evaluation_agent/schema.py
   - resource: /evaluation_agent/role_facts.py
@@ -25,10 +27,14 @@ sources:
 do, and whether they did it**. Sibling of `candidate_agent`; imports `llm` and
 nothing else, enforced by `tests/test_architecture.py`.
 
-`status: draft` because it is deliberately partial. The role-fact checklist and
-[the rubric](/concepts/modules/evaluation-agent-rubric.md) are built; the
-deterministic signals, the judge pass and the report are milestone M3 of the
-Phase 0 MVP plan.
+This package is deliberately small and now complete for what it owns: the
+role-fact checklist and [the rubric](/concepts/modules/evaluation-agent-rubric.md).
+The deterministic signals, the judge pass and the report — milestone M3 of the
+Phase 0 MVP plan — were built in **`report_engine/`** (2026-08-26/27), not
+here, because that package imports nothing first-party by rule. The two meet in
+`control_plane/reporting.py`, which imports `DEFAULT_RUBRIC` from this package
+to assemble the session bundle the report engine scores. See
+[Report engine](/concepts/subsystems/report-engine.md).
 
 ## Why it exists at all right now
 
@@ -85,8 +91,9 @@ bands that reproduce the spec's own examples (74 → Competent, 48 → Developin
 **No criterion is a critical-fail gate** — the mockup shows one on Fair &
 Inclusive, which contradicts the standing rule that the report is an analytical
 estimate; `test_the_rubric_has_no_critical_fail_gate` keeps that a decision
-rather than an omission. Nothing yet scores a session against the rubric — the
-signals, the judge and the report are M3.
+rather than an omission. Scoring against this rubric happens in
+`report_engine/score.py`, fed by `control_plane/reporting.py`; the rubric's
+weights are the only thing this package contributes to a score.
 
 ## Where it is used
 

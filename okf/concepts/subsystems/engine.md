@@ -31,8 +31,8 @@ sources:
 `engine/` — a Go module that runs the **live voice session**. It is the runtime
 counterpart to everything else in this repo: the Python side decides *what* an
 interview is, the engine performs it. Design and task breakdown live in
-[the implementation plan](/docs/ENGINE_IMPLEMENTATION_PLAN.md); the payload it
-consumes is specified in [the engine contract](/docs/GO_ENGINE_CONTRACT.md).
+the implementation plan (`docs/ENGINE_IMPLEMENTATION_PLAN.md`); the payload it
+consumes is specified in the engine contract (`docs/GO_ENGINE_CONTRACT.md`).
 
 **Status: under construction — but a live interview now runs end to end.**
 
@@ -124,7 +124,7 @@ Contract: [Session ingest](/concepts/contracts/session-ingest.md).
 
 ## The harness context and the two windows
 
-[`docs/LIVE_TALKING_ENGINE_HARNESS.drawio`](/docs/LIVE_TALKING_ENGINE_HARNESS.drawio)
+`docs/LIVE_TALKING_ENGINE_HARNESS.drawio` (rendered as `.png`/`.svg` beside it)
 is the design: both live transcripts — the interviewer's ASR and what the
 Speaker actually spoke — land in one **harness context**, the Thinker reasons
 from it, and its direction reaches the Speaker only in two silences. The
@@ -271,7 +271,7 @@ Python rather than invented at runtime.
 | **Speaker** | The mouth and the fast front brain. A realtime speech-to-speech model that always owns the voice; it is never replaced as the speaker. |
 | **Thinker** | The subconscious. A reasoning model that holds who this person actually is, runs speculatively and continuously, and is consulted when the Speaker is unsure what it may say. |
 
-[`docs/ENGINE_ONE_BRAIN_TWO_PARTS.html`](/docs/ENGINE_ONE_BRAIN_TWO_PARTS.html) draws
+`docs/ENGINE_ONE_BRAIN_TWO_PARTS.html` draws
 the mechanism: the anatomy, a millisecond timeline of both the confident and the
 deferring turn, and what the shared ledger prevents. Open it in a browser.
 
@@ -351,7 +351,7 @@ than passing by coincidence.
 ## Contract versioning
 
 `internal/contract` pins the **major** version and rejects anything else, per
-[the engine contract spec](/docs/GO_ENGINE_CONTRACT.md). It also retains the
+the engine contract spec (`docs/GO_ENGINE_CONTRACT.md`). It also retains the
 **minor**, because minor bumps are additive and therefore accepted — meaning a
 newer contract can reach an older engine and have its new fields silently
 dropped by the decoder. Features gated on a later minor call `RequireMinor` so a
@@ -375,6 +375,38 @@ Both sample contracts sat at v1.0 long after the schema moved to v1.3 for this
 reason, and nothing in `check.sh` could see it; `scripts/export_engine_contract_sample.py`
 regenerates them from the real compiler and `export_schemas.py --check` now fails
 if the version or any of the five fields drifts.
+
+## Configuration
+
+`engine/internal/config.Load` reads named environment variables only (no
+`os.Getenv` anywhere else — the layering test forbids it), through a lookup
+function so tests inject a map. **Required** means `engined` refuses to start
+without it; every issue is reported at once, not one per restart. Verified
+against `config.go` on 2026-09-13.
+
+| Var | Default | Meaning |
+|---|---|---|
+| `GEMINI_API_KEY`, `OPENAI_API_KEY` | required | Vendor keys, same names as the Python side. `GEMINI_API_KEY2` is **ignored** — the key failover is a Python feature |
+| `SPEAKER_MODEL_ID`, `THINKER_MODEL_ID`, `JUDGE_MODEL_ID`, `TTS_MODEL_ID`, `ASR_MODEL_ID` | required | One model per part. Which vendor/model is live is an operational decision, never a code default. `ASR_MODEL_ID` is an OpenAI Realtime transcription model; the Transcriber is only built when `OPENAI_API_KEY` is also set |
+| `SPEAKER_VENDOR` | `gemini` | `gemini` or `openai` backs the Speaker adapter |
+| `CONTROL_PLANE_BASE_URL`, `CONTROL_PLANE_SHARED_SECRET` | required | The [control plane seam](#the-control-plane-seam); the secret goes out as a bearer token |
+| `S3_BUCKET`, `S3_REGION` | required | Session-bundle storage — required by the loader even though `store/s3` is still `doc.go` |
+| `S3_PREFIX`, `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE` | empty / `false` | Prefix and S3-compatible override (MinIO) |
+| `PREGATE_DEADLINE_MS` | `250` | Deterministic pre-gate budget |
+| `STALL_DEADLINE_MS` | `50` | Stall-clip start budget |
+| `THINKER_DEADLINE_MS` | `700` | Window for the Thinker's note on a deferred turn |
+| `PAUSE_BEFORE_ANSWER_DEFAULT_MS` | `700` | Persona pause when the contract gives none. The stall grace is derived from the persona's pause and clamped to 50–350 ms in `actor.go` |
+| `ABANDON_AFTER_S` | `300` | Silence cap → `end_reason: abandoned` |
+| `SESSION_DURATION_CAP_S` | `3600` | Session cap → `end_reason: duration_cap` |
+| `CONNECT_TIMEOUT_S` | `15` | Speaker connect budget; failure → `end_reason: error` |
+| `WALKBACK_ENABLED`, `DEFER_TOOL_ENABLED` | `true` | Feature toggles for the walk-back and the defer tool |
+| `WEBRTC_ICE_SERVERS`, `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL` | Google STUN / empty | Signalling settings for the WebRTC transport, which does not exist yet; `wsfallback` ignores them |
+| `SPOOL_DIR` | `./spool` | Ingest spool (`SPOOL_DIR/ingest`) and, once built, the bundle spool. Shared with the control plane |
+| `METRICS_ADDR` | empty | Metrics HTTP listener; blank disables it |
+| `GEMINI_TTS_VOICES` | the 30-name roster in `.env.example` | Ordered, **append-only**: a persona's frozen voice is `hash(candidate_id) mod len`, so reordering repoints existing personas |
+
+`.env.example` is the operator-facing copy of this table and carries the same
+defaults; when the two disagree, `config.go` wins and both must be fixed.
 
 ## Checks
 

@@ -27,18 +27,22 @@ sources:
 ---
 # Storage ports
 
-> **The object store is new (2026-09-10)** and is *not* one of these seven —
-> it holds bytes, not rows, and lives in `control_plane/object_store.py`. It is
-> documented at the bottom of this page. Nothing calls it yet: wiring it into
-> `repository.py` and the recording routes is the next work package.
+> **Eight narrow row ports** (verified against `control_plane/ports.py`,
+> 2026-09-13): `InterviewStore`, `ExpectationStore`, `CandidateStore`,
+> `SessionStore`, `RecordingStore`, `AnalysisStore`, `ReportStore` and
+> `IngestStore`. They arrived in that order — `ReportStore` with the session
+> report, `AnalysisStore` with the audio analysis, `IngestStore` with the Go
+> engine's write-back (2026-09-12) — and each addition is a new protocol, never
+> a method on an old one. Five composites (`ExpectationWorkflowStore`,
+> `EnrollmentStore`, `IngestWorkflowStore`, `TurnWorkflowStore`,
+> `RecordingWorkflowStore`) name a handler's exact need. `AnalysisWorkflowStore`
+> deliberately does **not** compose the report store, because a handler that
+> can both analyse and report will eventually do both by accident.
 >
-> **Seven narrow ports now.** `AnalysisStore` joined them with the audio
-> analysis; `AnalysisWorkflowStore` deliberately does **not** compose the report
-> store, because a handler that can both analyse and report will eventually do
-> both by accident.
->
-> **Six narrow ports now, not five.** `ReportStore` joined them with the
-> session report — see [Report engine](/concepts/subsystems/report-engine.md).
+> **The object store (2026-09-10)** is *not* one of these — it holds bytes, not
+> rows, and lives in `control_plane/object_store.py`. It is documented at the
+> bottom of this page. **Nothing calls it yet**: wiring it into `repository.py`
+> and the recording routes is the open work package in [Backlog](/backlog.md).
 
 `typing.Protocol`, `@runtime_checkable`, **structural** — `InterviewRepository`
 neither imports nor subclasses them. Swapping SQLite for Postgres means writing

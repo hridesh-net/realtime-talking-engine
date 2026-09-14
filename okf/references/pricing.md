@@ -54,4 +54,4 @@ first is the trap — it is edited as prose and does not look like a cost change
 ## Related
 
 [Audio analysis agent](/concepts/subsystems/analysis-agent.md) ·
-[infra/README.md](/infra/README.md) — the fixed monthly cost this amortises against
+`infra/README.md` — the fixed monthly cost this amortises against

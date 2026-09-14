@@ -22,7 +22,7 @@ contain.
 
 | BRD section | Where it lives |
 |---|---|
-| §1.4 Build decision matrix | Why interview creation is Python — `control_plane/README.md` restates it |
+| §1.4 Build decision matrix | Why interview creation is Python — restated in [Project Overview](/concepts/project-overview.md) |
 | §3.1 Functional requirements | The endpoints; FR-002 is the seeded persona |
 | §3.2 NFR-003 | [`tests/test_architecture.py`](/concepts/architecture.md) — SOLID as executable checks |
 | §4.1–4.2 Domain model, interview aggregate | [`control_plane/schemas.py`](/concepts/contracts/interview-record.md), the SQLite schema |

@@ -7,6 +7,9 @@ tags: [work-log, handoff, agents]
 generated:
   by: codex
   at: "2026-09-12"
+verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13"
 status: draft
 ---
 # Cross-agent work log
@@ -49,3 +52,25 @@ run, and remaining risk. Keep durable implementation history in
   the network. Updated [engine](/concepts/subsystems/engine.md),
   [session-ingest](/concepts/contracts/session-ingest.md) (new),
   [rest-api](/concepts/contracts/rest-api.md), [storage-ports](/concepts/contracts/storage-ports.md).
+
+## 2026-09-13
+
+* OKF wrap-up before new requirements. Audited the bundle against commit
+  `4280481`: every bundle link, Repo Map path, API route, DDL table, `.env`
+  variable, `check.sh` gate, test file and `ui/src` file cross-checked against
+  the tree. Fixed what had drifted (stale "uncommitted" state, the evaluation
+  agent and subsystem index describing the report as unbuilt, the storage-port
+  count, `session_ingests` missing from the schema page, five test files and
+  four UI files with no card, the engine's configuration undocumented, six
+  links that pointed outside the bundle) and recorded the remaining code-side
+  discrepancies in [Backlog](/backlog.md) rather than fixing code. No code
+  changed. Details in [log.md](/log.md), 2026-09-13.
+* Four approved cleanups after the audit, all offline-verified (28 gates PASS
+  incl. `migrations (postgres)` and `object store (minio)` on Apple
+  `container`): removed the inert `SESSION_COST_CAP_USD` end to end with a
+  new migration `0003` (fixtures in `test_migrations.py` moved to `0004`);
+  corrected the `.env.example` database comment; ignored and untracked
+  `graphify-out/`, ignored `.serena/`; deleted `control_plane/README.md`.
+  Staged, not committed. Remaining risk unchanged: the live runs in
+  [Backlog](/backlog.md).
+

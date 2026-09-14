@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5
   at: "2026-09-10T18:00:00Z"
 verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T18:00:00Z"
   - by: claude-opus-5
@@ -83,7 +85,7 @@ status: stable
 | `tests/test_migrations.py` | [Database schema § Postgres](/concepts/contracts/database-schema.md) — the runner, and the two foreign-key decisions SQLite could not enforce |
 | `tests/` | [Test suite](/concepts/subsystems/test-suite.md), [Architecture](/concepts/architecture.md) |
 | `scripts/check.sh` | [Checks](/concepts/runbooks/checks.md) |
-| `scripts/rename_columns_sqlite.py` | [Database schema](/concepts/contracts/database-schema.md) — the one-off that applies the 2026-09-10 column renames to an existing `.db`; there are no migrations |
+| `scripts/rename_columns_sqlite.py` | [Database schema](/concepts/contracts/database-schema.md) — the one-off that applies the 2026-09-10 column renames to an existing SQLite `.db`; SQLite has no migration runner (Postgres does) |
 | `scripts/export_schemas.py` | [Owner handover](/concepts/subsystems/owner-handover.md) |
 | `owner_handover/` | [Owner handover](/concepts/subsystems/owner-handover.md) |
 | `docs/BRD_AI_Interview_Platform_v2.md` | [BRD](/references/brd.md) — **superseded** by BRD v3 |
@@ -97,7 +99,7 @@ status: stable
 | `engine/internal/audio/` | [Live-session engine](/concepts/subsystems/engine.md) — sample domain: resampler, onset detection, jitter buffer, send ring |
 | `engine/internal/transport/` | [Live-session engine](/concepts/subsystems/engine.md) — `wsfallback` carries live traffic today; `webrtc` is a placeholder |
 | `engine/internal/controlplane/` | [Session ingest](/concepts/contracts/session-ingest.md) — the HTTP `ContractSource`: contract fetch, ingest report with retry and spool |
-| `control_plane/migrations/` | [Storage ports](/concepts/contracts/storage-ports.md) — Postgres DDL, one numbered file per change; `0002` is the ingest table |
+| `control_plane/migrations/` | [Storage ports](/concepts/contracts/storage-ports.md) — Postgres DDL, one numbered file per change; `0002` is the ingest table, `0003` drops the never-produced `cost_cap` end reason |
 | `engine/internal/vendors/gemini/` | [Live-session engine](/concepts/subsystems/engine.md) — the Speaker, over the Gemini **Live** API. Read its live-verified facts before changing it |
 | `engine/internal/vendors/` (others) | [Live-session engine](/concepts/subsystems/engine.md) — reasoning adapters and TTS; only `cmd/engined` may import any of them |
 | `engine/internal/stall/` | [Live-session engine](/concepts/subsystems/engine.md) — pre-synthesized opening line and stall clips |
@@ -105,6 +107,17 @@ status: stable
 | `.golangci.yml` | [Live-session engine](/concepts/subsystems/engine.md), [Checks](/concepts/runbooks/checks.md) |
 | `pyproject.toml`, `.env.example` | [Conventions](/concepts/conventions.md), [Dev setup](/concepts/runbooks/dev-setup.md) |
 | `control_plane.db` | [Database schema](/concepts/contracts/database-schema.md) — gitignored |
+| `scripts/transcribe_recording.py`, `scripts/export_engine_contract_sample.py` | [Session recording](/concepts/contracts/session-recording.md) (transcribes each stereo channel separately into a speaker-labelled turn list — exact labels, no diarisation); [EngineContract](/concepts/contracts/engine-contract.md) (the sample the Go contract tests pin) |
+| `report_engine/cli.py`, `__main__.py`, `text.py` | [Report engine](/concepts/subsystems/report-engine.md) — `python -m report_engine` over a bundle file (cannot run the judge); shared text helpers |
+| `engine/internal/vendors/openaitx/` | [Live-session engine](/concepts/subsystems/engine.md) — the independent Transcriber (OpenAI Realtime transcription, GA shape; live test under `//go:build live`) |
+| `engine/internal/{gate,ledger,obs,judge}/` | [Live-session engine](/concepts/subsystems/engine.md) — pre-gate, claims ledger, event log; `judge` is `doc.go` only |
+| `engine/internal/config/` | [Live-session engine § Configuration](/concepts/subsystems/engine.md#configuration) — the only place the engine reads the environment |
+| `infra/` | `infra/README.md` — one EC2 instance, three processes behind Caddy; Terraform in `infra/terraform/`, artifacts via `infra/build-artifacts.sh`. Deployment facts are in [Project Overview](/concepts/project-overview.md) build state; `*.tfvars` and state are gitignored |
+| `docs/INTERVIEWER_PRACTICE_PORTAL_PLAN.md`, `..._SYSTEM_FLOW.md`, `..._UI_FLOW.md` | The SkillBrew portal integration (separate repo): the approved plan, the request path and every endpoint the portal calls, and the user-facing walkthrough. Drove the compatibility layer in [REST API](/concepts/contracts/rest-api.md) |
+| `docs/VIDEO_SESSION_TAB_PLAN.md` | Spoken sessions in their own portal tab, with video — the control-plane half is in [Session recording](/concepts/contracts/session-recording.md) |
+| `docs/LIVE_TALKING_ENGINE_HARNESS.{drawio,png,svg}` | [Live-session engine § the harness context](/concepts/subsystems/engine.md) — the latency diagram the actor was built against |
+| `docs/REPORT_ENGINE_SCORING_SPEC.md`, `docs/PRICING_PER_SESSION.md` | [Report engine scoring specification](/references/report-engine-spec.md), [What a session costs](/references/pricing.md) |
+| `graphify-out/` | Generated knowledge-graph artifacts from the `/graphify` skill — **gitignored and untracked since 2026-09-13**, like `owner_handover/`. Not a source; nothing in this bundle depends on it |
 
 ## "I want to change X" → read Y
 

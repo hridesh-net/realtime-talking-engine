@@ -89,7 +89,6 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("config loaded",
 		"control_plane_base_url", cfg.ControlPlaneBaseURL,
-		"session_cost_cap_usd", cfg.SessionCostCapUSD,
 		"session_duration_cap", cfg.SessionDurationCap,
 	)
 

@@ -42,9 +42,6 @@ const (
 	// "45-60 min"); default to the top of that range and let deploys tune
 	// it with SESSION_DURATION_CAP_S.
 	defaultSessionDurationCap = 60 * time.Minute
-	// defaultSessionCostCapUSD is the per-session spend ceiling that trips
-	// WINDING_DOWN with end_reason "cost_cap" (plan §11 row 6).
-	defaultSessionCostCapUSD = 5.0
 	// defaultConnectTimeout bounds how long the engine waits for a
 	// transport connection (WebRTC signaling, vendor session open) to
 	// establish before giving up.
@@ -127,10 +124,6 @@ type Config struct {
 	// ControlPlaneSharedSecret authenticates the engine to the control
 	// plane (plan §15 OQ-6: shared secret or mTLS).
 	ControlPlaneSharedSecret Secret
-
-	// SessionCostCapUSD is the per-session spend ceiling. Crossing it
-	// drives WINDING_DOWN with end_reason "cost_cap" (plan §11).
-	SessionCostCapUSD float64
 
 	// PreGateDeadline is the deterministic pre-gate's verdict deadline
 	// after end-of-turn. A verdict not ready by this deadline is treated
@@ -281,19 +274,6 @@ func (l *loader) durationS(key string, def time.Duration) time.Duration {
 }
 
 // float64 reads key as a float64, falling back to def if unset.
-func (l *loader) float64(key string, def float64) float64 {
-	v, ok := l.lookup(key)
-	if !ok || v == "" {
-		return def
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		l.issues = append(l.issues, &Issue{Key: key, Err: fmt.Errorf("%w: %s", ErrInvalid, err.Error())})
-		return def
-	}
-	return f
-}
-
 // strList reads key as a comma-separated list, trimming whitespace around
 // each element and dropping empty elements, falling back to def if unset or
 // empty after trimming.
@@ -380,8 +360,6 @@ func Load(lookup LookupFunc) (*Config, error) {
 		ControlPlaneBaseURL:      l.required("CONTROL_PLANE_BASE_URL"),
 		ControlPlaneSharedSecret: l.requiredSecret("CONTROL_PLANE_SHARED_SECRET"),
 
-		SessionCostCapUSD: l.float64("SESSION_COST_CAP_USD", defaultSessionCostCapUSD),
-
 		PreGateDeadline:          l.durationMs("PREGATE_DEADLINE_MS", defaultPreGateDeadline),
 		StallDeadline:            l.durationMs("STALL_DEADLINE_MS", defaultStallDeadline),
 		ThinkerDeadline:          l.durationMs("THINKER_DEADLINE_MS", defaultThinkerDeadline),
@@ -443,8 +421,6 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 
 	fs.StringVar(&c.ControlPlaneBaseURL, "control-plane-base-url", c.ControlPlaneBaseURL, "base URL of the control-plane service")
 
-	fs.Float64Var(&c.SessionCostCapUSD, "session-cost-cap-usd", c.SessionCostCapUSD, "per-session spend ceiling in USD")
-
 	fs.DurationVar(&c.PreGateDeadline, "pregate-deadline", c.PreGateDeadline, "pre-gate verdict deadline after end-of-turn")
 	fs.DurationVar(&c.StallDeadline, "stall-deadline", c.StallDeadline, "target latency for the first stall clip after a DEFER verdict")
 	fs.DurationVar(&c.ThinkerDeadline, "thinker-deadline", c.ThinkerDeadline, "Thinker note deadline before falling back to the contract directive")
@@ -493,7 +469,6 @@ var flagEnvKeys = map[string]string{
 	"s3-region":                   "S3_REGION",
 	"s3-prefix":                   "S3_PREFIX",
 	"control-plane-base-url":      "CONTROL_PLANE_BASE_URL",
-	"session-cost-cap-usd":        "SESSION_COST_CAP_USD",
 	"pregate-deadline":            "PREGATE_DEADLINE_MS",
 	"stall-deadline":              "STALL_DEADLINE_MS",
 	"thinker-deadline":            "THINKER_DEADLINE_MS",

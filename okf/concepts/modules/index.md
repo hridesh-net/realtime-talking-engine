@@ -31,3 +31,15 @@ there.
 ## control_plane
 * [control_plane/api.py](/concepts/modules/control-plane-api.md) - routes and dependency injection.
 * [control_plane/repository.py](/concepts/modules/control-plane-repository.md) - the SQLite adapter.
+
+## Files without a card — by decision, not omission
+`control_plane/object_store.py`, `control_plane/migrate.py` and
+`control_plane/reporting.py` are documented on the contract and subsystem pages
+they serve ([Storage ports](/concepts/contracts/storage-ports.md),
+[Database schema](/concepts/contracts/database-schema.md),
+[Report engine](/concepts/subsystems/report-engine.md)); `analysis_agent/*` and
+`report_engine/*` are documented as whole packages ([Audio analysis
+agent](/concepts/subsystems/analysis-agent.md), [Report
+engine](/concepts/subsystems/report-engine.md)) because their invariants live
+across files, not in one. The [Repo Map](/concepts/repo-map.md) routes every
+path either way.

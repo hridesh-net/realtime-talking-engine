@@ -24,6 +24,8 @@ sources:
   - resource: /control_plane/repository.py
   - resource: /control_plane/migrate.py
   - resource: /control_plane/migrations/0001_initial.sql
+  - resource: /control_plane/migrations/0002_session_ingests.sql
+  - resource: /control_plane/migrations/0003_end_reason_drop_cost_cap.sql
 ---
 # Database schema
 
@@ -59,7 +61,9 @@ a guard firing halfway would otherwise leave a half-renamed database).
 
 **Both backends exist in the tree right now, and the service still runs on
 SQLite.** `control_plane/migrations/0001_initial.sql` is the same schema in
-Postgres DDL, applied by `control_plane/migrate.py`; `repository.py` has not
+Postgres DDL, `0002_session_ingests.sql` adds the engine's write-back table and
+`0003_end_reason_drop_cost_cap.sql` narrows its `end_reason` vocabulary, all
+applied by `control_plane/migrate.py`; `repository.py` has not
 been switched over, so nothing in the request path touches Postgres yet. That
 switch is a later work package. `_SCHEMA` and `init_db` are still the live
 definition and must not be deleted until then.
@@ -265,6 +269,28 @@ browser today (`POST /sessions/{id}/recording/chunks`); no code path sets
 Bytes are **not** in SQLite. `storage_key` (today, `"{session_id}.webm"`)
 names a file under `RECORDINGS_DIR` (default `recordings`, gitignored, see
 [Dev setup](/concepts/runbooks/dev-setup.md)).
+
+## `session_ingests`
+`session_id` **PK**, FK → `sessions(id)` (CASCADE), `payload` (JSON; `jsonb`
+with a `jsonb_typeof = 'object'` CHECK on Postgres, `TEXT` on SQLite),
+`engine_version`, `contract_fingerprint`, `end_reason` (CHECK
+`(interviewer_ended,abandoned,duration_cap,error)` on Postgres only —
+the SQLite DDL carries no CHECK, the Pydantic model enforces it),
+`first_received_at`, `received_at`. Added 2026-09-12 with migration `0002`;
+`0003` (2026-09-13) re-creates the CHECK without `cost_cap`, a value the engine
+never produced — the constraint is swapped in a new file because `0002` may
+already be applied somewhere, and an edited applied file is drift.
+
+The Go engine's single write-back for a finished voice session, kept **whole**
+beside the transcript it carries: the repository rewrites `session_turns` from
+the payload's turn table, and this row keeps everything the turn table does
+not model — metrics, degradations, ceiling flags, the unlock flip. One row per
+session, **replaced** on a repeated ingest (the engine retries with the session
+id as its idempotency key; `first_received_at` survives the replace,
+`received_at` moves). See [Session ingest](/concepts/contracts/session-ingest.md)
+for the payload and the 409 rule, and
+[Storage ports](/concepts/contracts/storage-ports.md) for why `IngestStore` is
+its own port rather than a method on `SessionStore`.
 
 ## `ai_personas` (legacy)
 `candidate_id` PK, `interview_id` FK, `name`, `background`, `attributes` JSON,

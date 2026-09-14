@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5
   at: "2026-09-12T00:00:00Z"
 verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T18:00:00Z"
   - by: claude-opus-5
@@ -148,7 +150,7 @@ because what it checks cannot be faked: the DDL has to be executed by the
 engine that will execute it in production.
 
 * **The runner** — a fresh database gets the whole schema; the ledger records the file's sha256; `--check` is clean afterwards; re-applying returns `[]` and adds no row; an extra file is **pending** (exit 1) while an edited or deleted applied file is **drift** (exit 2); `assert_current` names the pending file.
-* **A migration that fails midway records nothing for itself.** The file is one transaction, so a `0002` whose second statement raises leaves `0001` applied, `0002` unrecorded, and the table its first statement created absent.
+* **A migration that fails midway records nothing for itself.** The file is one transaction, so a `0004` (a fixture written beside the three real files) whose second statement raises leaves `0001`–`0003` applied, `0004` unrecorded, and the table its first statement created absent.
 * **The advisory lock serialises two runners.** The migration sleeps, so the second thread is guaranteed to arrive mid-transaction. Without `pg_advisory_xact_lock` it would read an empty ledger and run the same `CREATE TABLE` — the test would then see a duplicate-relation error or two ledger rows. This is a test that can fail, not a description of a mechanism.
 * **The two foreign-key decisions.** `sessions.candidate_id` and `interview_assignments.candidate_id` have **no** FK constraint, `sessions.interview_id` does; deleting an interview cascades to sessions, turns and personas; deleting a *persona* leaves the session and its transcript standing; and the candidate primary key can be rewritten out from under a session. SQLite ignored all of this, so nothing else in the suite can notice a tidy-minded edit that adds the constraint back.
 * **The type mapping** — the JSON columns really are `jsonb`, the timestamps really are `timestamptz`, `language_gate` is `boolean`, `byte_size` is `bigint`, and a `skills_required` written as an object is rejected by its `jsonb_typeof` CHECK.
@@ -259,6 +261,46 @@ blanked, the multipart branch removed, the part's content type ignored, the
 body-suppression guard deleted, the headers dropped, CORS never installed, and
 CORS installed unconditionally with a wildcard.
 
+### `tests/test_trait_dimensions.py` (17 tests)
+
+`candidate_agent/trait_dimensions.py` in isolation — pure composition, no model.
+Composing from presets is held to the same guarantees as a hand-written
+archetype (trait coverage, a legal verdict, `must_discover` weights summing to
+1.0); an unknown preset fails loudly; the realism-taxonomy vocabulary is
+enforced by `HumanTraitProfile`'s own validation, not by the composer.
+
+### `tests/test_custom_persona_integration.py` (1 long test)
+
+The composed persona **enacts** as composed. Drives the full
+`VirtualCandidateAgent.generate()` pipeline — the path `POST .../candidates`
+takes for `custom_personas` — against an *adversarial* fake model that returns
+a draft violating every constraint the archetype's re-imposition exists to
+hold, and asserts the stored persona is the composed one, not the draft.
+
+### `tests/test_control_plane_candidates_api.py` (11 tests)
+
+The enrollment routes under `TestClient` with a fake `StructuredModel` and a
+throwaway SQLite file per test: `GET /trait-dimensions`, composing a custom
+persona through `POST .../candidates`, idempotent re-submission, and 422 on a
+bad preset. This is the coverage the earlier "enrollment routes are untested"
+gap asked for.
+
+### `tests/test_full_interview_pipeline_integration.py` (8 tests)
+
+The whole manager-facing flow over the real HTTP surface, offline: create an
+interview → compose or cast a persona → read its `InterviewerScorecard` → run a
+multi-turn practice session → end it → re-read the transcript and the
+scorecard, repeated across a spread of persona compositions (every bias trap
+and none). It is the closest thing to a system test that costs nothing.
+
+### `tests/test_model_error_surfacing.py` (4 tests)
+
+A provider failure (rate limit, quota, outage) must surface as a clean **502**,
+never a raw 500 with a stack trace. Found live against the Gemini free-tier
+quota: the three endpoints that call a model to cast a persona or generate an
+expectation never caught `ModelError`, unlike the realtime-voice mint two
+hundred lines away. These four lock in that fix.
+
 ## Live — `scripts/check.sh --live`
 
 Run as scripts, not through pytest:
@@ -313,7 +355,7 @@ stayed green.
 
 ## Gaps
 
-* **The interview, expectation, and enrollment routes are still untested.** `test_session.py` covers the session handlers and the session SQL; the skip-unless-regenerate branch, the 422 on unknown archetypes at enrollment, and the interview/expectation SQL remain uncovered. The pattern to copy is already in `test_session.py`.
+* **The expectation routes are still thinly tested.** Enrollment is covered by `test_control_plane_candidates_api.py` and the interview and session routes by `test_full_interview_pipeline_integration.py`; the skip-unless-regenerate branch of `POST .../expectation` and the expectation SQL remain uncovered. The pattern to copy is already in `test_session.py`.
 * No live scenario exercises a session end to end against a real provider. The pivot plan's Phase 5 task 30 adds one scripted session per persona under `--live`.
 * **Nothing automated exercises real audio.** The WebRTC handshake and the data-channel event names were verified by hand against the live API on 2026-08-22, and the Gemini Live SDK surface against the pinned packages on 2026-09-01 (both recorded in [Realtime voice](/concepts/contracts/realtime-voice.md)); a vendor rename would pass every test here and fail in the browser. The event-name mapping in `VoiceSessionView.jsx`, the PCM framing in `geminiLive.js`, and the resumption/`goAway` handling are the fragile surfaces. `tests/test_gemini_live_mint.py` covers the mint half of that and nothing more.
 * Nothing checks that `EXPECTATION_JSON_SCHEMA` matches `InterviewExpectation` — two hand-maintained representations of one shape.

@@ -80,7 +80,7 @@ type SessionIngest struct {
 	EngineVersion       string
 	StartedAt           time.Time
 	EndedAt             time.Time
-	// EndReason is one of: interviewer_ended, abandoned, cost_cap, error.
+	// EndReason is one of: interviewer_ended, abandoned, duration_cap, error.
 	EndReason string
 	// Turns is the session's full turn table.
 	Turns []TurnIngest

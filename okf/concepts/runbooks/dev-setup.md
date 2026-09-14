@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5/okf-curator
   at: "2026-09-10T12:00:00Z"
 verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T12:00:00Z"
   - by: claude-opus-5
@@ -91,27 +93,31 @@ Resolution per role: `<ROLE>_PROVIDER`/`<ROLE>_MODEL` → `LLM_PROVIDER`/`LLM_MO
 | `EXPECTATION` | the interviewer expectation document | one structured call per interview |
 | `CANDIDATE` | casting a persona | one structured call per persona |
 | `SESSION` | playing the persona in a live interview | one **chat** call per turn |
-| `JUDGE` | scoring a finished transcript | reserved — no consumer yet |
+| `JUDGE` | writing the report's prose from a finished session (`report_engine/judge.py`) | one structured call per report; **blank** means code-composed sentences, no model |
+| `ANALYSIS` | listening to the session recording (`analysis_agent/`) | one audio call per window; must resolve to a provider in `AUDIO_PROVIDERS` — **gemini only** today, and the Analyse button is hidden when none is available |
 | `ROLE_FACTS` | drafting the role-fact checklist | one structured call per wizard auto-fill |
 | `VOICE` | the live **spoken** session | mints a browser credential; realtime-capable providers only |
 
 | Var | Default |
 |---|---|
-| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` / `ROLE_FACTS_PROVIDER` | — (auto-detect) |
-| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` / `ROLE_FACTS_MODEL` | — |
+| `EXPECTATION_PROVIDER` / `CANDIDATE_PROVIDER` / `SESSION_PROVIDER` / `JUDGE_PROVIDER` / `ROLE_FACTS_PROVIDER` / `ANALYSIS_PROVIDER` | — (auto-detect) |
+| `EXPECTATION_MODEL` / `CANDIDATE_MODEL` / `SESSION_MODEL` / `JUDGE_MODEL` / `ROLE_FACTS_MODEL` / `ANALYSIS_MODEL` | — |
+| `TRANSCRIBE_MODEL` | `gpt-4o-transcribe` — the interviewer's own speech-to-text on the **OpenAI voice path only**; Gemini Live transcribes both sides itself and ignores it |
 | `LLM_PROVIDER` / `LLM_MODEL` | — |
 | provider default model | `gemini-3.7-flash` / `gpt-4o-mini` |
 
 `SESSION` is the one worth tuning: it is the only role called on every turn, so
 it dominates both cost and the pace of a practice interview.
 
-⚠️ **`VOICE` does not fall back to `LLM_PROVIDER`.** Realtime speech-to-speech is
-OpenAI-only today, so this role resolves against the realtime-capable providers
-alone — a `LLM_PROVIDER=gemini` deployment still gets voice from OpenAI if
-`OPENAI_API_KEY` is set, and gets no Voice button if it is not. `VOICE_MODEL`
-must be a realtime speech model (`gpt-realtime-2`, `gpt-realtime-2.1-mini`),
+⚠️ **`VOICE` does not fall back to `LLM_PROVIDER`.** This role resolves against
+the realtime-capable providers alone (`REALTIME_PROVIDERS`: gemini, openai) and,
+left blank, picks the first of those whose key is set — **gemini before
+openai** since 2026-09-01. `VOICE_PROVIDER=openai` keeps the WebRTC path.
+`VOICE_MODEL` must be a realtime speech model for the chosen provider
+(`gemini-3.1-flash-live-preview`; `gpt-realtime-2`, `gpt-realtime-2.1-mini`),
 never a text model id; pointing it at one fails at mint time.
 `GET /api/v1/voice-capability` reports what the deployment can actually do.
+See [Realtime voice](/concepts/contracts/realtime-voice.md).
 
 Model IDs are config, never hardcoded at a call site.
 
@@ -129,10 +135,23 @@ different per-role provider sends the wrong model id. Prefer the per-role vars.
 | `CONTROL_PLANE_SHARED_SECRET` | *(empty)* | Shared with the Go engine, which sends it as a bearer token on `GET /candidates/{id}/engine-contract` and `POST /sessions/{id}/ingest`. Same value in both processes' environments. **Unset, those two routes answer 503** — voice sessions cannot start, by design |
 | `CORS_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to call this API cross-origin. **Empty or unset installs no CORS middleware at all** — the console under `ui/` is same-origin and needs none, and a wildcard would let any page on the internet call this service with the caller's cookies. Set it to the portal's origin to serve it, e.g. `http://localhost:3002`. Whitespace around each entry is trimmed |
 | `RECORDINGS_DIR` | `recordings` | Where browser-uploaded voice-session audio lands, one file per session. Local disk on this host only — see [Session recording](/concepts/contracts/session-recording.md) for the consent/retention decisions. Retention is manual; nothing purges it. |
+| `OBJECT_STORE_DIR` | `objects` | Root of the filesystem [object store](/concepts/contracts/storage-ports.md) when `S3_BUCKET` is unset. Read by `object_store_from_env()`; **nothing in the request path calls the object store yet** |
+| `S3_BUCKET`, `S3_REGION`, `S3_PREFIX`, `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE` | *(empty)* | Selects and configures `S3ObjectStore` (`S3_ENDPOINT` + path style for MinIO). Shared names with the Go engine, which requires bucket and region; the Python side needs only `S3_BUCKET` to pick S3 |
 
 `build_app()` calls `load_dotenv()`, so `.env` is picked up automatically when
 running the service. Scripts and tests that build agents directly rely on the
 environment already being set.
+
+## The Go engine's variables
+
+Everything under the `Go engine` banner in `.env.example` (`SPEAKER_MODEL_ID`,
+`THINKER_MODEL_ID`, the deadlines, the TURN settings, `METRICS_ADDR`, …) is read
+**only** by `engine/internal/config` and is documented in the engine page —
+[Live-session engine § Configuration](/concepts/subsystems/engine.md#configuration).
+Four names are shared with this service and must carry the same value in both
+processes' environments: `GEMINI_API_KEY`, `OPENAI_API_KEY`,
+`CONTROL_PLANE_SHARED_SECRET` and `SPOOL_DIR` (plus the `S3_*` set once the
+object store is wired).
 
 ## Postgres — being built beside SQLite
 

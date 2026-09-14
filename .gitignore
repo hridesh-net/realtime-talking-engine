@@ -32,7 +32,13 @@ ui/dist/
 owner_handover/
 
 .DS_Store
-.claude/settings.local.json
+# Claude Code project state (settings, local skills, permissions) stays on the machine.
+.claude/
+# Editor / MCP tool state (serena), machine-local.
+.serena/
+# graphify-out/ is a build product of the /graphify skill (untracked 2026-09-13,
+# same reasoning as owner_handover/): regenerated on demand, never a source.
+graphify-out/
 
 # Terraform (infra/terraform) — local plan/apply state, never committed:
 # state can contain resource attribute values, and .terraform/ is a

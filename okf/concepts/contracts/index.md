@@ -15,5 +15,5 @@ handoff to the Go engine. Read the page before editing the file, and regenerate
 * [Realtime voice](/concepts/contracts/realtime-voice.md) - the broker port, the ephemeral credential, and the browser-to-vendor media path.
 * [Session transcript](/concepts/contracts/session-transcript.md) - a live interview and its server-stamped turns.
 * [Session recording](/concepts/contracts/session-recording.md) - the browser-captured audio artifact for voice sessions, and the seam to the engine's future recorder.
-* [Storage ports](/concepts/contracts/storage-ports.md) - the five narrow persistence protocols.
-* [Database schema](/concepts/contracts/database-schema.md) - SQLite tables, constraints, indexes.
+* [Storage ports](/concepts/contracts/storage-ports.md) - the eight narrow row-storage protocols, their workflow composites, and the separate byte-storage port (object store).
+* [Database schema](/concepts/contracts/database-schema.md) - the tables, constraints and indexes — SQLite DDL (what runs) and the Postgres migrations built beside it.

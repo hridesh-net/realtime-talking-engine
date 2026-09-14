@@ -8,6 +8,8 @@ generated:
   by: claude-opus-5
   at: "2026-09-10T18:00:00Z"
 verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-09-10T18:00:00Z"
   - by: claude-opus-5
@@ -51,6 +53,12 @@ non-zero if any failed, with a summary list.
 | `pytest tests/test_migrations.py` | The [Postgres schema and migration runner](/concepts/contracts/database-schema.md) — apply, `--check`'s three exit codes, drift, a failed migration recording nothing, the advisory lock, and the two foreign-key decisions. **Needs a database**; see the block below |
 | `pytest tests/test_object_store.py` | The [object store port](/concepts/contracts/storage-ports.md) — one behavioural set over **both** adapters: round trip, the five range cases, a missing key, the content-type round trip, the prefix in the real key, and a 9 MiB object whose ETag proves the multipart path. **Needs MinIO**; see the block below |
 | `pytest tests/test_key_failover.py` | The [second-key failover](/concepts/subsystems/llm-port.md#two-gemini-keys-one-silent-failover-2026-09-01) — which errors are key-shaped and which are not, that a rate-limited primary falls over and a malformed request does not, that stickiness survives a rebuild, and that a single key builds no wrapper. Offline: counting fakes, no key |
+| `pytest tests/test_trait_dimensions.py` | Composing a persona from presets is held to a hand-written archetype's guarantees — [Test suite](/concepts/subsystems/test-suite.md) |
+| `pytest tests/test_custom_persona_integration.py` | A composed persona enacts as composed, against an adversarial fake model that violates every constraint |
+| `pytest tests/test_control_plane_candidates_api.py` | The enrollment routes under `TestClient`: trait dimensions, custom personas, idempotent re-submission, 422 on a bad preset |
+| `pytest tests/test_model_error_surfacing.py` | A provider failure on the casting and expectation endpoints is a clean 502, never a raw 500 |
+| `pytest tests/test_report_engine.py` | The [report engine](/concepts/subsystems/report-engine.md) without a judge — signals, scoring, segments, and byte-identical output for the same bundle |
+| `pytest tests/test_full_interview_pipeline_integration.py` | The whole manager-facing flow over HTTP, offline, across a spread of personas: create → cast → scorecard → session → end → re-read |
 | gofmt / go vet / go build / `go test -race` / go architecture / golangci-lint | The [live-session engine](/concepts/subsystems/engine.md) in `engine/`. Every gate runs **from inside the module** — a repo-root `go vet ./...` finds no packages. Race detector always on |
 | `pytest tests/test_report_judge.py` | The [judge veto](/concepts/determinism.md) — verbatim spans, who spoke, no numbers in prose, and that a rejected claim leaves the composed sentence standing. Offline: `judge.overlay` driven with hand-written model output |
 | `pytest tests/test_analysis_agent.py` | The [analysis harness](/concepts/subsystems/analysis-agent.md) — window timestamps, anchor rejection, the 60/40 weighting, and `duration_ms` against a real video-plus-audio WebM. Offline, but that last test **skips when `ffmpeg`/`ffprobe` are not on PATH** — the one gate in this table that can quietly cover less than it looks like it does |

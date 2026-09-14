@@ -111,7 +111,7 @@ turn table (`human → manager`, `persona → candidate`, `elapsed_ms = start_ms
 `at = started_at + start_ms`, empty text skipped), and upsert
 `session_ingests` with the raw payload — `first_received_at` survives a
 repeat, `received_at` moves. SQLite DDL in `database._SCHEMA`; Postgres in
-`migrations/0002_session_ingests.sql`.
+`migrations/0002_session_ingests.sql` (vocabulary narrowed by `0003`).
 
 ## Reads
 

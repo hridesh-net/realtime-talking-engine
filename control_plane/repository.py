@@ -517,7 +517,7 @@ class InterviewRepository:
         now = _utcnow()
         status = (
             "completed"
-            if ingest.end_reason in ("interviewer_ended", "duration_cap", "cost_cap")
+            if ingest.end_reason in ("interviewer_ended", "duration_cap")
             else "abandoned"
         )
         started = ingest.started_at.astimezone(UTC).isoformat()

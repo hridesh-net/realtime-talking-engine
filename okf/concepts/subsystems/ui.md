@@ -1,13 +1,15 @@
 ---
 type: Subsystem
 title: Test UI
-description: The React + Vite console, aligned to the SkillBrew.AI design mockup — shell, wizard, persona picker, sessions table, and the two session views.
+description: The React + Vite console, aligned to the SkillBrew.AI design mockup — shell, wizard, persona picker and composer, sessions table, the two session views, and the report screen with its analysis panel.
 resource: /ui
 tags: [ui, react, vite, frontend]
 generated:
   by: claude-opus-5/okf-curator
   at: "2026-08-23T19:30:00Z"
 verified:
+  - by: claude-fable-5-1
+    at: "2026-09-13T00:00:00Z"
   - by: claude-opus-5
     at: "2026-08-23T19:30:00Z"
   - by: claude-opus-5/okf-curator
@@ -64,7 +66,8 @@ Vite proxies `/api` → `http://127.0.0.1:8081`, so **start the API first**.
 | File | Screen | Data |
 |---|---|---|
 | `src/api.js` | Thin `fetch` wrapper over `/api/v1`, one function per endpoint; unwraps FastAPI's `detail` into `Error.message` | — |
-| `src/App.jsx` | Screen switch over `'list' \| 'create' \| 'detail' \| 'session'` in one `useState`. A router would be a dependency to express `if` | all loaders |
+| `src/main.jsx` | Vite entry: mounts `App` | — |
+| `src/App.jsx` | Screen switch over `'list' \| 'create' \| 'detail' \| 'session' \| 'report'` in one `useState`. A router would be a dependency to express `if` | all loaders |
 | `src/Shell.jsx` | Icon rail (**one entry** — Interview Training), topbar, breadcrumbs, footer | none |
 | `src/InterviewList.jsx` | Landing screen: interview cards, status tabs, search | `GET /interviews` |
 | `src/Wizard.jsx` | Two-step new interview: Basics, then the picker | `POST /interviews` |
@@ -72,6 +75,9 @@ Vite proxies `/api` → `http://127.0.0.1:8081`, so **start the API first**.
 | `src/InterviewDetail.jsx` | Tabs: Sessions (table + transcript panel), Practise, Cast | candidates + `GET /interviews/{id}/sessions` |
 | `src/SessionView.jsx` | The typed interview | session endpoints |
 | `src/VoiceSessionView.jsx` | The **spoken** interview — branches on the credential's `provider`; dual-channel recording uploaded to us | realtime + transcript + recording |
+| `src/PersonaComposer.jsx` | Compose a persona from the realism taxonomy instead of picking an archetype; every option comes from the server, `function` and `region` are the two free-text fields | `GET /trait-dimensions` |
+| `src/ReportView.jsx` | One session's report as its own screen — an iframe of the engine's own HTML, so print-to-PDF and the on-screen report are one renderer | `POST/GET /sessions/{id}/report`, `report.html` |
+| `src/AnalysisPanel.jsx` | Runs and polls one session's audio analysis (a background job, ~1 min, 4 s poll); tells *running* from *never asked* by the row's existence | `POST /sessions/{id}/analyze`, `GET .../analysis` |
 | `src/geminiLive.js` | The Gemini Live transport: WebSocket connect, PCM up, gapless playback, barge-in, resumption | vendor-direct |
 | `src/audio/pcmWorklet.js` | `AudioWorkletProcessor` — Float32 → Int16 LE at 16 kHz, plus the RMS the "hearing you" indicator reads | — |
 | `src/index.css` | Ported mockup stylesheet | — |
@@ -86,9 +92,11 @@ branch and the orphaned `.rail .ri:disabled` CSS rule. The logo and the one
 active icon stay, so it still reads as a rail. Add an entry here only when it
 navigates somewhere.
 
-`api.js` covers the interview, expectation, archetype, candidate, and session
-endpoints. It does **not** cover the engine-contract or scorecard endpoints —
-those are for the Go engine and the grading pipeline, not the operator.
+`api.js` covers the interview, expectation, archetype, trait-dimension,
+role-fact, candidate, session, voice, recording, analysis and report
+endpoints. It does **not** cover the engine-contract, ingest or scorecard
+endpoints — those are for the Go engine and the grading pipeline, not the
+operator.
 
 ## The wizard
 

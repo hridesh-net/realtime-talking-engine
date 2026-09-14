@@ -155,7 +155,7 @@ type actor struct {
 	unlockAt       time.Time
 	// startedAt/endedAt/endReason describe the session's life for the
 	// ingest report. endReason is one of the control plane's enum:
-	// interviewer_ended, abandoned, duration_cap, cost_cap, error.
+	// interviewer_ended, abandoned, duration_cap, error.
 	startedAt time.Time
 	endedAt   time.Time
 	endReason string
